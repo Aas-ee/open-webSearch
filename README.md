@@ -1,5 +1,6 @@
 # Open-WebSearch MCP Server
 
+[![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
 [中文](./README-zh.md)
 
 A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web search without API keys.
@@ -28,6 +29,14 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
 - Optimize article content extraction, add support for more sites
 
 ## Installation Guide
+
+### Installing via Smithery
+
+To install MultiWebSearch for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@Aas-ee/open-websearch):
+
+```bash
+npx -y @smithery/cli install @Aas-ee/open-websearch --client claude
+```
 
 ### Local Installation
 
