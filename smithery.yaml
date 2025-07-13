@@ -1,0 +1,35 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+startCommand:
+  type: http
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required: []
+    properties:
+      enableCors:
+        type: boolean
+        default: false
+        description: Enable CORS
+      corsOrigin:
+        type: string
+        default: "*"
+        description: CORS origin
+      defaultSearchEngine:
+        type: string
+        default: bing
+        description: Default search engine (bing, duckduckgo, exa, brave)
+      useProxy:
+        type: boolean
+        default: false
+        description: Enable HTTP proxy
+      proxyUrl:
+        type: string
+        default: http://127.0.0.1:10809
+        description: Proxy server URL
+  exampleConfig:
+    enableCors: false
+    corsOrigin: "*"
+    defaultSearchEngine: duckduckgo
+    useProxy: true
+    proxyUrl: http://your-proxy-server:port
