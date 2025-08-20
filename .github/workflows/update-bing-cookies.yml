@@ -1,0 +1,110 @@
+name: Update Bing Cookies
+
+on:
+  schedule:
+    # Run daily at midnight
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  update-cookies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          npm install -g typescript
+          npm install playwright @playwright/test dotenv
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Create script directory
+        run: mkdir -p scripts
+
+      - name: Create Playwright script
+        run: |
+          cat > scripts/get-bing-cookies.ts << 'EOL'
+          import { chromium } from 'playwright';
+          import fs from 'fs';
+
+          async function getBingCookies() {
+            console.log('Launching browser...');
+            const browser = await chromium.launch({
+              headless: true
+            });
+
+            try {
+              const context = await browser.newContext();
+              const page = await context.newPage();
+
+              console.log('Navigating to Bing...');
+              await page.goto('https://cn.bing.com/search?q=Windows', { waitUntil: 'networkidle' });
+
+              // Wait for cookies to be set
+              await page.waitForTimeout(5000);
+
+              // Get all cookies
+              const cookies = await context.cookies();
+              const cookieString = cookies
+                .map(cookie => `${cookie.name}=${cookie.value}`)
+                .join('; ');
+
+              console.log('Successfully retrieved cookies');
+
+              // Store in JSON format
+              const cookieData = {
+                cookie: cookieString,
+                timestamp: new Date().toISOString(),
+                count: cookies.length
+              };
+
+              fs.writeFileSync('bing_cookies.json', JSON.stringify(cookieData, null, 2));
+              console.log('Cookies saved to bing_cookies.json');
+
+              return cookieData;
+            } catch (error) {
+              console.error('Error getting cookies:', error);
+              throw error;
+            } finally {
+              await browser.close();
+            }
+          }
+
+          getBingCookies()
+            .catch(error => {
+              console.error('Script failed:', error);
+              process.exit(1);
+            });
+          EOL
+
+      - name: Run Playwright script
+        run: |
+          npx tsc scripts/get-bing-cookies.ts --esModuleInterop --target es2019 --module commonjs
+          node scripts/get-bing-cookies.js
+
+      - name: Update GitHub Gist
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          if [ -z "$GIST_ID" ] || [ -z "$GH_TOKEN" ]; then
+            echo "Error: BING_COOKIES_GIST_ID or GH_PAT secrets are not set."
+            exit 1
+          fi
+
+          echo "Updating GitHub Gist..."
+          curl -X PATCH \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token $GH_TOKEN" \
+            -d "{\"files\": {\"bing_cookies.json\": {\"content\": $(cat bing_cookies.json | jq -Rs .)}}}"\
+            https://api.github.com/gists/$GIST_ID
+
+          echo "\nGist updated successfully!"
