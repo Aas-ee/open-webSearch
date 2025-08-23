@@ -80,7 +80,7 @@ jobs:
           echo -e "\n=== Image Manifest ==="
           docker manifest inspect ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch || echo "Manifest command not available"
 
-  # 测试运行容器（在不同架构上）
+  # 修复后的 AMD64 测试
   test-run-amd64:
     needs: test-build
     runs-on: ubuntu-latest
@@ -103,28 +103,55 @@ jobs:
           echo "Testing AMD64 container..."
           docker pull --platform linux/amd64 ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch
           
-          # 启动容器并测试基本功能
-          CONTAINER_ID=$(docker run -d --platform linux/amd64 ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch)
+          # 启动容器（后台运行，给容器命名）
+          echo "Starting AMD64 container..."
+          CONTAINER_ID=$(docker run -d --platform linux/amd64 --name test-amd64-${{ github.run_number }} ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch)
+          echo "Container ID: $CONTAINER_ID"
           
           # 等待容器启动
-          sleep 10
+          echo "Waiting for container to start..."
+          sleep 15
           
           # 检查容器状态
+          echo "=== Container Status ==="
           docker ps -a
+          
+          # 使用 docker inspect 获取容器状态（更可靠）
+          CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' $CONTAINER_ID)
+          echo "Container status: $CONTAINER_STATUS"
           
           # 获取日志
           echo "=== Container Logs ==="
           docker logs $CONTAINER_ID
           
           # 检查容器是否正在运行
-          if docker ps | grep -q $CONTAINER_ID; then
+          if [ "$CONTAINER_STATUS" = "running" ]; then
             echo "✅ AMD64 container is running successfully!"
+          
+            # 尝试连接到应用（可选）
+            echo "Testing application connectivity..."
+            if docker exec $CONTAINER_ID sh -c 'curl -f http://localhost:3000/health' 2>/dev/null || docker exec $CONTAINER_ID sh -c 'nc -z localhost 3000' 2>/dev/null; then
+              echo "✅ Application is responding!"
+            else
+              echo "ℹ️  Application connectivity test failed, but container is running"
+            fi
+          
+            # 清理：停止并删除容器
             docker stop $CONTAINER_ID
+            docker rm $CONTAINER_ID
           else
-            echo "❌ AMD64 container failed to run"
+            echo "❌ AMD64 container failed to run. Status: $CONTAINER_STATUS"
+          
+            # 获取更多调试信息
+            EXIT_CODE=$(docker inspect --format='{{.State.ExitCode}}' $CONTAINER_ID 2>/dev/null || echo "unknown")
+            echo "Exit code: $EXIT_CODE"
+          
+            # 清理失败的容器
+            docker rm $CONTAINER_ID 2>/dev/null || true
             exit 1
           fi
 
+  # 修复后的 ARM64 测试
   test-run-arm64:
     needs: test-build
     runs-on: ubuntu-latest
@@ -152,25 +179,51 @@ jobs:
           echo "Testing ARM64 container..."
           docker pull --platform linux/arm64 ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch
           
-          # 启动容器并测试基本功能
-          CONTAINER_ID=$(docker run -d --platform linux/arm64 ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch)
+          # 启动容器（后台运行，给容器命名）
+          echo "Starting ARM64 container..."
+          CONTAINER_ID=$(docker run -d --platform linux/arm64 --name test-arm64-${{ github.run_number }} ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch)
+          echo "Container ID: $CONTAINER_ID"
           
-          # 等待容器启动
-          sleep 15  # ARM64 模拟可能需要更长时间
+          # ARM64 模拟需要更长时间启动
+          echo "Waiting for ARM64 container to start..."
+          sleep 20
           
           # 检查容器状态
+          echo "=== Container Status ==="
           docker ps -a
+          
+          # 使用 docker inspect 获取容器状态（更可靠）
+          CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' $CONTAINER_ID)
+          echo "Container status: $CONTAINER_STATUS"
           
           # 获取日志
           echo "=== Container Logs ==="
           docker logs $CONTAINER_ID
           
           # 检查容器是否正在运行
-          if docker ps | grep -q $CONTAINER_ID; then
+          if [ "$CONTAINER_STATUS" = "running" ]; then
             echo "✅ ARM64 container is running successfully!"
+          
+            # 尝试连接到应用（可选）
+            echo "Testing application connectivity..."
+            if docker exec $CONTAINER_ID sh -c 'curl -f http://localhost:3000/health' 2>/dev/null || docker exec $CONTAINER_ID sh -c 'nc -z localhost 3000' 2>/dev/null; then
+              echo "✅ Application is responding!"
+            else
+              echo "ℹ️  Application connectivity test failed, but container is running"
+            fi
+          
+            # 清理：停止并删除容器
             docker stop $CONTAINER_ID
+            docker rm $CONTAINER_ID
           else
-            echo "❌ ARM64 container failed to run"
+            echo "❌ ARM64 container failed to run. Status: $CONTAINER_STATUS"
+          
+            # 获取更多调试信息
+            EXIT_CODE=$(docker inspect --format='{{.State.ExitCode}}' $CONTAINER_ID 2>/dev/null || echo "unknown")
+            echo "Exit code: $EXIT_CODE"
+          
+            # 清理失败的容器
+            docker rm $CONTAINER_ID 2>/dev/null || true
             exit 1
           fi
 
@@ -181,8 +234,47 @@ jobs:
     if: always()
 
     steps:
-      - name: Delete test images (optional)
+      - name: Test Results Summary
+        run: |
+          echo "🎯 Multi-Platform Docker Test Results"
+          echo "=================================="
+          
+          if [ "${{ needs.test-build.result }}" == "success" ]; then
+            echo "✅ Multi-platform build: SUCCESS"
+          else
+            echo "❌ Multi-platform build: FAILED"
+          fi
+          
+          if [ "${{ needs.test-run-amd64.result }}" == "success" ]; then
+            echo "✅ AMD64 container test: SUCCESS"
+          else
+            echo "❌ AMD64 container test: FAILED"
+          fi
+          
+          if [ "${{ needs.test-run-arm64.result }}" == "success" ]; then
+            echo "✅ ARM64 container test: SUCCESS"
+          else
+            echo "❌ ARM64 container test: FAILED"
+          fi
+          
+          echo ""
+          if [ "${{ needs.test-build.result }}" == "success" ] && [ "${{ needs.test-run-amd64.result }}" == "success" ] && [ "${{ needs.test-run-arm64.result }}" == "success" ]; then
+            echo "🎉 All tests passed! Ready to deploy multi-platform support to production."
+            echo ""
+            echo "Next steps:"
+            echo "1. Update your production docker.yml workflow to include multi-platform support"
+            echo "2. Test with a real release tag"
+          else
+            echo "⚠️  Some tests failed. Please check the logs and fix issues before deploying."
+          fi
+
+      - name: Cleanup Instructions
         continue-on-error: true
         run: |
-          echo "Test completed. You can manually delete test images from GitHub Container Registry if needed."
-          echo "Test image: ghcr.io/${{ github.repository_owner }}/open-web-search:test-multiarch"
+          echo ""
+          echo "📝 Cleanup Information:"
+          echo "Test images created:"
+          echo "- ghcr.io/${{ github.repository_owner }}/open-web-search:test-multiarch"
+          echo "- ghcr.io/${{ github.repository_owner }}/open-web-search:test-${{ github.sha }}"
+          echo ""
+          echo "You can manually delete these test images from GitHub Container Registry if needed."
