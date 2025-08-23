@@ -1,0 +1,178 @@
+name: Test Multi-Platform Docker Build
+
+on:
+  push:
+    branches:
+      - test-multiarch-docker
+  workflow_dispatch:
+    inputs:
+      test_platforms:
+        description: 'Platforms to test (comma separated)'
+        required: false
+        default: 'linux/amd64,linux/arm64'
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get lowercase repository owner
+        id: lowercase
+        run: echo "repository_owner_lowercase=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      # 第一步：仅构建测试（不推送）
+      - name: Test Build Only (No Push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ github.event.inputs.test_platforms || 'linux/amd64,linux/arm64' }}
+          push: false
+          tags: test/open-web-search:multiarch-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 第二步：如果构建成功，推送测试镜像
+      - name: Build and Push Test Image
+        if: success()
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ github.event.inputs.test_platforms || 'linux/amd64,linux/arm64' }}
+          push: true
+          tags: |
+            ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch
+            ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-${{ github.sha }}
+          cache-from: type=gha
+
+      # 第三步：验证镜像信息
+      - name: Inspect Multi-Platform Image
+        if: success()
+        run: |
+          echo "=== Multi-Platform Image Inspection ==="
+          docker buildx imagetools inspect ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch
+          
+          echo -e "\n=== Image Manifest ==="
+          docker manifest inspect ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch || echo "Manifest command not available"
+
+  # 测试运行容器（在不同架构上）
+  test-run-amd64:
+    needs: test-build
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get lowercase repository owner
+        id: lowercase
+        run: echo "repository_owner_lowercase=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Test AMD64 Container
+        run: |
+          echo "Testing AMD64 container..."
+          docker pull --platform linux/amd64 ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch
+          
+          # 启动容器并测试基本功能
+          CONTAINER_ID=$(docker run -d --platform linux/amd64 ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch)
+          
+          # 等待容器启动
+          sleep 10
+          
+          # 检查容器状态
+          docker ps -a
+          
+          # 获取日志
+          echo "=== Container Logs ==="
+          docker logs $CONTAINER_ID
+          
+          # 检查容器是否正在运行
+          if docker ps | grep -q $CONTAINER_ID; then
+            echo "✅ AMD64 container is running successfully!"
+            docker stop $CONTAINER_ID
+          else
+            echo "❌ AMD64 container failed to run"
+            exit 1
+          fi
+
+  test-run-arm64:
+    needs: test-build
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get lowercase repository owner
+        id: lowercase
+        run: echo "repository_owner_lowercase=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Test ARM64 Container
+        run: |
+          echo "Testing ARM64 container..."
+          docker pull --platform linux/arm64 ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch
+          
+          # 启动容器并测试基本功能
+          CONTAINER_ID=$(docker run -d --platform linux/arm64 ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search:test-multiarch)
+          
+          # 等待容器启动
+          sleep 15  # ARM64 模拟可能需要更长时间
+          
+          # 检查容器状态
+          docker ps -a
+          
+          # 获取日志
+          echo "=== Container Logs ==="
+          docker logs $CONTAINER_ID
+          
+          # 检查容器是否正在运行
+          if docker ps | grep -q $CONTAINER_ID; then
+            echo "✅ ARM64 container is running successfully!"
+            docker stop $CONTAINER_ID
+          else
+            echo "❌ ARM64 container failed to run"
+            exit 1
+          fi
+
+  # 清理测试镜像
+  cleanup:
+    needs: [test-run-amd64, test-run-arm64]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Delete test images (optional)
+        continue-on-error: true
+        run: |
+          echo "Test completed. You can manually delete test images from GitHub Container Registry if needed."
+          echo "Test image: ghcr.io/${{ github.repository_owner }}/open-web-search:test-multiarch"
