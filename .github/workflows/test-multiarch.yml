@@ -3,8 +3,15 @@ name: Test Multi-Platform Docker Build
 on:
   push:
     branches:
-      - test-multiarch-docker
-  workflow_dispatch:
+      - '**'  # 允许在任何分支上触发
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/**'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:  # 允许手动触发
     inputs:
       test_platforms:
         description: 'Platforms to test (comma separated)'
@@ -14,6 +21,9 @@ on:
 jobs:
   test-build:
     runs-on: ubuntu-latest
+
+    # 只在特定分支或手动触发时运行完整测试
+    if: contains(github.ref, 'test-multiarch') || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
 
     steps:
       - name: Checkout code
