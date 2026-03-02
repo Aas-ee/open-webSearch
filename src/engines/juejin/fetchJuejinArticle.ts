@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { config } from '../../config.js';
 
 export async function fetchJuejinArticle(url: string): Promise<{ content: string }> {
     try {
@@ -21,7 +22,7 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
                 'accept-language': 'zh-CN,zh;q=0.9',
                 'priority': 'u=0, i'
             },
-            timeout: 30000,
+            timeout: config.requestTimeout,
             decompress: true
         });
 
@@ -68,7 +69,8 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
         return { content };
 
     } catch (error) {
-        console.error('❌ 获取掘金文章失败:', error);
-        throw new Error(`获取掘金文章失败: ${error instanceof Error ? error.message : '未知错误'}`);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`❌ 获取掘金文章失败: ${msg}`);
+        throw new Error(`获取掘金文章失败: ${msg}`);
     }
 }

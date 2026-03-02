@@ -1,4 +1,5 @@
 import { searchBaidu } from '../engines/baidu/index.js';
+import { destroySharedBrowser } from '../engines/shared/browser.js';
 
 async function testBaiduSearch() {
   console.log('🔍 Starting Baidu search test...');
@@ -28,4 +29,4 @@ async function testBaiduSearch() {
 }
 
 // Run the test
-testBaiduSearch().catch(console.error);
+testBaiduSearch().catch(console.error).finally(async () => { await destroySharedBrowser(); process.exit(0); });

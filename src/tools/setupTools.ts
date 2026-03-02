@@ -15,6 +15,20 @@ import {searchBrave} from "../engines/brave/index.js";
 import {fetchGithubReadme} from "../engines/github/index.js";
 import { fetchJuejinArticle } from "../engines/juejin/fetchJuejinArticle.js";
 import { searchJuejin } from "../engines/juejin/index.js";
+import axios from 'axios';
+
+/** 从错误对象中提取可读的错误消息（处理 AxiosError/AggregateError 等 message 为空的情况） */
+function getErrorMessage(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+        const parts: string[] = [];
+        if (error.code) parts.push(error.code);
+        if (error.message) parts.push(error.message);
+        if (error.response) parts.push(`HTTP ${error.response.status}`);
+        if (parts.length > 0) return parts.join(' - ');
+    }
+    if (error instanceof Error && error.message) return error.message;
+    return String(error) || 'Unknown error';
+}
 
 // 支持的搜索引擎
 const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave','juejin'] as const;
@@ -42,8 +56,13 @@ const distributeLimit = (totalLimit: number, engineCount: number): number[] => {
     );
 };
 
+interface SearchExecutionResult {
+    results: SearchResult[];
+    errors: { engine: string; message: string }[];
+}
+
 // 执行搜索
-const executeSearch = async (query: string, engines: string[], limit: number): Promise<SearchResult[]> => {
+const executeSearch = async (query: string, engines: string[], limit: number): Promise<SearchExecutionResult> => {
     // Clean up the query string to ensure it won't cause issues due to spaces or special characters
     const cleanQuery = query.trim();
     console.error(`[DEBUG] Executing search, query: "${cleanQuery}", engines: ${engines.join(', ')}, limit: ${limit}`);
@@ -51,33 +70,32 @@ const executeSearch = async (query: string, engines: string[], limit: number): P
     if (!cleanQuery) {
         console.error('Query string is empty');
         throw new Error('Query string cannot be empty');
-
     }
 
     const limits = distributeLimit(limit, engines.length);
+    const errors: { engine: string; message: string }[] = [];
 
     const searchTasks = engines.map((engine, index) => {
         const engineLimit = limits[index];
         const searchFn = engineMap[engine as SupportedEngine];
 
         if (!searchFn) {
-            console.warn(`Unsupported search engine: ${engine}`);
+            const msg = `Unsupported search engine: ${engine}`;
+            console.warn(msg);
+            errors.push({ engine, message: msg });
             return Promise.resolve([]);
         }
 
         return searchFn(query, engineLimit).catch(error => {
-            console.error(`Search failed for engine ${engine}:`, error);
+            const msg = getErrorMessage(error);
+            console.error(`Search failed for engine ${engine}: ${msg}`);
+            errors.push({ engine, message: msg });
             return [];
         });
     });
 
-    try {
-        const results = await Promise.all(searchTasks);
-        return results.flat().slice(0, limit);
-    } catch (error) {
-        console.error('Search execution failed:', error);
-        throw error;
-    }
+    const results = await Promise.all(searchTasks);
+    return { results: results.flat().slice(0, limit), errors };
 };
 
 // 验证文章 URL
@@ -87,7 +105,7 @@ const validateArticleUrl = (url: string, type: 'linuxdo' | 'csdn' | 'juejin'): b
 
         switch (type) {
             case 'linuxdo':
-                return urlObj.hostname === 'linux.do' && url.includes('.json');
+                return urlObj.hostname === 'linux.do' && /\/t(opic)?\//.test(url);
             case 'csdn':
                 return urlObj.hostname === 'blog.csdn.net' && url.includes('/article/details/');
             case 'juejin':
@@ -154,8 +172,9 @@ export const setupTools = (server: McpServer): void => {
     // 搜索工具
     // 生成搜索工具的动态描述
     const getSearchDescription = () => {
+        const scenarioHint = '。当你需要查找最新信息、验证事实、研究主题或查阅超出你训练数据的文档/教程时，请使用此工具。中文查询优先选择 Baidu 或 Bing；英文查询优先选择 Bing 或 DuckDuckGo；开发/编程主题可考虑 CSDN、Juejin(掘金) 或 Exa。';
         if (config.allowedSearchEngines.length === 0) {
-            return "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金)) with no API key required";
+            return "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金)) with no API key required" + scenarioHint;
         } else {
             const enginesText = config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -165,7 +184,7 @@ export const setupTools = (server: McpServer): void => {
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required)`;
+            return `Search the web using these engines: ${enginesText} (no API key required)` + scenarioHint;
         }
     };
 
@@ -185,7 +204,9 @@ export const setupTools = (server: McpServer): void => {
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
-            engines: z.array(getEnginesEnum()).min(1).default([config.defaultSearchEngine])
+            maxDescriptionLength: z.number().min(1).optional()
+                .describe("Maximum length of each result's description. Defaults to the global MAX_DESCRIPTION_LENGTH setting. Omit for no limit."),
+            engines: z.array(z.string().transform(s => s.toLowerCase()).pipe(getEnginesEnum())).min(1).default([config.defaultSearchEngine])
                 .transform(requestedEngines => {
                     // 如果有配置允许的搜索引擎，过滤请求的引擎
                     if (config.allowedSearchEngines.length > 0) {
@@ -200,29 +221,92 @@ export const setupTools = (server: McpServer): void => {
                     return requestedEngines;
                 })
         },
-        async ({query, limit = 10, engines = ['bing']}) => {
+        async ({query, limit = 10, maxDescriptionLength, engines = ['bing']}) => {
             try {
                 console.error(`Searching for "${query}" using engines: ${engines.join(', ')}`);
 
-                const results = await executeSearch(query.trim(), engines, limit);
+                const { results, errors } = await executeSearch(query.trim(), engines, limit);
+
+                // 所有引擎全部失败（错误数 == 引擎数）→ 返回 isError
+                if (errors.length === engines.length) {
+                    const errorDetail = errors.map(e => `${e.engine}: ${e.message}`).join('\n');
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `All search engines failed:\n${errorDetail}`
+                        }],
+                        isError: true
+                    };
+                }
+
+                // 0 结果但只有部分引擎失败 → 也标记为错误，列出各引擎状态
+                if (results.length === 0 && errors.length > 0) {
+                    const failedSet = new Set(errors.map(e => e.engine));
+                    const succeededEngines = engines.filter(e => !failedSet.has(e));
+                    const lines = errors.map(e => `${e.engine}: ${e.message}`);
+                    if (succeededEngines.length > 0) {
+                        lines.push(`${succeededEngines.join(', ')}: returned 0 results`);
+                    }
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `No results found:\n${lines.join('\n')}`
+                        }],
+                        isError: true
+                    };
+                }
+
+                // 所有引擎均成功执行但返回 0 条结果 → 不是错误，给出信息性提示
+                if (results.length === 0 && errors.length === 0) {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                query: query.trim(),
+                                engines: engines,
+                                totalResults: 0,
+                                results: [],
+                                message: `所有搜索引擎（${engines.join('、')}）均未找到与此查询匹配的结果。可能是查询过于具体、过长，或搜索引擎未能找到匹配的页面。建议简化查询或使用不同的关键词。`
+                            }, null, 2)
+                        }]
+                    };
+                }
+
+                // 应用描述长度限制：调用参数 > 全局配置 > 不限制
+                const descLimit = maxDescriptionLength ?? config.maxDescriptionLength;
+                const truncatedResults = descLimit
+                    ? results.map(r => ({
+                        ...r,
+                        description: r.description.length > descLimit
+                            ? r.description.slice(0, descLimit) + '...'
+                            : r.description
+                    }))
+                    : results;
+
+                const response: Record<string, unknown> = {
+                    query: query.trim(),
+                    engines: engines,
+                    totalResults: truncatedResults.length,
+                    results: truncatedResults
+                };
+
+                // 部分引擎失败 → 在结果中附带警告
+                if (errors.length > 0) {
+                    response.warnings = errors.map(e => `${e.engine}: ${e.message}`);
+                }
 
                 return {
                     content: [{
                         type: 'text',
-                        text: JSON.stringify({
-                            query: query.trim(),
-                            engines: engines,
-                            totalResults: results.length,
-                            results: results
-                        }, null, 2)
+                        text: JSON.stringify(response, null, 2)
                     }]
                 };
             } catch (error) {
-                console.error('Search tool execution failed:', error);
+                console.error(`Search tool execution failed: ${getErrorMessage(error)}`);
                 return {
                     content: [{
                         type: 'text',
-                        text: `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: `Search failed: ${getErrorMessage(error)}`
                     }],
                     isError: true
                 };
@@ -233,7 +317,7 @@ export const setupTools = (server: McpServer): void => {
     // 获取 Linux.do 文章工具
     server.tool(
         fetchLinuxDoToolName,
-        "Fetch full article content from a linux.do post URL",
+        "获取 linux.do 帖子的完整内容。当搜索结果中包含 linux.do 链接，且你需要阅读完整讨论或帖子内容以回答用户问题时，请使用此工具。",
         {
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'linuxdo'),
@@ -252,11 +336,11 @@ export const setupTools = (server: McpServer): void => {
                     }]
                 };
             } catch (error) {
-                console.error('Failed to fetch Linux.do article:', error);
+                console.error(`Failed to fetch Linux.do article: ${getErrorMessage(error)}`);
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: `Failed to fetch article: ${getErrorMessage(error)}`
                     }],
                     isError: true
                 };
@@ -267,7 +351,7 @@ export const setupTools = (server: McpServer): void => {
     // 获取 CSDN 文章工具
     server.tool(
         fetchCsdnToolName,
-        "Fetch full article content from a csdn post URL",
+        "获取 CSDN 博客文章的完整内容。当搜索结果中包含 blog.csdn.net 链接，且你需要全文来回答用户问题时，请使用此工具。",
         {
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'csdn'),
@@ -286,11 +370,11 @@ export const setupTools = (server: McpServer): void => {
                     }]
                 };
             } catch (error) {
-                console.error('Failed to fetch CSDN article:', error);
+                console.error(`Failed to fetch CSDN article: ${getErrorMessage(error)}`);
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: `Failed to fetch article: ${getErrorMessage(error)}`
                     }],
                     isError: true
                 };
@@ -301,7 +385,7 @@ export const setupTools = (server: McpServer): void => {
     // 获取 GitHub README 工具
     server.tool(
         fetchGithubToolName,
-        "Fetch README content from a GitHub repository URL",
+        "获取 GitHub 仓库的 README 内容。当用户询问某个 GitHub 项目，或你需要从 README 了解项目用途、安装步骤或使用方式时，请使用此工具。",
         {
             url: z.string().min(1).refine(
                 (url) => validateGithubUrl(url),
@@ -330,11 +414,11 @@ export const setupTools = (server: McpServer): void => {
                     };
                 }
             } catch (error) {
-                console.error('Failed to fetch GitHub README:', error);
+                console.error(`Failed to fetch GitHub README: ${getErrorMessage(error)}`);
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: `Failed to fetch README: ${getErrorMessage(error)}`
                     }],
                     isError: true
                 };
@@ -345,7 +429,7 @@ export const setupTools = (server: McpServer): void => {
     // 获取掘金文章工具
     server.tool(
         fetchJuejinToolName,
-        "Fetch full article content from a Juejin(掘金) post URL",
+        "获取掘金(Juejin)文章的完整内容。当搜索结果中包含 juejin.cn 链接，且你需要全文来提供详细回答时，请使用此工具。",
         {
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'juejin'),
@@ -364,11 +448,11 @@ export const setupTools = (server: McpServer): void => {
                     }]
                 };
             } catch (error) {
-                console.error('Failed to fetch Juejin article:', error);
+                console.error(`Failed to fetch Juejin article: ${getErrorMessage(error)}`);
                 return {
                     content: [{
                         type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        text: `Failed to fetch article: ${getErrorMessage(error)}`
                     }],
                     isError: true
                 };

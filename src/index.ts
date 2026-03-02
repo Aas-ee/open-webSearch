@@ -9,6 +9,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import cors from 'cors';
 import {config} from "./config.js";
+import { destroySharedBrowser } from "./engines/shared/browser.js";
 
 async function main() {
   // Create MCP server
@@ -29,6 +30,13 @@ async function main() {
     }).catch(error => {
       console.error('❌ Failed to initialize STDIO transport:', error);
     });
+
+    // stdin 关闭时（MCP 宿主停止服务器），主动清理浏览器并退出
+    server.server.onclose = async () => {
+      console.error('[server] MCP connection closed, cleaning up...');
+      await destroySharedBrowser();
+      process.exit(0);
+    };
   }
 
   // Only set up HTTP server if enabled

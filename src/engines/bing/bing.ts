@@ -1,72 +1,112 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
+import { getSharedBrowser, destroySharedBrowser } from '../shared/browser.js';
+import { config } from '../../config.js';
+
+/**
+ * 解码 Bing 重定向 URL，提取实际目标地址。
+ * Bing URL 格式: https://www.bing.com/ck/a?...&u=a1<Base64编码的URL>
+ * 参数 'u' 的值以 'a1' 开头，后接 Base64 编码的原始 URL。
+ */
+function decodeBingUrl(bingUrl: string): string {
+    try {
+        const url = new URL(bingUrl);
+        const encodedUrl = url.searchParams.get('u');
+        if (!encodedUrl) {
+            return bingUrl;
+        }
+        const base64Part = encodedUrl.substring(2);
+        const decodedUrl = Buffer.from(base64Part, 'base64').toString('utf-8');
+        if (decodedUrl.startsWith('http')) {
+            return decodedUrl;
+        }
+        return bingUrl;
+    } catch {
+        return bingUrl;
+    }
+}
+
+function parsePageResults(html: string): SearchResult[] {
+    const $ = cheerio.load(html);
+    const results: SearchResult[] = [];
+    $('#b_results h2').each((i, element) => {
+        const linkElement = $(element).find('a').first();
+        if (linkElement.length) {
+            const rawUrl = linkElement.attr('href');
+            if (rawUrl && rawUrl.startsWith('http')) {
+                const url = decodeBingUrl(rawUrl);
+                const parentLi = $(element).closest('li');
+                const snippetElement = parentLi.find('p').first();
+                const sourceElement = parentLi.find('.b_tpcn');
+                results.push({
+                    title: linkElement.text().trim(),
+                    url: url,
+                    description: snippetElement.text().trim() || '',
+                    source: sourceElement.text().trim() || '',
+                    engine: 'bing'
+                });
+            }
+        }
+    });
+    return results;
+}
 
 export async function searchBing(query: string, limit: number): Promise<SearchResult[]> {
-    let allResults: SearchResult[] = [];
-    let pn = 0;
+    try {
+        const browser = await getSharedBrowser();
+        const page = await browser.newPage();
 
-    while (allResults.length < limit) {
-        const response = await axios.get('https://www.bing.com/search', {
-            params: {
-                q: query,
-                first: 1 + pn * 10
-            },
-            headers: {
-                "authority": "www.bing.com",
-                "ect": "3g",
-                "pragma": "no-cache",
-                "sec-ch-ua-arch": "\"x86\"",
-                "sec-ch-ua-bitness": "\"64\"",
-                "sec-ch-ua-full-version": "\"112.0.5615.50\"",
-                "sec-ch-ua-full-version-list": "\"Chromium\";v=\"112.0.5615.50\", \"Google Chrome\";v=\"112.0.5615.50\", \"Not:A-Brand\";v=\"99.0.0.0\"",
-                "sec-ch-ua-model": "\"\"",
-                "sec-ch-ua-platform-version": "\"15.0.0\"",
-                "sec-fetch-user": "?1",
-                "upgrade-insecure-requests": "1",
-                "Cookie": "MUID=3727DBB14FD763511D80CDBD4ED262EF; MSPTC=5UlNf4UsLqV53oFqqdHiR26FwDDL8zSW3kC74kIJQfM; _EDGE_S=SID=132F08F578E06F832D931EE779E16E2D; MUIDB=3727DBB14FD763511D80CDBD4ED262EF; SRCHD=AF=NOFORM; SRCHUID=V=2&GUID=B3AFD0E41DB649E39803C690946C3B65&dmnchg=1; ak_bmsc=578AE2B7DA55FA9F332ADCDFBA0B9B64~000000000000000000000000000000~YAAQZCg0F9XLkYGXAQAAjywwkhxcD6Pm2nguBmpB14hnmCR3kz9Mfau5cZ7pwHxdU2Uog9+6hOkBmzpOV3UoTOhi52nB725xM7zN90mRDv0zQtJdO/llaKlt2zqTmB4F5kd+GzPjXLAN4Zmj4KwpAjLK1T4TexH/9WlQTkRamdJTKuR47IZWHHebqsbNqHoYncHhxICO9Rnu51vhlps/rrhPBtgPgbrQnDfr6YzAQWmSqc5g9hk03sM9nnWUyVbRV0ZVsgke7BCYX5V1JD5L0Zf8/FWdntBpjpd2IcmehBz38ChGThPrBEWNCZQbCS6lE4OaQanrrdmBHf/r5YEf2LeIqZy0bJGIiSQaSh6d7KFO2haTQk/JscZAs+V5kNsAOxIGreRve+E=; _UR=QS=0&TQS=0&Pn=0; BFBUSR=BFBHP=0; SRCHUSR=DOB=20250621&DS=1; _Rwho=u=d&ts=2025-06-21; ipv6=hit=1750507922628&t=4; BFPRResults=FirstPageUrls=C5E678E900F98310F0D3DB1F3EB96D99%2CB5A20FAE72B0C3019A56409EAC7AF3FB%2C7A44A77FF42EDF11CC9BF5CFE08B179A%2C6ED615E5E634BD5AFC7BB2A0A77F8FF8%2CA993E7AAF4890BEC06882621CA376D00%2C49CF0FC3C203D5E918A76258506B0CF4%2C7F03D5026C1D046F66B11D525095BF8B%2C058BB67A6B7F15E58D3A19B897BC57F8%2C1B886024FDE703428D24A41AFA1E62AF%2C5A8B56DC0AE03A8B94643DEA2A22DBAC&FPIG=05F126AA95514CF5AD5E33E4AEBA474D; _HPVN=CS=eyJQbiI6eyJDbiI6MSwiU3QiOjAsIlFzIjowLCJQcm9kIjoiUCJ9LCJTYyI6eyJDbiI6MSwiU3QiOjAsIlFzIjowLCJQcm9kIjoiSCJ9LCJReiI6eyJDbiI6MSwiU3QiOjAsIlFzIjowLCJQcm9kIjoiVCJ9LCJBcCI6dHJ1ZSwiTXV0ZSI6dHJ1ZSwiTGFkIjoiMjAyNS0wNi0yMVQwMDowMDowMFoiLCJJb3RkIjowLCJHd2IiOjAsIlRucyI6MCwiRGZ0IjpudWxsLCJNdnMiOjAsIkZsdCI6MCwiSW1wIjoxNSwiVG9ibiI6MH0=; _C_ETH=1; _RwBf=r=0&ilt=15&ihpd=1&ispd=14&rc=36&rb=0&rg=200&pc=36&mtu=0&rbb=0&clo=0&v=15&l=2025-06-21T07:00:00.0000000Z&lft=0001-01-01T00:00:00.0000000&aof=0&ard=0001-01-01T00:00:00.0000000&rwdbt=0&rwflt=0&rwaul2=0&g=&o=2&p=&c=&t=0&s=0001-01-01T00:00:00.0000000+00:00&ts=2025-06-21T11:36:08.7064260+00:00&rwred=0&wls=&wlb=&wle=&ccp=&cpt=&lka=0&lkt=0&aad=0&TH=&cid=0&gb=; _SS=SID=132F08F578E06F832D931EE779E16E2D&R=36&RB=0&GB=0&RG=200&RP=36; SRCHHPGUSR=SRCHLANG=zh-Hans&IG=63A0A44F5D2F4499AD165A366D073C03&DM=0&BRW=N&BRH=T&CW=1202&CH=1289&SCW=1185&SCH=2279&DPR=1.0&UTC=480&HV=1750505768&HVE=notFound&WTS=63886101120&PV=15.0.0&PRVCW=1202&PRVCH=1289&EXLTT=13; SRCHHPGUSR=SRCHLANG=en&IG=9A53F826E9C9432497327CA995144E14&DM=0&BRW=N&BRH=T&CW=1202&CH=1289&SCW=1185&SCH=2279&DPR=1.0&UTC=480&HV=1750505768&HVE=notFound&WTS=63886101120&PV=15.0.0&PRVCW=1202&PRVCH=1289&EXLTT=13",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
-                "Accept": "*/*",
-                "Host": "cn.bing.com",
-                "Connection": "keep-alive"
+        try {
+            const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}`;
+            await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: config.requestTimeout });
+
+            // cn.bing.com 等本地化版本可能异步渲染搜索结果，
+            // networkidle2 无法保证 DOM 已就绪，需要显式等待结果选择器。
+            try {
+                await page.waitForSelector('#b_results .b_algo', { timeout: 10000 });
+            } catch {
+                // 可能确实没有结果，或者 Bing 使用了不同的页面结构，继续尝试解析
+                console.warn('[bing] 等待搜索结果选择器 #b_results .b_algo 超时，页面 URL:', page.url());
             }
-        });
 
-        const $ = cheerio.load(response.data);
-        const results: SearchResult[] = [];
+            let allResults = parsePageResults(await page.content());
 
-        $('#b_content').children()
-            .find('#b_results').children()
-            .each((i, element) => {
-                const titleElement = $(element).find('h2');
-                const linkElement = $(element).find('a');
-                const snippetElement = $(element).find('p').first();
+            // 如果首次解析为空，可能是异步渲染还没完成（cn.bing.com 特有的延迟），
+            // 或者出现了 cookie 同意弹窗等遮挡，尝试再等待一次。
+            if (allResults.length === 0) {
+                console.warn('[bing] 首次解析返回 0 条结果，等待 3 秒后重试...');
+                await new Promise(r => setTimeout(r, 3000));
+                allResults = parsePageResults(await page.content());
+            }
 
-                if (titleElement.length && linkElement.length) {
-                    const url = linkElement.attr('href');
-                    if (url && url.startsWith('http')) {
-
-                        const sourceElement = $(element).find('.b_tpcn');
-                        results.push({
-                            title: titleElement.text(),
-                            url: url,
-                            description: snippetElement.text().trim() || '',
-                            source: sourceElement.text().trim() || '',
-                            engine: 'bing'
-                        });
-                    }
+            while (allResults.length < limit) {
+                const nextLink = await page.$('.sb_pagN');
+                if (!nextLink) break;
+                // Bing 翻页可能用完整导航或 AJAX，两种方式都要兼容
+                const navPromise = page.waitForNavigation({ waitUntil: 'networkidle2', timeout: config.requestTimeout }).catch(() => {});
+                await nextLink.click();
+                await navPromise;
+                try {
+                    await page.waitForSelector('#b_results .b_algo', { timeout: 10000 });
+                } catch {
+                    // 翻页后如果超时，继续尝试解析
                 }
-            });
+                const pageResults = parsePageResults(await page.content());
+                if (pageResults.length === 0) break;
+                allResults = allResults.concat(pageResults);
+            }
 
-        allResults = allResults.concat(results);
-
-        if (results.length === 0) {
-            console.error('⚠️ No more results, ending early....');
-            break;
+            const finalResults = allResults.slice(0, limit);
+            if (finalResults.length === 0) {
+                const finalUrl = page.url();
+                console.warn(`[bing] 搜索返回 0 条结果。最终 URL: ${finalUrl}。页面可能出现了验证码、Cookie 同意弹窗，或 HTML 结构已变更。`);
+            }
+            return finalResults;
+        } finally {
+            await page.close();
         }
-
-        pn += 1;
+    } catch (err) {
+        await destroySharedBrowser();
+        throw err;
     }
-
-    return allResults.slice(0, limit); // 截取最多 limit 个
 }

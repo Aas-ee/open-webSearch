@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
-import { getProxyUrl } from "../../config.js";
+import { getProxyUrl, config } from "../../config.js";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
 interface ExaResult {
@@ -59,7 +59,7 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
         const response = await axios.post<{ results: ExaResult[] }>(
             `https://exa.ai/search/api/search-fast`,
             data,
-            requestOptions
+            { ...requestOptions, timeout: config.requestTimeout }
         );
 
         const apiResults = response.data.results;
@@ -82,11 +82,10 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
         return allResults.slice(0, limit);
 
     } catch (error) {
-        // @ts-ignore
-        console.error('❌ Error fetching search results from Exa.ai:', error.message);
-        if (axios.isAxiosError(error) && error.response) {
-            console.error('API Error Response:', error.response.data);
-        }
+        const msg = axios.isAxiosError(error)
+            ? [error.code, error.message, error.response?.status && `HTTP ${error.response.status}`].filter(Boolean).join(' - ')
+            : (error instanceof Error ? error.message : String(error));
+        console.error(`❌ Exa.ai search failed: ${msg}`);
         return [];
     }
 }

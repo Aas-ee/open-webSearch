@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { config } from '../../config.js';
 
 /**
  * GitHub README Fetcher - Extract repo info from URLs and fetch README content
@@ -61,7 +62,7 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
                 'Accept': 'application/vnd.github.v3.raw',
                 'User-Agent': 'GitHub-README-Fetcher/1.0'
             },
-            timeout: 10000,
+            timeout: config.requestTimeout,
             validateStatus: (status) => status === 200
         });
 

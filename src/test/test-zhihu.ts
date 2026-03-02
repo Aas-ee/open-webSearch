@@ -1,4 +1,5 @@
 import {searchZhiHu} from "../engines/zhihu/zhihu.js";
+import { destroySharedBrowser } from '../engines/shared/browser.js';
 
 async function testZhiHuSearch() {
   console.log('🔍 Starting Zhihu search test...');
@@ -28,4 +29,4 @@ async function testZhiHuSearch() {
 }
 
 // Run the test
-testZhiHuSearch().catch(console.error);
+testZhiHuSearch().catch(console.error).finally(async () => { await destroySharedBrowser(); process.exit(0); });

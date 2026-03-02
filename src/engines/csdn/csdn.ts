@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
+import { config } from '../../config.js';
 
 export async function searchCsdn(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
@@ -8,6 +9,7 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
 
     while (allResults.length < limit) {
         const response = await axios.get('https://so.csdn.net/api/v3/search', {
+            timeout: config.requestTimeout,
             params: {
                 q: query,
                 p: pn
@@ -38,7 +40,7 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
             results.push ({
                 title: title,
                 url: url_location,
-                description: digest,
+                description: digest || '',
                 source: nickname,
                 engine: "csdn"
             });

@@ -1,4 +1,5 @@
 import { searchLinuxDo } from '../engines/linuxdo/index.js';
+import { destroySharedBrowser } from '../engines/shared/browser.js';
 
 async function testLinuxDoSearch() {
   console.log('🔍 Starting LinuxDo search test...');
@@ -28,4 +29,4 @@ async function testLinuxDoSearch() {
 }
 
 // Run the test
-testLinuxDoSearch().catch(console.error);
+testLinuxDoSearch().catch(console.error).finally(async () => { await destroySharedBrowser(); process.exit(0); });

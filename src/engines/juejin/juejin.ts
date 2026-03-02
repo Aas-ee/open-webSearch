@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
+import { config } from '../../config.js';
 
 interface JuejinSearchResponse {
     err_no: number;
@@ -44,6 +45,7 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
             console.error(`🔍 Searching Juejin with query: "${query}", cursor: ${cursor}`);
 
             const response = await axios.get<JuejinSearchResponse>('https://api.juejin.cn/search_api/v1/search', {
+                timeout: config.requestTimeout,
                 params: {
                     aid: '2608',
                     uuid: '7259393293459605051',
@@ -79,17 +81,18 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
                 break;
             }
 
-            const results: SearchResult[] = responseData.data.map((item) => {
+            const results: SearchResult[] = responseData.data
+                .filter((item) => item.result_model?.article_info && item.result_model?.author_user_info)
+                .map((item) => {
                 const { result_model, title_highlight, content_highlight } = item;
                 const { article_info, author_user_info, category, tags } = result_model;
 
                 // 移除HTML标签的高亮标记
-                const cleanTitle = title_highlight.replace(/<\/?em>/g, '');
-                const cleanContent = content_highlight.replace(/<\/?em>/g, '');
+                const cleanTitle = (title_highlight || article_info.title || '').replace(/<\/?em>/g, '');
+                const cleanContent = (content_highlight || article_info.brief_content || '').replace(/<\/?em>/g, '');
 
-                // 构建描述信息
-                const tagNames = tags.map(tag => tag.tag_name).join(', ');
-                const description = `${cleanContent} | 分类: ${category.category_name} | 标签: ${tagNames} | 👍 ${article_info.digg_count} | 👀 ${article_info.view_count}`;
+                const tagNames = (tags || []).map(tag => tag.tag_name).join(', ');
+                const description = `${cleanContent} | 分类: ${category?.category_name ?? ''} | 标签: ${tagNames} | 👍 ${article_info.digg_count} | 👀 ${article_info.view_count}`;
 
                 return {
                     title: cleanTitle,
@@ -104,22 +107,21 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
 
             // 检查是否有下一页
             if (!responseData.has_more || !responseData.cursor || results.length === 0) {
-                console.log('⚠️ No more results, ending search');
+                console.error('⚠️ No more results, ending search');
                 break;
             }
 
             cursor = responseData.cursor;
         }
 
-        console.log(`✅ Juejin search completed, found ${allResults.length} results`);
+        console.error(`✅ Juejin search completed, found ${allResults.length} results`);
         return allResults.slice(0, limit);
 
     } catch (error) {
-        console.error('❌ Juejin search failed:', error);
-        if (axios.isAxiosError(error)) {
-            console.error('Response status:', error.response?.status);
-            console.error('Response data:', error.response?.data);
-        }
+        const msg = axios.isAxiosError(error)
+            ? [error.code, error.message, error.response?.status && `HTTP ${error.response.status}`].filter(Boolean).join(' - ')
+            : (error instanceof Error ? error.message : String(error));
+        console.error(`❌ Juejin search failed: ${msg}`);
         return [];
     }
 }

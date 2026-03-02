@@ -1,6 +1,6 @@
 <div align="center">
 
-# Open-WebSearch MCP Server
+# Open-WebSearch MCP 服务器
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=%23de5a16)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Aas-ee/open-webSearch)](https://archestra.ai/mcp-catalog/aas-ee__open-websearch)
@@ -9,49 +9,140 @@
 ![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
 ![Issues](https://img.shields.io/github/issues/Aas-ee/open-websearch)
 
-**[🇨🇳 中文](./README-zh.md) | 🇺🇸 English**
+**🇨🇳 中文 | [🇺🇸 English](./README-en.md)**
 
 </div>
 
-A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web search without API keys.
+一个基于多引擎搜索结果的模型上下文协议(MCP)服务器，支持免费网络搜索，无需API密钥。
 
-## Features
 
-- Web search using multi-engine results
+<details>
+  <summary><strong style="color: #95cfe4">点击展开查看简单示例效果(deepseek-v3)</strong></summary>
+
+---
+
+### 🧩 示例开始
+
+### prompt: 
+
+> 使用websearch工具查询 《Open-WebSearch MCP》，用csdn引擎，查20条记录，告诉我工具返回的engine，以及相关信息，再通过url查询作者是Aasee的文章内容（如果有多篇顺序查询，不要同时查询）。规范输出
+
+---
+
+### assistant: 
+
+我将使用MCP_search工具查询《Open-WebSearch MCP》并使用CSDN引擎获取20条记录。
+
+
+
+### 查询结果分析
+
+1. **使用的搜索引擎**: CSDN
+2. **总记录数**: 20条
+
+### 作者Aasee的文章列表
+搜索结果显示有2篇作者是"Aasee."的文章：
+
+1. **文章标题**: "开源 AI 联网搜索工具：Open-WebSearch MCP 全新升级，支持多引擎 + 流式响应！"
+   **URL**: https://blog.csdn.net/weixin_45801664/article/details/149000138?ops_request_misc=%257B%2522request%255Fid%2522%253A%252203ceec270907178223ab139631d9a81f%2522%252C%2522scm%2522%253A%252220140713.130102334.pc%255Fall.%2522%257D&request_id=03ceec270907178223ab139631d9a81f&biz_id=0&utm_medium=distribute.pc_search_result.none-task-blog-2~all~first_rank_ecpm_v1~rank_v31_ecpm-1-149000138-null-null.142^v102^pc_search_result_base6&utm_term=Open-WebSearch%20MCP
+   **简介**: 该项目为AI插件开发提供免费、可控的联网搜索能力，支持Bing、百度、CSDN多引擎组合搜索...
+
+2. **文章标题**: "Web Seach 搜索 MCP 启动！"
+   **URL**: https://blog.csdn.net/weixin_45801664/article/details/148813614?ops_request_misc=%257B%2522request%255Fid%2522%253A%252203ceec270907178223ab139631d9a81f%2522%252C%2522scm%2522%253A%252220140713.130102334.pc%255Fall.%2522%257D&request_id=03ceec270907178223ab139631d9a81f&biz_id=0&utm_medium=distribute.pc_search_result.none-task-blog-2~all~first_rank_ecpm_v1~rank_v31_ecpm-4-148813614-null-null.142^v102^pc_search_result_base6&utm_term=Open-WebSearch%20MCP
+   **简介**: 开源Web搜索MCP服务器Open-WebSearch上线，解决AI模型无法获取最新网络信息的问题...
+
+### 开始查询第一篇文章内容
+我将先查询第一篇文章的全文内容：
+
+
+
+# 搜索结果分析
+
+## 工具返回的引擎信息
+使用了CSDN搜索引擎进行查询，返回了20条相关记录。
+
+## 作者Aasee的相关文章内容
+
+### 文章1: "开源 AI 联网搜索工具：Open-WebSearch MCP 全新升级，支持多引擎 + 流式响应！"
+```
+🚀 开源 AI 联网搜索工具：Open-WebSearch MCP 全新升级，支持多引擎 + 流式响应！
+
+💡「让你的 AI 插件真正能联网」—— 不需要 API Key，搜索结果可控、开箱即用！
+
+项目亮点一览：
+✅ 多引擎实时搜索：支持 Bing、百度、CSDN、DuckDuckGo、Exa、Brave
+✅ 流式响应(MCP协议)：兼容 Claude 插件(MCP)协议
+✅ 文章正文抓取：支持提取 CSDN 博客文章全文
+✅ 完全免费 & 无需 API Key
+✅ Docker 一键部署
+
+安装方法：
+- Git克隆项目: git clone https://github.com/Aas-ee/open-webSearch
+- 或使用Docker: docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
+
+MCP工具支持：
+🔍 search：多引擎搜索工具
+📄 fetchCsdnArticle：提取 CSDN 文章全文
+🧪 fetchLinuxDoArticle：抓取 Linux.do 文章(开发中)
+
+项目地址：
+🧩 GitHub: https://github.com/Aas-ee/open-webSearch
+📦 Docker: ghcr.io/aas-ee/open-web-search:latest
+```
+
+### 文章2: "Web Seach 搜索 MCP 启动！"
+```
+开源Web搜索MCP服务器Open-WebSearch上线，解决AI模型无法获取最新网络信息的问题。
+该项目免费提供百度搜索结果API，支持结构化JSON返回格式，兼容Claude等AI工具的MCP协议。
+用户仅需简单安装即可使用，无需API密钥...
+```
+
+需要查询其他Aasee作者的文章内容吗？我可以继续为您检索。
+
+### ✅ 示例结束
+
+---
+</details>
+
+## 功能特性
+
+- 使用多引擎搜索结果进行网络检索
     - bing
     - baidu
-    - ~~linux.do~~ temporarily unsupported
+    - linux.do
     - csdn
     - duckduckgo
     - exa
     - brave
     - juejin
-- HTTP proxy configuration support for accessing restricted resources
-- No API keys or authentication required
-- Returns structured results with titles, URLs, and descriptions
-- Configurable number of results per search
-- Customizable default search engine
-- Support for fetching individual article content
+- 支持HTTP代理配置，轻松解决网络访问限制
+- 无需API密钥或身份验证
+- 返回带标题、URL和描述的结构化结果
+- 可配置每次搜索返回的结果数量
+- 可自定义默认搜索引擎
+- 支持获取单篇文章内容
     - csdn
-    - github (README files)
+    - github（README文件）
+    - 掘金（juejin）
+    - linux.do
 
 ## TODO
-- Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), Google and other search engines
-- Support for more blogs, forums, and social platforms
-- Optimize article content extraction, add support for more sites
-- ~~Support for GitHub README fetching~~ (already supported)
+- 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,Google等搜索引擎
+- 支持更多博客论坛、社交软件
+- 优化文章内容提取功能，增加更多站点支持
+- ~~支持GitHub README获取~~（已支持）
 
-## Installation Guide
+## 安装指南
 
-### NPX Quick Start (Recommended)
+### NPX 快速启动（推荐）
 
-The fastest way to get started:
+最快的使用方式：
 
 ```bash
-# Basic usage
+# 基本使用
 npx open-websearch@latest
 
-# With environment variables (Linux/macOS)
+# 带环境变量（Linux/macOS）
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true npx open-websearch@latest
 
 # Windows PowerShell
@@ -60,50 +151,56 @@ $env:DEFAULT_SEARCH_ENGINE="duckduckgo"; $env:ENABLE_CORS="true"; npx open-webse
 # Windows CMD
 set MODE=stdio && set DEFAULT_SEARCH_ENGINE=duckduckgo && npx open-websearch@latest
 
-# Cross-platform (requires cross-env, Used for local development)
+# 跨平台（需要 cross-env，用于本地开发）
+# 全局安装
 npm install -g open-websearch
 npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 ```
 
-**Environment Variables:**
+**环境变量说明：**
 
-| Variable | Default                 | Options | Description |
-|----------|-------------------------|---------|-------------|
-| `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
-| `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin` | Default search engine |
-| `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
-| `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
-| `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
-| `PORT` | `3000`                  | 1-65535 | Server port |
-| `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
-| `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool |
-| `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | Valid MCP tool name | Custom name for the Linux.do article fetch tool |
-| `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | Valid MCP tool name | Custom name for the CSDN article fetch tool |
-| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Valid MCP tool name | Custom name for the GitHub README fetch tool |
-| `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | Valid MCP tool name | Custom name for the Juejin article fetch tool |
+| 变量名 | 默认值                     | 可选值 | 说明                                   |
+|--------|-------------------------|--------|--------------------------------------|
+| `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS                               |
+| `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置                             |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `linuxdo` | 默认搜索引擎                               |
+| `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理                             |
+| `PROXY_URL` | `http://127.0.0.1:10809` | 任何有效URL | 代理服务器URL                             |
+| `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
+| `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
+| `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
+| `MAX_DESCRIPTION_LENGTH` | 无限制 | 正整数 | 搜索结果描述的全局最大长度，超出部分将被截断 |
+| `MCP_TOOL_SEARCH_NAME` | `search` | 有效的MCP工具名称 | 搜索工具的自定义名称 |
+| `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | 有效的MCP工具名称 | Linux.do文章获取工具的自定义名称 |
+| `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | 有效的MCP工具名称 | CSDN文章获取工具的自定义名称 |
+| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | 有效的MCP工具名称 | GitHub README获取工具的自定义名称 |
+| `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | 有效的MCP工具名称 | 掘金文章获取工具的自定义名称 |
 
-**Common configurations:**
+**常用配置示例：**
 ```bash
-# Enable proxy for restricted regions
+# 启用代理（适用于网络受限地区）
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
 
-# Full configuration
+# 完整配置
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
 ```
 
-### Local Installation
+**Windows 用户注意事项：**
+- 在 PowerShell 中使用 `$env:VAR="value"; ` 语法
+- 本地开发推荐使用 `npx cross-env` 实现跨平台兼容
 
-1. Clone or download this repository
-2. Install dependencies:
+### 本地安装
+
+1. 克隆或下载本仓库
+2. 安装依赖项：
 ```bash
 npm install
 ```
-3. Build the server:
+3. 构建服务器：
 ```bash
 npm run build
 ```
-4. Add the server to your MCP configuration:
+4. 将服务器添加到您的MCP配置中：
 
 **Cherry Studio:**
 ```json
@@ -120,7 +217,7 @@ npm run build
 }
 ```
 
-**VSCode (Claude Dev Extension):**
+**VSCode版(Claude开发扩展):**
 ```json
 {
   "mcpServers": {
@@ -140,27 +237,23 @@ npm run build
 }
 ```
 
-**Claude Desktop:**
+**Claude桌面版:**
 ```json
 {
   "mcpServers": {
     "web-search": {
-      "transport": {
-        "type": "streamableHttp",
-        "url": "http://localhost:3000/mcp"
-      }
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
     },
     "web-search-sse": {
-      "transport": {
-        "type": "sse",
-        "url": "http://localhost:3000/sse"
-      }
+      "type": "sse",
+      "url": "http://localhost:3000/sse"
     }
   }
 }
 ```
 
-**NPX Command Line Configuration:**
+**NPX命令行配置示例:**
 ```json
 {
   "mcpServers": {
@@ -179,13 +272,13 @@ npm run build
 }
 ```
 
-**Local STDIO Configuration for Cherry Studio (Windows):**
+**Cherry Studio 本地 STDIO 配置 (Windows):**
 ```json
 {
   "mcpServers": {
     "open-websearch-local": {
       "command": "node",
-      "args": ["C:/path/to/your/project/build/index.js"],
+      "args": ["C:/你的项目路径/build/index.js"],
       "env": {
         "MODE": "stdio",
         "DEFAULT_SEARCH_ENGINE": "duckduckgo",
@@ -196,31 +289,34 @@ npm run build
 }
 ```
 
-### Docker Deployment
+### Docker部署
 
-Quick deployment using Docker Compose:
+使用Docker Compose快速部署：
 
 ```bash
 docker-compose up -d
 ```
 
-Or use Docker directly:
+或者直接使用Docker：
 ```bash
 docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
 ```
 
-Environment variable configuration:
+配置环境变量说明：
 
-| Variable | Default                 | Options | Description |
-|----------|-------------------------|---------|-------------|
-| `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
-| `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | Default search engine |
-| `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
-| `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
-| `PORT` | `3000`                  | 1-65535 | Server port |
+| 变量名 | 默认值                     | 可选值 | 说明 |
+|--------|-------------------------|--------|------|
+| `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS |
+| `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置 |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `linuxdo` | 默认搜索引擎 |
+| `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理 |
+| `PROXY_URL` | `http://127.0.0.1:10809` | 任何有效URL | 代理服务器URL |
+| `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式 |
+| `PORT` | `3000`                  | 1-65535 | 服务器端口 |
+| `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎 |
+| `MAX_DESCRIPTION_LENGTH` | 无限制 | 正整数 | 搜索结果描述最大长度 |
 
-Then configure in your MCP client:
+然后在MCP客户端中配置：
 ```json
 {
   "mcpServers": {
@@ -244,57 +340,59 @@ Then configure in your MCP client:
 }
 ```
 
-## Usage Guide
+## 使用说明
 
-The server provides four tools: `search`, `fetchLinuxDoArticle`, `fetchCsdnArticle`, and `fetchGithubReadme`.
+服务器提供五个工具：`search`、`fetchCsdnArticle`、`fetchGithubReadme`、`fetchJuejinArticle` 和 `fetchLinuxDoArticle`。
 
-### search Tool Usage
+### search工具使用说明
 
 ```typescript
 {
-  "query": string,        // Search query
-  "limit": number,        // Optional: Number of results to return (default: 10)
-  "engines": string[]     // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin) default bing
+  "query": string,        // 搜索查询词
+  "limit": number,        // 可选：返回结果数量（默认：10，范围：1-50）
+  "engines": string[],    // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin) 默认bing，大小写不敏感
+  "maxDescriptionLength": number  // 可选：单次调用的描述最大长度，优先级高于全局 MAX_DESCRIPTION_LENGTH
 }
 ```
 
-Usage example:
+使用示例：
 ```typescript
 use_mcp_tool({
   server_name: "web-search",
   tool_name: "search",
   arguments: {
-    query: "search content",
-    limit: 3,  // Optional parameter
-    engines: ["bing", "csdn", "duckduckgo", "exa", "brave", "juejin"] // Optional parameter, supports multi-engine combined search
+    query: "搜索内容",
+    limit: 3,  // 可选参数
+    engines: ["bing", "csdn", "duckduckgo", "exa", "brave", "juejin"] // 可选参数，支持多引擎组合搜索
   }
 })
 ```
 
-Response example:
+返回示例：
 ```json
 [
   {
-    "title": "Example Search Result",
+    "title": "示例搜索结果",
     "url": "https://example.com",
-    "description": "Description text of the search result...",
-    "source": "Source",
-    "engine": "Engine used"
+    "description": "搜索结果的描述文本...",
+    "source": "来源",
+    "engine": "使用的引擎"
   }
 ]
 ```
 
-### fetchCsdnArticle Tool Usage
 
-Used to fetch complete content of CSDN blog articles.
+### fetchCsdnArticle工具使用说明
+
+用于获取CSDN博客文章的完整内容。
 
 ```typescript
 {
-  "url": string    // URL from CSDN search results using the search tool
+  "url": string    // search 工具使用csdn查询出的url
 }
 ```
 
-Usage example:
+使用示例：
 ```typescript
 use_mcp_tool({
   server_name: "web-search",
@@ -305,26 +403,26 @@ use_mcp_tool({
 })
 ```
 
-Response example:
+返回示例：
 ```json
 [
   {
-    "content": "Example search result"
+    "content": "示例搜索结果"
   }
 ]
 ```
 
-### fetchLinuxDoArticle Tool Usage
+### fetchLinuxDoArticle工具使用说明
 
-Used to fetch complete content of Linux.do forum articles.
+用于获取Linux.do论坛文章的完整内容。
 
 ```typescript
 {
-  "url": string    // URL from linuxdo search results using the search tool
+  "url": string    // search 工具使用linuxdo查询出的url
 }
 ```
 
-Usage example:
+使用示例：
 ```typescript
 use_mcp_tool({
   server_name: "web-search",
@@ -335,26 +433,28 @@ use_mcp_tool({
 })
 ```
 
-Response example:
+返回示例：
 ```json
 [
   {
-    "content": "Example search result"
+    "content": "示例搜索结果"
   }
 ]
+
 ```
 
-### fetchGithubReadme Tool Usage
 
-Used to fetch README content from GitHub repositories.
+### fetchGithubReadme工具使用说明
+
+用于获取GitHub仓库的README文件内容。
 
 ```typescript
 {
-  "url": string    // GitHub repository URL (supports HTTPS, SSH formats)
+  "url": string    // GitHub仓库URL（支持HTTPS、SSH格式）
 }
 ```
 
-Usage example:
+使用示例：
 ```typescript
 use_mcp_tool({
   server_name: "web-search",
@@ -365,13 +465,13 @@ use_mcp_tool({
 })
 ```
 
-Supported URL formats:
+支持的URL格式：
 - HTTPS: `https://github.com/owner/repo`
 - HTTPS with .git: `https://github.com/owner/repo.git`
 - SSH: `git@github.com:owner/repo.git`
-- URLs with parameters: `https://github.com/owner/repo?tab=readme`
+- 带参数的URL: `https://github.com/owner/repo?tab=readme`
 
-Response example:
+返回示例：
 ```json
 [
   {
@@ -380,17 +480,18 @@ Response example:
 ]
 ```
 
-### fetchJuejinArticle Tool Usage
 
-Used to fetch complete content of Juejin articles.
+### fetchJuejinArticle工具使用说明
+
+用于获取掘金文章的完整内容。
 
 ```typescript
 {
-  "url": string    // Juejin article URL from search results
+  "url": string    // 掘金文章URL
 }
 ```
 
-Usage example:
+使用示例：
 ```typescript
 use_mcp_tool({
   server_name: "web-search",
@@ -401,10 +502,10 @@ use_mcp_tool({
 })
 ```
 
-Supported URL format:
-- `https://juejin.cn/post/{article_id}`
+支持的URL格式：
+- `https://juejin.cn/post/{文章ID}`
 
-Response example:
+返回示例：
 ```json
 [
   {
@@ -413,97 +514,98 @@ Response example:
 ]
 ```
 
-## Usage Limitations
 
-Since this tool works by scraping multi-engine search results, please note the following important limitations:
+## 使用限制
 
-1. **Rate Limiting**:
-    - Too many searches in a short time may cause the used engines to temporarily block requests
-    - Recommendations:
-        - Maintain reasonable search frequency
-        - Use the limit parameter judiciously
-        - Add delays between searches when necessary
+由于本工具通过爬取多引擎搜索结果实现，请注意以下重要限制：
 
-2. **Result Accuracy**:
-    - Depends on the HTML structure of corresponding engines, may fail when engines update
-    - Some results may lack metadata like descriptions
-    - Complex search operators may not work as expected
+1. **频率限制**：
+    - 短时间内搜索次数过多可能导致使用的引擎暂时屏蔽请求
+    - 建议：
+        - 保持合理的搜索频率
+        - 审慎使用limit参数
+        - 必要时可在搜索间设置延迟
 
-3. **Legal Terms**:
-    - This tool is for personal use only
-    - Please comply with the terms of service of corresponding engines
-    - Implement appropriate rate limiting based on your actual use case
+2. **结果准确性**：
+    - 依赖对应引擎的HTML结构，可能随引擎改版失效
+    - 部分结果可能缺失描述等元数据
+    - 复杂搜索运算符可能无法按预期工作
 
-4. **Search Engine Configuration**:
-   - Default search engine can be set via the `DEFAULT_SEARCH_ENGINE` environment variable
-   - Supported engines: bing, duckduckgo, exa, brave
-   - The default engine is used when searching specific websites
+3. **法律条款**：
+    - 本工具仅限个人使用
+    - 请遵守对应引擎的服务条款
+    - 建议根据实际使用场景实施适当的频率限制
 
-5. **Proxy Configuration**:
-   - HTTP proxy can be configured when certain search engines are unavailable in specific regions
-   - Enable proxy with environment variable `USE_PROXY=true`
-   - Configure proxy server address with `PROXY_URL`
+4. **搜索引擎配置**：
+   - 可通过环境变量`DEFAULT_SEARCH_ENGINE`设置默认搜索引擎
+   - 支持的引擎有：bing, duckduckgo, exa, brave
+   - 当搜索特定网站内容时，会自动使用默认搜索引擎
 
-## Contributing
+5. **代理服务配置**：
+   - 当某些搜索引擎在特定地区不可用时，可配置HTTP代理
+   - 通过环境变量`USE_PROXY=true`启用代理
+   - 使用`PROXY_URL`配置代理服务器地址
 
-Welcome to submit issue reports and feature improvement suggestions!
+## 贡献指南
 
-### Contributor Guide
+欢迎提交问题报告和功能改进建议！
 
-If you want to fork this repository and publish your own Docker image, you need to make the following configurations:
+### 贡献者指南
 
-#### GitHub Secrets Configuration
+如果您想要fork本仓库并发布自己的Docker镜像，需要进行以下配置：
 
-To enable automatic Docker image building and publishing, please add the following secrets in your GitHub repository settings (Settings → Secrets and variables → Actions):
+#### GitHub Secrets配置
 
-**Required Secrets:**
-- `GITHUB_TOKEN`: Automatically provided by GitHub (no setup needed)
+要启用自动Docker镜像构建和发布功能，请在您的GitHub仓库设置中添加以下secrets（Settings → Secrets and variables → Actions）：
 
-**Optional Secrets (for Alibaba Cloud ACR):**
-- `ACR_REGISTRY`: Your Alibaba Cloud Container Registry URL (e.g., `registry.cn-hangzhou.aliyuncs.com`)
-- `ACR_USERNAME`: Your Alibaba Cloud ACR username
-- `ACR_PASSWORD`: Your Alibaba Cloud ACR password
-- `ACR_IMAGE_NAME`: Your image name in ACR (e.g., `your-namespace/open-web-search`)
+**必需的Secrets:**
+- `GITHUB_TOKEN`: GitHub自动提供（无需设置）
 
-#### CI/CD Workflow
+**可选的Secrets（用于阿里云ACR）:**
+- `ACR_REGISTRY`: 您的阿里云容器镜像服务URL（例如：`registry.cn-hangzhou.aliyuncs.com`）
+- `ACR_USERNAME`: 您的阿里云ACR用户名
+- `ACR_PASSWORD`: 您的阿里云ACR密码
+- `ACR_IMAGE_NAME`: 您在ACR中的镜像名称（例如：`your-namespace/open-web-search`）
 
-The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml`) that automatically:
+#### CI/CD工作流程
 
-1. **Trigger Conditions**:
-    - Push to `main` branch
-    - Push version tags (`v*`)
-    - Manual workflow trigger
+仓库包含一个GitHub Actions工作流程（`.github/workflows/docker.yml`），会自动：
 
-2. **Build and Push to**:
-    - GitHub Container Registry (ghcr.io) - always enabled
-    - Alibaba Cloud Container Registry - only enabled when ACR secrets are configured
+1. **触发条件**：
+    - 推送到`main`分支
+    - 推送版本标签（`v*`）
+    - 手动触发workflow
 
-3. **Image Tags**:
-    - `ghcr.io/your-username/open-web-search:latest`
-    - `your-acr-address/your-image-name:latest` (if ACR is configured)
+2. **构建并推送到**：
+    - GitHub Container Registry (ghcr.io) - 始终启用
+    - 阿里云容器镜像服务 - 仅在配置ACR secrets时启用
 
-#### Fork and Publish Steps:
+3. **镜像标签**：
+    - `ghcr.io/您的用户名/open-web-search:latest`
+    - `您的ACR地址/您的镜像名:latest`（如果配置了ACR）
 
-1. **Fork the repository** to your GitHub account
-2. **Configure secrets** (if you need ACR publishing):
-    - Go to Settings → Secrets and variables → Actions in your forked repository
-    - Add the ACR-related secrets listed above
-3. **Push changes** to the `main` branch or create version tags
-4. **GitHub Actions will automatically build and push** your Docker image
-5. **Use your image**, update the Docker command:
+#### Fork和发布步骤：
+
+1. **Fork仓库**到您的GitHub账户
+2. **配置secrets**（如果需要ACR发布）：
+    - 进入您fork的仓库的Settings → Secrets and variables → Actions
+    - 添加上面列出的ACR相关secrets
+3. **推送更改**到`main`分支或创建版本标签
+4. **GitHub Actions将自动构建并推送**您的Docker镜像
+5. **使用您的镜像**，更新Docker命令：
    ```bash
-   docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/your-username/open-web-search:latest
+   docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/您的用户名/open-web-search:latest
    ```
 
-#### Notes:
-- If you don't configure ACR secrets, the workflow will only publish to GitHub Container Registry
-- Make sure your GitHub repository has Actions enabled
-- The workflow will use your GitHub username (converted to lowercase) as the GHCR image name
+#### 注意事项：
+- 如果您不配置ACR secrets，工作流程将只发布到GitHub Container Registry
+- 确保您的GitHub仓库已启用Actions功能
+- 工作流程会使用您的GitHub用户名（转换为小写）作为GHCR镜像名称
 
 <div align="center">
 
 ## Star History
-If you find this project helpful, please consider giving it a ⭐ Star!
+如果项目对你有帮助，请考虑给个⭐ Star！
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
 
