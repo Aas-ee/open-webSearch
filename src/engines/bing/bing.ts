@@ -59,8 +59,25 @@ export async function searchBing(query: string, limit: number): Promise<SearchRe
         try {
             const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}`;
             await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: config.requestTimeout });
-            await new Promise(r => setTimeout(r, 500));
+
+            // cn.bing.com 等本地化版本可能异步渲染搜索结果，
+            // networkidle2 无法保证 DOM 已就绪，需要显式等待结果选择器。
+            try {
+                await page.waitForSelector('#b_results .b_algo', { timeout: 10000 });
+            } catch {
+                // 可能确实没有结果，或者 Bing 使用了不同的页面结构，继续尝试解析
+                console.warn('[bing] 等待搜索结果选择器 #b_results .b_algo 超时，页面 URL:', page.url());
+            }
+
             let allResults = parsePageResults(await page.content());
+
+            // 如果首次解析为空，可能是异步渲染还没完成（cn.bing.com 特有的延迟），
+            // 或者出现了 cookie 同意弹窗等遮挡，尝试再等待一次。
+            if (allResults.length === 0) {
+                console.warn('[bing] 首次解析返回 0 条结果，等待 3 秒后重试...');
+                await new Promise(r => setTimeout(r, 3000));
+                allResults = parsePageResults(await page.content());
+            }
 
             while (allResults.length < limit) {
                 const nextLink = await page.$('.sb_pagN');
@@ -69,13 +86,22 @@ export async function searchBing(query: string, limit: number): Promise<SearchRe
                 const navPromise = page.waitForNavigation({ waitUntil: 'networkidle2', timeout: config.requestTimeout }).catch(() => {});
                 await nextLink.click();
                 await navPromise;
-                await new Promise(r => setTimeout(r, 1000));
+                try {
+                    await page.waitForSelector('#b_results .b_algo', { timeout: 10000 });
+                } catch {
+                    // 翻页后如果超时，继续尝试解析
+                }
                 const pageResults = parsePageResults(await page.content());
                 if (pageResults.length === 0) break;
                 allResults = allResults.concat(pageResults);
             }
 
-            return allResults.slice(0, limit);
+            const finalResults = allResults.slice(0, limit);
+            if (finalResults.length === 0) {
+                const finalUrl = page.url();
+                console.warn(`[bing] 搜索返回 0 条结果。最终 URL: ${finalUrl}。页面可能出现了验证码、Cookie 同意弹窗，或 HTML 结构已变更。`);
+            }
+            return finalResults;
         } finally {
             await page.close();
         }

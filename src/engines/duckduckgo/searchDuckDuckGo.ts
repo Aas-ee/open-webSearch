@@ -33,11 +33,16 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
     if (results.length > 0) {
       return results;
     }
+    console.warn('[duckduckgo] 预加载 URL 方法返回 0 条结果，尝试 HTML 方法...');
   } catch (error) {
     console.warn('预加载URL方法失败，尝试HTML方法:', errMsg(error));
   }
 
-  return await searchDuckDuckGoHtml(query, limit, effectiveProxyUrl);
+  const htmlResults = await searchDuckDuckGoHtml(query, limit, effectiveProxyUrl);
+  if (htmlResults.length === 0) {
+    console.warn('[duckduckgo] 预加载和 HTML 两种方法均返回 0 条结果。查询可能过于具体，或 DuckDuckGo 阻止了请求。');
+  }
+  return htmlResults;
   }
 
   /**

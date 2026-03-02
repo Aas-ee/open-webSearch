@@ -255,6 +255,22 @@ export const setupTools = (server: McpServer): void => {
                     };
                 }
 
+                // 所有引擎均成功执行但返回 0 条结果 → 不是错误，给出信息性提示
+                if (results.length === 0 && errors.length === 0) {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: JSON.stringify({
+                                query: query.trim(),
+                                engines: engines,
+                                totalResults: 0,
+                                results: [],
+                                message: `所有搜索引擎（${engines.join('、')}）均未找到与此查询匹配的结果。可能是查询过于具体、过长，或搜索引擎未能找到匹配的页面。建议简化查询或使用不同的关键词。`
+                            }, null, 2)
+                        }]
+                    };
+                }
+
                 // 应用描述长度限制：调用参数 > 全局配置 > 不限制
                 const descLimit = maxDescriptionLength ?? config.maxDescriptionLength;
                 const truncatedResults = descLimit
