@@ -172,8 +172,9 @@ export const setupTools = (server: McpServer): void => {
     // 搜索工具
     // 生成搜索工具的动态描述
     const getSearchDescription = () => {
+        const scenarioHint = '。当你需要查找最新信息、验证事实、研究主题或查阅超出你训练数据的文档/教程时，请使用此工具。中文查询优先选择 Baidu 或 Bing；英文查询优先选择 Bing 或 DuckDuckGo；开发/编程主题可考虑 CSDN、Juejin(掘金) 或 Exa。';
         if (config.allowedSearchEngines.length === 0) {
-            return "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金)) with no API key required";
+            return "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金)) with no API key required" + scenarioHint;
         } else {
             const enginesText = config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -183,7 +184,7 @@ export const setupTools = (server: McpServer): void => {
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required)`;
+            return `Search the web using these engines: ${enginesText} (no API key required)` + scenarioHint;
         }
     };
 
@@ -316,7 +317,7 @@ export const setupTools = (server: McpServer): void => {
     // 获取 Linux.do 文章工具
     server.tool(
         fetchLinuxDoToolName,
-        "Fetch full article content from a linux.do post URL",
+        "获取 linux.do 帖子的完整内容。当搜索结果中包含 linux.do 链接，且你需要阅读完整讨论或帖子内容以回答用户问题时，请使用此工具。",
         {
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'linuxdo'),
@@ -350,7 +351,7 @@ export const setupTools = (server: McpServer): void => {
     // 获取 CSDN 文章工具
     server.tool(
         fetchCsdnToolName,
-        "Fetch full article content from a csdn post URL",
+        "获取 CSDN 博客文章的完整内容。当搜索结果中包含 blog.csdn.net 链接，且你需要全文来回答用户问题时，请使用此工具。",
         {
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'csdn'),
@@ -384,7 +385,7 @@ export const setupTools = (server: McpServer): void => {
     // 获取 GitHub README 工具
     server.tool(
         fetchGithubToolName,
-        "Fetch README content from a GitHub repository URL",
+        "获取 GitHub 仓库的 README 内容。当用户询问某个 GitHub 项目，或你需要从 README 了解项目用途、安装步骤或使用方式时，请使用此工具。",
         {
             url: z.string().min(1).refine(
                 (url) => validateGithubUrl(url),
@@ -428,7 +429,7 @@ export const setupTools = (server: McpServer): void => {
     // 获取掘金文章工具
     server.tool(
         fetchJuejinToolName,
-        "Fetch full article content from a Juejin(掘金) post URL",
+        "获取掘金(Juejin)文章的完整内容。当搜索结果中包含 juejin.cn 链接，且你需要全文来提供详细回答时，请使用此工具。",
         {
             url: z.string().url().refine(
                 (url) => validateArticleUrl(url, 'juejin'),
