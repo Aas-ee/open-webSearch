@@ -45,28 +45,30 @@ export async function searchBrave(query: string, limit: number): Promise<SearchR
         const results: SearchResult[] = [];
 
 
-        // Select the main container for all search results
-        const resultsContainer = $('#results');
-
-        // Find each result snippet within the container
-        resultsContainer.find('.snippet').each((index, element) => {
+        // Brave now uses SvelteKit SSR. The page structure is:
+        // #results > .snippet.svelte-* (top-level result card)
+        //   └── .result-content
+        //        ├── > a (main link with href)
+        //        │   ├── .site-name-wrapper (source)
+        //        │   └── .search-snippet-title (title)
+        //        └── .generic-snippet (description)
+        $('#results .snippet').each((index, element) => {
             const resultElement = $(element);
+            const content = resultElement.find('.result-content').first();
+            if (content.length === 0) return;
 
-            // Extract the title
-            const titleElement = resultElement.find('.title');
-            const title = titleElement.text().trim();
+            // The first <a> inside .result-content is the main link
+            const mainLink = content.find('> a').first();
+            const url = mainLink.attr('href');
 
-            // Extract the URL from the main link
-            const linkElement = resultElement.find('a.heading-serpresult');
-            const url = linkElement.attr('href');
+            // Title is inside .search-snippet-title
+            const title = mainLink.find('.search-snippet-title').text().trim();
 
-            // Extract the description/snippet
-            const snippetElement = resultElement.find('.snippet-description');
-            const description = snippetElement.text().trim() || '';
+            // Description is in .generic-snippet
+            const description = content.find('.generic-snippet').text().trim() || '';
 
-            // Extract the source/sitename
-            const sourceElement = resultElement.find('.sitename');
-            const source = sourceElement.text().trim() || '';
+            // Source/site name is in .site-name-wrapper
+            const source = mainLink.find('.site-name-wrapper').first().text().trim() || '';
 
             // Ensure that we have a valid title and URL before adding
             if (title && url) {
@@ -75,7 +77,7 @@ export async function searchBrave(query: string, limit: number): Promise<SearchR
                     url: url,
                     description: description,
                     source: source,
-                    engine: 'bing'
+                    engine: 'brave'
                 });
             }
         });
