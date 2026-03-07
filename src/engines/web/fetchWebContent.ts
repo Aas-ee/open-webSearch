@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { getProxyUrl } from '../../config.js';
+import { assertPublicHttpUrl } from '../../utils/urlSafety.js';
 
 export interface FetchWebContentResult {
     url: string;
@@ -16,6 +17,7 @@ const DEFAULT_TIMEOUT_MS = 20000;
 const DEFAULT_MAX_CHARS = 30000;
 const MIN_MAX_CHARS = 1000;
 const MAX_MAX_CHARS = 200000;
+const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
 
 function normalizeText(text: string): string {
     return text
@@ -94,15 +96,15 @@ function extractMainTextFromHtml(html: string): { title: string; text: string } 
 
 export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MAX_CHARS): Promise<FetchWebContentResult> {
     const parsedUrl = new URL(url);
-    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-        throw new Error('Only HTTP and HTTPS URLs are supported');
-    }
+    assertPublicHttpUrl(parsedUrl, 'Request URL');
 
     const effectiveProxyUrl = getProxyUrl();
     const requestOptions: any = {
         timeout: DEFAULT_TIMEOUT_MS,
         maxRedirects: 5,
         responseType: 'text',
+        maxContentLength: MAX_DOWNLOAD_BYTES,
+        maxBodyLength: MAX_DOWNLOAD_BYTES,
         decompress: true,
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
@@ -117,9 +119,38 @@ export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MA
         requestOptions.httpsAgent = proxyAgent;
     }
 
+    // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
+    try {
+        const headResponse = await axios.head(parsedUrl.toString(), {
+            ...requestOptions,
+            responseType: 'json',
+            validateStatus: (status: number) => status >= 200 && status < 400
+        });
+        const headLength = Number(headResponse.headers['content-length']);
+        if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
+            const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
+            (tooLargeError as any).code = 'ERR_RESPONSE_TOO_LARGE';
+            throw tooLargeError;
+        }
+    } catch (error: any) {
+        if (error?.code === 'ERR_RESPONSE_TOO_LARGE') {
+            throw error;
+        }
+        const status = error?.response?.status;
+        // Some servers don't support HEAD correctly; continue and rely on GET download limits.
+        if (status !== undefined && ![400, 403, 404, 405, 406, 501].includes(status)) {
+            throw error;
+        }
+    }
+
     const response = await axios.get(parsedUrl.toString(), requestOptions);
     const contentType = String(response.headers['content-type'] || '').toLowerCase();
     const finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
+    assertPublicHttpUrl(finalUrl, 'Final URL');
+    const contentLength = Number(response.headers['content-length']);
+    if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
+        throw new Error(`Response body too large (${contentLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
+    }
     const raw = typeof response.data === 'string'
         ? response.data
         : JSON.stringify(response.data, null, 2);

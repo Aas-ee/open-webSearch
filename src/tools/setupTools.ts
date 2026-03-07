@@ -16,6 +16,7 @@ import {fetchGithubReadme} from "../engines/github/index.js";
 import { fetchJuejinArticle } from "../engines/juejin/fetchJuejinArticle.js";
 import { searchJuejin } from "../engines/juejin/index.js";
 import { fetchWebContent } from "../engines/web/index.js";
+import { isPublicHttpUrl } from "../utils/urlSafety.js";
 
 // 支持的搜索引擎
 const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave','juejin'] as const;
@@ -158,12 +159,7 @@ const validateGithubUrl = (url: string): boolean => {
 
 // 验证通用网页 URL
 const validateWebUrl = (url: string): boolean => {
-    try {
-        const urlObj = new URL(url);
-        return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
-    } catch {
-        return false;
-    }
+    return isPublicHttpUrl(url);
 };
 
 // 获取工具名称，优先使用环境变量，否则使用默认值
@@ -396,7 +392,7 @@ export const setupTools = (server: McpServer): void => {
         {
             url: z.string().url().refine(
                 (url) => validateWebUrl(url),
-                "URL must use HTTP or HTTPS protocol"
+                "URL must be a public HTTP(S) address (private/local network targets are blocked)"
             ),
             maxChars: z.number().int().min(1000).max(200000).default(30000)
         },

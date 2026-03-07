@@ -7,8 +7,28 @@ type TestCase = {
 };
 
 const originalAxiosGet = axios.get.bind(axios);
+const originalAxiosHead = axios.head.bind(axios);
 
 function installAxiosMock(): void {
+    (axios as any).head = async (url: string) => {
+        if (url.endsWith('/too-large.md')) {
+            return {
+                headers: { 'content-length': String(5 * 1024 * 1024) },
+                request: { res: { responseUrl: url } }
+            };
+        }
+        if (url.endsWith('/long.md')) {
+            return {
+                headers: { 'content-length': String(1024) },
+                request: { res: { responseUrl: url } }
+            };
+        }
+        return {
+            headers: {},
+            request: { res: { responseUrl: url } }
+        };
+    };
+
     (axios as any).get = async (url: string) => {
         if (url.endsWith('/skill.md')) {
             return {
@@ -44,6 +64,10 @@ function installAxiosMock(): void {
             };
         }
 
+        if (url.endsWith('/too-large.md')) {
+            throw new Error('GET should not be called when HEAD indicates oversized response');
+        }
+
         if (url.endsWith('/spa')) {
             return {
                 headers: { 'content-type': 'text/html; charset=utf-8' },
@@ -68,6 +92,7 @@ function installAxiosMock(): void {
 
 function restoreAxiosMock(): void {
     (axios as any).get = originalAxiosGet;
+    (axios as any).head = originalAxiosHead;
 }
 
 function assert(condition: unknown, message: string): void {
@@ -135,6 +160,30 @@ async function main(): Promise<void> {
                     failed = true;
                 }
                 assert(failed, 'file protocol should be rejected');
+            }
+        },
+        {
+            name: 'should reject private/local network targets',
+            run: async () => {
+                let failed = false;
+                try {
+                    await fetchWebContent('http://127.0.0.1/private', 5000);
+                } catch {
+                    failed = true;
+                }
+                assert(failed, 'private network target should be rejected');
+            }
+        },
+        {
+            name: 'should reject oversized response by content-length',
+            run: async () => {
+                let failed = false;
+                try {
+                    await fetchWebContent('https://example.com/too-large.md', 5000);
+                } catch {
+                    failed = true;
+                }
+                assert(failed, 'oversized response should be rejected');
             }
         }
     ];
