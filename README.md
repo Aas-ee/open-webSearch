@@ -34,6 +34,7 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
 - Support for fetching individual article content
     - csdn
     - github (README files)
+    - generic HTTP(S) page / Markdown content
 
 ## TODO
 - Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), Google and other search engines
@@ -82,6 +83,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | Valid MCP tool name | Custom name for the CSDN article fetch tool |
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | Valid MCP tool name | Custom name for the GitHub README fetch tool |
 | `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | Valid MCP tool name | Custom name for the Juejin article fetch tool |
+| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | Valid MCP tool name | Custom name for generic web/Markdown fetch tool |
 
 **Common configurations:**
 ```bash
@@ -242,7 +244,7 @@ Then configure in your MCP client:
 
 ## Usage Guide
 
-The server provides four tools: `search`, `fetchLinuxDoArticle`, `fetchCsdnArticle`, and `fetchGithubReadme`.
+The server provides six tools: `search`, `fetchLinuxDoArticle`, `fetchCsdnArticle`, `fetchGithubReadme`, `fetchJuejinArticle`, and `fetchWebContent`.
 
 ### search Tool Usage
 
@@ -374,6 +376,41 @@ Response example:
     "content": "<div align=\"center\">\n\n# Open-WebSearch MCP Server..."
   }
 ]
+```
+
+### fetchWebContent Tool Usage
+
+Fetch content directly from public HTTP(S) links, including Markdown files (`.md`) and ordinary web pages.
+
+```typescript
+{
+  "url": string,         // Public HTTP(S) URL
+  "maxChars": number     // Optional: max returned content length (1000-200000, default 30000)
+}
+```
+
+Usage example:
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchWebContent",
+  arguments: {
+    url: "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+    maxChars: 12000
+  }
+})
+```
+
+Response example:
+```json
+{
+  "url": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+  "finalUrl": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+  "contentType": "text/plain; charset=utf-8",
+  "title": "",
+  "truncated": false,
+  "content": "# Open-WebSearch MCP Server ..."
+}
 ```
 
 ### fetchJuejinArticle Tool Usage

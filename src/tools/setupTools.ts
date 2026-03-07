@@ -15,6 +15,7 @@ import {searchBrave} from "../engines/brave/index.js";
 import {fetchGithubReadme} from "../engines/github/index.js";
 import { fetchJuejinArticle } from "../engines/juejin/fetchJuejinArticle.js";
 import { searchJuejin } from "../engines/juejin/index.js";
+import { fetchWebContent } from "../engines/web/index.js";
 
 // 支持的搜索引擎
 const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave','juejin'] as const;
@@ -31,6 +32,33 @@ const engineMap: Record<SupportedEngine, (query: string, limit: number) => Promi
     brave: searchBrave,
     juejin: searchJuejin,
 };
+
+// Normalize engine names from different client representations (e.g. "Bing", "DuckDuckGo", "linux.do")
+export function normalizeEngineName(engine: string): string {
+    const cleaned = engine.trim().toLowerCase();
+    const compact = cleaned.replace(/[\s._-]+/g, '');
+
+    switch (compact) {
+        case 'baidu':
+            return 'baidu';
+        case 'bing':
+            return 'bing';
+        case 'linuxdo':
+            return 'linuxdo';
+        case 'csdn':
+            return 'csdn';
+        case 'duckduckgo':
+            return 'duckduckgo';
+        case 'exa':
+            return 'exa';
+        case 'brave':
+            return 'brave';
+        case 'juejin':
+            return 'juejin';
+        default:
+            return cleaned;
+    }
+}
 
 // 分配搜索结果数量
 const distributeLimit = (totalLimit: number, engineCount: number): number[] => {
@@ -128,6 +156,16 @@ const validateGithubUrl = (url: string): boolean => {
     }
 };
 
+// 验证通用网页 URL
+const validateWebUrl = (url: string): boolean => {
+    try {
+        const urlObj = new URL(url);
+        return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
+    } catch {
+        return false;
+    }
+};
+
 // 获取工具名称，优先使用环境变量，否则使用默认值
 function getToolName(envVarName: string, defaultName: string): string {
     const configuredName = process.env[envVarName];
@@ -150,6 +188,7 @@ export const setupTools = (server: McpServer): void => {
     const fetchCsdnToolName = getToolName('MCP_TOOL_FETCH_CSDN_NAME', 'fetchCsdnArticle');
     const fetchGithubToolName = getToolName('MCP_TOOL_FETCH_GITHUB_NAME', 'fetchGithubReadme');
     const fetchJuejinToolName = getToolName('MCP_TOOL_FETCH_JUEJIN_NAME', 'fetchJuejinArticle');
+    const fetchWebToolName = getToolName('MCP_TOOL_FETCH_WEB_NAME', 'fetchWebContent');
 
     // 搜索工具
     // 生成搜索工具的动态描述
@@ -179,13 +218,21 @@ export const setupTools = (server: McpServer): void => {
         return z.enum(allowedEngines as [string, ...string[]]);
     };
 
+    const getEngineInputSchema = () => {
+        const enginesEnum = getEnginesEnum();
+        return z.string()
+            .min(1, "Engine value must not be empty")
+            .transform((engine) => normalizeEngineName(engine))
+            .pipe(enginesEnum);
+    };
+
     server.tool(
         searchToolName,
         getSearchDescription(),
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
-            engines: z.array(getEnginesEnum()).min(1).default([config.defaultSearchEngine])
+            engines: z.array(getEngineInputSchema()).min(1).default([config.defaultSearchEngine])
                 .transform(requestedEngines => {
                     // 如果有配置允许的搜索引擎，过滤请求的引擎
                     if (config.allowedSearchEngines.length > 0) {
@@ -335,6 +382,41 @@ export const setupTools = (server: McpServer): void => {
                     content: [{
                         type: 'text',
                         text: `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    }],
+                    isError: true
+                };
+            }
+        }
+    );
+
+    // 获取通用网页/Markdown 内容工具
+    server.tool(
+        fetchWebToolName,
+        "Fetch content from a public HTTP(S) URL (supports Markdown files and normal web pages)",
+        {
+            url: z.string().url().refine(
+                (url) => validateWebUrl(url),
+                "URL must use HTTP or HTTPS protocol"
+            ),
+            maxChars: z.number().int().min(1000).max(200000).default(30000)
+        },
+        async ({url, maxChars = 30000}) => {
+            try {
+                console.error(`Fetching web content: ${url}`);
+                const result = await fetchWebContent(url, maxChars);
+
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(result, null, 2)
+                    }]
+                };
+            } catch (error) {
+                console.error('Failed to fetch web content:', error);
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Failed to fetch web content: ${error instanceof Error ? error.message : 'Unknown error'}`
                     }],
                     isError: true
                 };
