@@ -29,7 +29,8 @@
     "express": "^4.18.2",
     "https-proxy-agent": "^7.0.6",
     "jsdom": "^26.1.0",
-    "npx": "^10.2.2"
+    "npx": "^10.2.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
