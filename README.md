@@ -145,16 +145,12 @@ npm run build
 {
   "mcpServers": {
     "web-search": {
-      "transport": {
-        "type": "streamableHttp",
-        "url": "http://localhost:3000/mcp"
-      }
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
     },
     "web-search-sse": {
-      "transport": {
-        "type": "sse",
-        "url": "http://localhost:3000/sse"
-      }
+      "type": "sse",
+      "url": "http://localhost:3000/sse"
     }
   }
 }
