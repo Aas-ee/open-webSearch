@@ -33,6 +33,33 @@ const engineMap: Record<SupportedEngine, (query: string, limit: number) => Promi
     juejin: searchJuejin,
 };
 
+// Normalize engine names from different client representations (e.g. "Bing", "DuckDuckGo", "linux.do")
+export function normalizeEngineName(engine: string): string {
+    const cleaned = engine.trim().toLowerCase();
+    const compact = cleaned.replace(/[\s._-]+/g, '');
+
+    switch (compact) {
+        case 'baidu':
+            return 'baidu';
+        case 'bing':
+            return 'bing';
+        case 'linuxdo':
+            return 'linuxdo';
+        case 'csdn':
+            return 'csdn';
+        case 'duckduckgo':
+            return 'duckduckgo';
+        case 'exa':
+            return 'exa';
+        case 'brave':
+            return 'brave';
+        case 'juejin':
+            return 'juejin';
+        default:
+            return cleaned;
+    }
+}
+
 // 分配搜索结果数量
 const distributeLimit = (totalLimit: number, engineCount: number): number[] => {
     const base = Math.floor(totalLimit / engineCount);
@@ -191,13 +218,21 @@ export const setupTools = (server: McpServer): void => {
         return z.enum(allowedEngines as [string, ...string[]]);
     };
 
+    const getEngineInputSchema = () => {
+        const enginesEnum = getEnginesEnum();
+        return z.string()
+            .min(1, "Engine value must not be empty")
+            .transform((engine) => normalizeEngineName(engine))
+            .pipe(enginesEnum);
+    };
+
     server.tool(
         searchToolName,
         getSearchDescription(),
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
-            engines: z.array(getEnginesEnum()).min(1).default([config.defaultSearchEngine])
+            engines: z.array(getEngineInputSchema()).min(1).default([config.defaultSearchEngine])
                 .transform(requestedEngines => {
                     // 如果有配置允许的搜索引擎，过滤请求的引擎
                     if (config.allowedSearchEngines.length > 0) {
