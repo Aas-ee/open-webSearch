@@ -2,6 +2,7 @@ import axios from 'axios';
 import {SearchResult} from '../../types.js';
 import { config } from '../../config.js';
 import {searchDuckDuckGo} from "../duckduckgo/index.js";
+import {searchBrave} from "../brave/brave.js";
 import * as cheerio from 'cheerio';
 
 async function searchBingForLinuxDo(query: string, limit: number): Promise<SearchResult[]> {
@@ -109,16 +110,24 @@ export async function searchLinuxDo(query: string, limit: number): Promise<Searc
         // Use the configured search engine
         if (config.defaultSearchEngine === 'duckduckgo') {
             results = await searchDuckDuckGo(siteQuery, limit);
-        } else {
-            // Default to Bing
+        } else if (config.defaultSearchEngine === 'bing') {
             results = await searchBingForLinuxDo(siteQuery, limit);
+        } else {
+            // Use Brave which reliably supports site: operator
+            results = await searchBrave(siteQuery, limit);
         }
 
-        // Filter results to ensure they're from linux.do
+        // If no results from configured engine, try Brave as fallback
+        if (results.length === 0 && config.defaultSearchEngine !== 'brave') {
+            console.error('🔄 No results from configured engine, falling back to Brave...');
+            results = await searchBrave(siteQuery, limit);
+        }
+
+        // Filter results to ensure they're from linux.do (including subdomains)
         const filteredResults = results.filter(result => {
             try {
                 const url = new URL(result.url);
-                return url.hostname === 'linux.do';
+                return url.hostname === 'linux.do' || url.hostname.endsWith('.linux.do');
             } catch {
                 return false;
             }
