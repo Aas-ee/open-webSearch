@@ -17,7 +17,9 @@
     "dev": "tsc && node build/index.js",
     "test:stdio": "set MODE=stdio && node build/index.js",
     "test:http": "set MODE=http && node build/index.js",
-    "test:both": "set MODE=both && node build/index.js"
+    "test:both": "set MODE=both && node build/index.js",
+    "test:web-content": "tsc && node build/test/test-web-content.js",
+    "test:web-content:live": "tsc && node build/test/test-web-content-live.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.2",

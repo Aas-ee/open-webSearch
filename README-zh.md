@@ -122,6 +122,7 @@ MCP工具支持：
 - 支持获取单篇文章内容
     - csdn
     - github（README文件）
+    - 通用 HTTP(S) 网页 / Markdown 内容
 
 ## TODO
 - 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,Google等搜索引擎
@@ -171,6 +172,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | 有效的MCP工具名称 | CSDN文章获取工具的自定义名称 |
 | `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | 有效的MCP工具名称 | GitHub README获取工具的自定义名称 |
 | `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | 有效的MCP工具名称 | 掘金文章获取工具的自定义名称 |
+| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | 有效的MCP工具名称 | 通用网页/Markdown抓取工具的自定义名称 |
 
 **常用配置示例：**
 ```bash
@@ -335,7 +337,7 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 
 ## 使用说明
 
-服务器提供四个工具：`search`、`fetchLinuxDoArticle`、`fetchCsdnArticle` 和 `fetchGithubReadme`。
+服务器提供六个工具：`search`、`fetchLinuxDoArticle`、`fetchCsdnArticle`、`fetchGithubReadme`、`fetchJuejinArticle` 和 `fetchWebContent`。
 
 ### search工具使用说明
 
@@ -470,6 +472,41 @@ use_mcp_tool({
     "content": "<div align=\"center\">\n\n# Open-WebSearch MCP Server..."
   }
 ]
+```
+
+### fetchWebContent工具使用说明
+
+用于直接抓取公开可访问的 HTTP(S) 链接内容，支持 Markdown 文件（`.md`）和普通网页。
+
+```typescript
+{
+  "url": string,         // 公开可访问的 HTTP(S) URL
+  "maxChars": number     // 可选：最大返回字符数（1000-200000，默认30000）
+}
+```
+
+使用示例：
+```typescript
+use_mcp_tool({
+  server_name: "web-search",
+  tool_name: "fetchWebContent",
+  arguments: {
+    url: "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+    maxChars: 12000
+  }
+})
+```
+
+返回示例：
+```json
+{
+  "url": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+  "finalUrl": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
+  "contentType": "text/plain; charset=utf-8",
+  "title": "",
+  "truncated": false,
+  "content": "# Open-WebSearch MCP Server ..."
+}
 ```
 
 
