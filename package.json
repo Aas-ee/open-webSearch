@@ -34,7 +34,7 @@
     "https-proxy-agent": "^7.0.6",
     "jsdom": "^26.1.0",
     "npx": "^10.2.2",
-    "zod": "^4.3.6"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
