@@ -167,6 +167,9 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
+| `BING_SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | Bing 搜索策略：仅请求、请求失败后回退 Playwright、或强制 Playwright |
+| `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Playwright Chromium 是否以无头模式运行 |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 正整数 | Playwright 页面导航和 Bing 结果等待超时时间 |
 | `MCP_TOOL_SEARCH_NAME` | `search` | 有效的MCP工具名称 | 搜索工具的自定义名称 |
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | 有效的MCP工具名称 | Linux.do文章获取工具的自定义名称 |
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | 有效的MCP工具名称 | CSDN文章获取工具的自定义名称 |
@@ -179,9 +182,26 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 # 启用代理（适用于网络受限地区）
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
 
+# 先走请求，失败后再回退到 Playwright（如果已安装）
+BING_SEARCH_MODE=auto npx open-websearch@latest
+
+# 强制仅使用请求模式
+BING_SEARCH_MODE=request npx open-websearch@latest
+
 # 完整配置
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
 ```
+
+如果你希望启用浏览器增强兜底，请自行安装 Playwright：
+```bash
+npm install playwright
+npx playwright install chromium
+```
+
+模式说明：
+- `request`：只使用请求方式抓 Bing
+- `auto`：先走请求，只有请求失败且本地已安装 Playwright + Chromium 时才回退到 Playwright
+- `playwright`：强制使用 Playwright；如果本地未安装 Playwright 或 Chromium，会直接报错
 
 **Windows 用户注意事项：**
 - 在 PowerShell 中使用 `$env:VAR="value"; ` 语法

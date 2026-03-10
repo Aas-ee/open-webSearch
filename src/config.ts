@@ -4,9 +4,14 @@ export interface AppConfig {
     defaultSearchEngine: 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'linuxdo'  | 'juejin';
     // List of allowed search engines (if empty, all engines are available)
     allowedSearchEngines: string[];
+    // Bing search mode: request only, auto request then fallback, or force Playwright
+    bingSearchMode: 'request' | 'auto' | 'playwright';
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
+    // Playwright configuration
+    playwrightHeadless: boolean;
+    playwrightNavigationTimeoutMs: number;
     // CORS configuration
     enableCors: boolean;
     corsOrigin: string;
@@ -22,9 +27,12 @@ export const config: AppConfig = {
     allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?
         process.env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
         [],
+    bingSearchMode: (process.env.BING_SEARCH_MODE as AppConfig['bingSearchMode']) || 'request',
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:10809',
     useProxy: process.env.USE_PROXY === 'true',
+    playwrightHeadless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
+    playwrightNavigationTimeoutMs: Number(process.env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS || 20000),
     // CORS configuration
     enableCors: process.env.ENABLE_CORS === 'true',
     corsOrigin: process.env.CORS_ORIGIN || '*',
@@ -35,11 +43,22 @@ export const config: AppConfig = {
 
 // Valid search engines list
 const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'linuxdo', 'juejin'];
+const validBingSearchModes = ['request', 'auto', 'playwright'];
 
 // Validate default search engine
 if (!validSearchEngines.includes(config.defaultSearchEngine)) {
     console.warn(`Invalid DEFAULT_SEARCH_ENGINE: "${config.defaultSearchEngine}", falling back to "bing"`);
     config.defaultSearchEngine = 'bing';
+}
+
+if (!validBingSearchModes.includes(config.bingSearchMode)) {
+    console.warn(`Invalid BING_SEARCH_MODE: "${config.bingSearchMode}", falling back to "request"`);
+    config.bingSearchMode = 'request';
+}
+
+if (!Number.isFinite(config.playwrightNavigationTimeoutMs) || config.playwrightNavigationTimeoutMs <= 0) {
+    console.warn(`Invalid PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "${process.env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS}", falling back to 20000`);
+    config.playwrightNavigationTimeoutMs = 20000;
 }
 
 // Validate allowed search engines
@@ -71,12 +90,16 @@ if (config.allowedSearchEngines.length > 0) {
 } else {
     console.error(`🔍 No search engine restrictions, all available engines can be used`);
 }
+console.error(`🔍 Bing search mode: ${config.bingSearchMode.toUpperCase()}`);
 
 if (config.useProxy) {
     console.error(`🌐 Using proxy: ${config.proxyUrl}`);
 } else {
     console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
 }
+
+console.error(`🧭 Playwright headless: ${config.playwrightHeadless}`);
+console.error(`🧭 Playwright navigation timeout: ${config.playwrightNavigationTimeoutMs}ms`);
 
 // Determine server mode from config
 const mode = process.env.MODE || (config.enableHttpServer ? 'both' : 'stdio');

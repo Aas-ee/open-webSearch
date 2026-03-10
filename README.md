@@ -78,6 +78,9 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
+| `BING_SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | Bing search strategy: request only, request then Playwright fallback, or force Playwright |
+| `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Whether Playwright Chromium runs in headless mode |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing result waits |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool |
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | Valid MCP tool name | Custom name for the Linux.do article fetch tool |
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | Valid MCP tool name | Custom name for the CSDN article fetch tool |
@@ -90,9 +93,26 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 # Enable proxy for restricted regions
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
 
+# Request first, then fallback to Playwright if available
+BING_SEARCH_MODE=auto npx open-websearch@latest
+
+# Force request-only Bing search
+BING_SEARCH_MODE=request npx open-websearch@latest
+
 # Full configuration
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
 ```
+
+If you want browser-enhanced fallback, install Playwright yourself:
+```bash
+npm install playwright
+npx playwright install chromium
+```
+
+Mode behavior:
+- `request`: only uses request-based Bing scraping
+- `auto`: tries request first, and only falls back to Playwright when request fails and Playwright + Chromium are available
+- `playwright`: forces Playwright and errors if Playwright or Chromium are unavailable
 
 ### Local Installation
 
