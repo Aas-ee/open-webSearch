@@ -25,15 +25,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.2",
-    "@types/axios": "^0.14.4",
     "@types/cheerio": "^0.22.35",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
-    "express": "^4.18.2",
+    "express": "^4.22.1",
     "https-proxy-agent": "^7.0.6",
     "jsdom": "^26.1.0",
-    "npx": "^10.2.2",
     "zod": "^3.25.76"
   },
   "devDependencies": {
