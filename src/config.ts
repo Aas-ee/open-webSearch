@@ -10,6 +10,11 @@ export interface AppConfig {
     proxyUrl?: string;
     useProxy: boolean;
     // Playwright configuration
+    playwrightPackage: 'auto' | 'playwright' | 'playwright-core';
+    playwrightModulePath?: string;
+    playwrightExecutablePath?: string;
+    playwrightWsEndpoint?: string;
+    playwrightCdpEndpoint?: string;
     playwrightHeadless: boolean;
     playwrightNavigationTimeoutMs: number;
     // CORS configuration
@@ -17,6 +22,11 @@ export interface AppConfig {
     corsOrigin: string;
     // Server configuration (determined by MODE env var: 'both', 'http', or 'stdio')
     enableHttpServer: boolean;
+}
+
+function readOptionalEnv(name: string): string | undefined {
+    const value = process.env[name]?.trim();
+    return value ? value : undefined;
 }
 
 // Read from environment variables or use defaults
@@ -31,6 +41,11 @@ export const config: AppConfig = {
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:10809',
     useProxy: process.env.USE_PROXY === 'true',
+    playwrightPackage: (process.env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
+    playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),
+    playwrightExecutablePath: readOptionalEnv('PLAYWRIGHT_EXECUTABLE_PATH'),
+    playwrightWsEndpoint: readOptionalEnv('PLAYWRIGHT_WS_ENDPOINT'),
+    playwrightCdpEndpoint: readOptionalEnv('PLAYWRIGHT_CDP_ENDPOINT'),
     playwrightHeadless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
     playwrightNavigationTimeoutMs: Number(process.env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS || 20000),
     // CORS configuration
@@ -44,6 +59,7 @@ export const config: AppConfig = {
 // Valid search engines list
 const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'linuxdo', 'juejin'];
 const validBingSearchModes = ['request', 'auto', 'playwright'];
+const validPlaywrightPackages = ['auto', 'playwright', 'playwright-core'];
 
 // Validate default search engine
 if (!validSearchEngines.includes(config.defaultSearchEngine)) {
@@ -56,9 +72,22 @@ if (!validBingSearchModes.includes(config.bingSearchMode)) {
     config.bingSearchMode = 'request';
 }
 
+if (!validPlaywrightPackages.includes(config.playwrightPackage)) {
+    console.warn(`Invalid PLAYWRIGHT_PACKAGE: "${config.playwrightPackage}", falling back to "auto"`);
+    config.playwrightPackage = 'auto';
+}
+
 if (!Number.isFinite(config.playwrightNavigationTimeoutMs) || config.playwrightNavigationTimeoutMs <= 0) {
     console.warn(`Invalid PLAYWRIGHT_NAVIGATION_TIMEOUT_MS: "${process.env.PLAYWRIGHT_NAVIGATION_TIMEOUT_MS}", falling back to 20000`);
     config.playwrightNavigationTimeoutMs = 20000;
+}
+
+if (config.playwrightWsEndpoint && config.playwrightCdpEndpoint) {
+    console.warn('Both PLAYWRIGHT_WS_ENDPOINT and PLAYWRIGHT_CDP_ENDPOINT are set, PLAYWRIGHT_WS_ENDPOINT will take precedence');
+}
+
+if ((config.playwrightWsEndpoint || config.playwrightCdpEndpoint) && config.playwrightExecutablePath) {
+    console.warn('PLAYWRIGHT_EXECUTABLE_PATH is ignored when connecting to a remote browser endpoint');
 }
 
 // Validate allowed search engines
@@ -98,6 +127,17 @@ if (config.useProxy) {
     console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
 }
 
+console.error(`🧭 Playwright client source: ${config.playwrightPackage}`);
+if (config.playwrightModulePath) {
+    console.error(`🧭 Playwright module path override: ${config.playwrightModulePath}`);
+}
+if (config.playwrightWsEndpoint) {
+    console.error(`🧭 Playwright remote endpoint (ws): ${config.playwrightWsEndpoint}`);
+} else if (config.playwrightCdpEndpoint) {
+    console.error(`🧭 Playwright remote endpoint (cdp): ${config.playwrightCdpEndpoint}`);
+} else if (config.playwrightExecutablePath) {
+    console.error(`🧭 Playwright executable path: ${config.playwrightExecutablePath}`);
+}
 console.error(`🧭 Playwright headless: ${config.playwrightHeadless}`);
 console.error(`🧭 Playwright navigation timeout: ${config.playwrightNavigationTimeoutMs}ms`);
 

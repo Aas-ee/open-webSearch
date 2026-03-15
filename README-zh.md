@@ -168,6 +168,11 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
 | `BING_SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | Bing 搜索策略：仅请求、请求失败后回退 Playwright、或强制 Playwright |
+| `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | 启用浏览器模式时优先解析哪种 Playwright 客户端包 |
+| `PLAYWRIGHT_MODULE_PATH` | 空 | 绝对路径或相对项目根目录路径 | 复用当前项目外部已经存在的 Playwright 客户端包 |
+| `PLAYWRIGHT_EXECUTABLE_PATH` | 空 | 任意有效浏览器二进制路径 | 使用现有 Chromium/Chrome 可执行文件启动浏览器 |
+| `PLAYWRIGHT_WS_ENDPOINT` | 空 | 有效的 Playwright `ws://` / `wss://` 地址 | 连接现有远端 Playwright 浏览器服务 |
+| `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 有效的 Chromium CDP 地址 | 通过 CDP 连接现有 Chromium 实例 |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Playwright Chromium 是否以无头模式运行 |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 正整数 | Playwright 页面导航和 Bing 结果等待超时时间 |
 | `MCP_TOOL_SEARCH_NAME` | `search` | 有效的MCP工具名称 | 搜索工具的自定义名称 |
@@ -192,16 +197,41 @@ BING_SEARCH_MODE=request npx open-websearch@latest
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
 ```
 
-如果你希望启用浏览器增强兜底，请自行安装 Playwright：
+浏览器增强 Bing 兜底现在是显式启用，不随发行包默认安装。你可以按下面几种方式手动启用：
+
+1. 本地完整安装 Playwright：
 ```bash
 npm install playwright
 npx playwright install chromium
+BING_SEARCH_MODE=auto npx open-websearch@latest
+```
+
+2. 只安装精简客户端并复用现有浏览器：
+```bash
+npm install playwright-core
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium BING_SEARCH_MODE=auto npx open-websearch@latest
+```
+
+3. 复用机器上其他位置已经安装好的 Playwright 包：
+```bash
+PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright BING_SEARCH_MODE=playwright npx open-websearch@latest
+```
+
+4. 连接现有远端浏览器：
+```bash
+npm install playwright-core
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ BING_SEARCH_MODE=auto npx open-websearch@latest
 ```
 
 模式说明：
 - `request`：只使用请求方式抓 Bing
-- `auto`：先走请求，只有请求失败且本地已安装 Playwright + Chromium 时才回退到 Playwright
-- `playwright`：强制使用 Playwright；如果本地未安装 Playwright 或 Chromium，会直接报错
+- `auto`：先走请求，只有请求失败且手动可访问的 Playwright 客户端和浏览器可用时才回退到 Playwright
+- `playwright`：强制使用 Playwright；如果配置的 Playwright 客户端或浏览器目标不可用，会直接报错
+
+补充说明：
+- `PLAYWRIGHT_MODULE_PATH` 优先级高于 `PLAYWRIGHT_PACKAGE`
+- `PLAYWRIGHT_WS_ENDPOINT` 优先级高于 `PLAYWRIGHT_CDP_ENDPOINT`
+- 使用远端端点时，会忽略 `PLAYWRIGHT_EXECUTABLE_PATH` 和本地启动代理参数
 
 **Windows 用户注意事项：**
 - 在 PowerShell 中使用 `$env:VAR="value"; ` 语法
@@ -214,6 +244,7 @@ npx playwright install chromium
 ```bash
 npm install
 ```
+   这里只会安装核心 MCP 服务依赖，浏览器兜底能力仍然需要你手动安装或连接 Playwright 客户端。
 3. 构建服务器：
 ```bash
 npm run build

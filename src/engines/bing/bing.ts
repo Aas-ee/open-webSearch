@@ -1,6 +1,8 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { createRequire } from 'module';
+import path from 'path';
 import { config, getProxyUrl } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
@@ -41,6 +43,30 @@ const BOT_DETECTION_KEYWORDS = [
     '验证码',
     '人机验证'
 ];
+const BROWSER_CONTEXT_OPTIONS = {
+    userAgent: BROWSER_USER_AGENT,
+    locale: 'zh-CN',
+    viewport: { width: 1920, height: 1080 },
+    deviceScaleFactor: 1,
+    colorScheme: 'light'
+};
+const PLAYWRIGHT_CONNECT_TIMEOUT_MS = Math.max(config.playwrightNavigationTimeoutMs, 30000);
+const require = createRequire(import.meta.url);
+
+type PlaywrightChromium = {
+    launch(options?: any): Promise<any>;
+    connect(options: { wsEndpoint: string; timeout?: number; headers?: Record<string, string> }): Promise<any>;
+    connectOverCDP(endpoint: string, options?: any): Promise<any>;
+};
+
+type PlaywrightModule = {
+    chromium: PlaywrightChromium;
+};
+
+type PlaywrightBrowserSession = {
+    browser: any;
+    close(): Promise<void>;
+};
 
 function buildBingSearchUrl(query: string, pageNumber: number): string {
     const url = new URL(BING_BASE_URL);
@@ -123,8 +149,9 @@ function buildPlaywrightProxy(): { server: string; username?: string; password?:
     }
 }
 
-let playwrightModulePromise: Promise<{ chromium: any } | null> | null = null;
+let playwrightModulePromise: Promise<PlaywrightModule | null> | null = null;
 let playwrightAvailabilityPromise: Promise<boolean> | null = null;
+let playwrightModuleSource: string | null = null;
 
 function randomDelay(minMs: number, maxMs: number): number {
     return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
@@ -316,20 +343,173 @@ async function setupAntiDetection(page: any): Promise<void> {
     });
 }
 
-async function createPlaywrightPage(browser: any): Promise<{ context: any; page: any }> {
-    const context = await browser.newContext({
-        userAgent: BROWSER_USER_AGENT,
-        locale: 'zh-CN',
-        viewport: { width: 1920, height: 1080 },
-        deviceScaleFactor: 1,
-        colorScheme: 'light'
-    });
-    const page = await context.newPage();
+async function preparePlaywrightPage(page: any): Promise<void> {
     await setupAntiDetection(page);
+    if (typeof page.setViewportSize === 'function') {
+        await page.setViewportSize(BROWSER_CONTEXT_OPTIONS.viewport).catch(() => undefined);
+    }
     await page.setExtraHTTPHeaders({
         'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
     });
-    return { context, page };
+}
+
+async function createPlaywrightPage(browser: any): Promise<{ context: any | null; page: any; closePageContext(): Promise<void> }> {
+    if (typeof browser.newContext === 'function') {
+        const context = await browser.newContext(BROWSER_CONTEXT_OPTIONS);
+        const page = await context.newPage();
+        await preparePlaywrightPage(page);
+        return {
+            context,
+            page,
+            closePageContext: async () => {
+                await context.close().catch(() => undefined);
+            }
+        };
+    }
+
+    if (typeof browser.contexts === 'function') {
+        const contexts = browser.contexts();
+        if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
+            const page = await contexts[0].newPage();
+            await preparePlaywrightPage(page);
+            return {
+                context: contexts[0],
+                page,
+                closePageContext: async () => {
+                    await page.close().catch(() => undefined);
+                }
+            };
+        }
+    }
+
+    if (typeof browser.newPage === 'function') {
+        const page = await browser.newPage();
+        await preparePlaywrightPage(page);
+        return {
+            context: null,
+            page,
+            closePageContext: async () => {
+                await page.close().catch(() => undefined);
+            }
+        };
+    }
+
+    throw new Error('Connected Playwright browser does not support creating a page');
+}
+
+function normalizeLoadedPlaywrightModule(loaded: any): PlaywrightModule | null {
+    if (loaded?.chromium) {
+        return loaded as PlaywrightModule;
+    }
+    if (loaded?.default?.chromium) {
+        return loaded.default as PlaywrightModule;
+    }
+    return null;
+}
+
+function getPlaywrightModuleCandidates(): Array<{ label: string; specifier: string }> {
+    const candidates: Array<{ label: string; specifier: string }> = [];
+    const seenSpecifiers = new Set<string>();
+
+    const pushCandidate = (label: string, specifier: string) => {
+        if (seenSpecifiers.has(specifier)) {
+            return;
+        }
+        seenSpecifiers.add(specifier);
+        candidates.push({ label, specifier });
+    };
+
+    if (config.playwrightModulePath) {
+        const resolvedModulePath = path.isAbsolute(config.playwrightModulePath)
+            ? config.playwrightModulePath
+            : path.resolve(process.cwd(), config.playwrightModulePath);
+        pushCandidate(`PLAYWRIGHT_MODULE_PATH (${resolvedModulePath})`, resolvedModulePath);
+    }
+
+    if (config.playwrightPackage === 'auto') {
+        pushCandidate('playwright package', 'playwright');
+        pushCandidate('playwright-core package', 'playwright-core');
+    } else {
+        pushCandidate(`${config.playwrightPackage} package`, config.playwrightPackage);
+    }
+
+    return candidates;
+}
+
+async function loadPlaywright(): Promise<PlaywrightModule | null> {
+    if (!playwrightModulePromise) {
+        playwrightModulePromise = (async () => {
+            const attempts: string[] = [];
+
+            for (const candidate of getPlaywrightModuleCandidates()) {
+                try {
+                    const loaded = require(candidate.specifier);
+                    const normalized = normalizeLoadedPlaywrightModule(loaded);
+                    if (!normalized) {
+                        attempts.push(`${candidate.label}: loaded module does not expose chromium`);
+                        continue;
+                    }
+
+                    playwrightModuleSource = candidate.label;
+                    console.error(`🧭 Playwright client resolved from ${candidate.label}`);
+                    return normalized;
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    attempts.push(`${candidate.label}: ${message}`);
+                }
+            }
+
+            console.warn([
+                'Playwright client is unavailable, falling back to HTTP Bing search.',
+                'Install `playwright` or `playwright-core`, or expose an existing client with PLAYWRIGHT_MODULE_PATH.',
+                `Attempts: ${attempts.join(' | ')}`
+            ].join(' '));
+            return null;
+        })();
+    }
+
+    return playwrightModulePromise;
+}
+
+async function openPlaywrightBrowser(playwright: PlaywrightModule, headless: boolean): Promise<PlaywrightBrowserSession> {
+    if (config.playwrightWsEndpoint) {
+        const browser = await playwright.chromium.connect({
+            wsEndpoint: config.playwrightWsEndpoint,
+            timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
+        });
+        return {
+            browser,
+            close: async () => {
+                await browser.close().catch(() => undefined);
+            }
+        };
+    }
+
+    if (config.playwrightCdpEndpoint) {
+        const browser = await playwright.chromium.connectOverCDP(config.playwrightCdpEndpoint, {
+            timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
+        });
+        return {
+            browser,
+            close: async () => {
+                await browser.close().catch(() => undefined);
+            }
+        };
+    }
+
+    const browser = await playwright.chromium.launch({
+        headless,
+        proxy: buildPlaywrightProxy(),
+        args: buildBrowserLaunchArgs(),
+        executablePath: config.playwrightExecutablePath
+    });
+
+    return {
+        browser,
+        close: async () => {
+            await browser.close().catch(() => undefined);
+        }
+    };
 }
 
 async function openBingAndSearch(page: any, query: string): Promise<void> {
@@ -387,19 +567,6 @@ async function goToNextResultsPage(page: any): Promise<boolean> {
     return false;
 }
 
-async function loadPlaywright(): Promise<{ chromium: any } | null> {
-    if (!playwrightModulePromise) {
-        playwrightModulePromise = import('playwright')
-            .then((module) => ({ chromium: module.chromium }))
-            .catch((error) => {
-                console.warn('Playwright is not installed, falling back to HTTP Bing search:', error);
-                return null;
-            });
-    }
-
-    return playwrightModulePromise;
-}
-
 async function isPlaywrightAvailable(): Promise<boolean> {
     if (!playwrightAvailabilityPromise) {
         playwrightAvailabilityPromise = (async () => {
@@ -409,15 +576,11 @@ async function isPlaywrightAvailable(): Promise<boolean> {
             }
 
             try {
-                const browser = await playwright.chromium.launch({
-                    headless: true,
-                    proxy: buildPlaywrightProxy(),
-                    args: buildBrowserLaunchArgs()
-                });
-                await browser.close();
+                const session = await openPlaywrightBrowser(playwright, true);
+                await session.close();
                 return true;
             } catch (error) {
-                console.warn('Playwright Chromium is unavailable, auto fallback will stay disabled:', error);
+                console.warn(`Playwright browser is unavailable${playwrightModuleSource ? ` via ${playwrightModuleSource}` : ''}, auto fallback will stay disabled:`, error);
                 return false;
             }
         })();
@@ -459,63 +622,62 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
 async function searchBingWithPlaywright(query: string, limit: number): Promise<SearchResult[]> {
     const playwright = await loadPlaywright();
     if (!playwright) {
-        throw new Error('Playwright package is not installed');
+        throw new Error('Playwright client is not available. Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.');
     }
 
-    const browser = await playwright.chromium.launch({
-        headless: config.playwrightHeadless,
-        proxy: buildPlaywrightProxy(),
-        args: buildBrowserLaunchArgs()
-    });
+    const session = await openPlaywrightBrowser(playwright, config.playwrightHeadless);
 
     try {
-        const { context, page } = await createPlaywrightPage(browser);
+        const { page, closePageContext } = await createPlaywrightPage(session.browser);
 
-        const allResults: SearchResult[] = [];
-        const seenUrls = new Set<string>();
+        try {
+            const allResults: SearchResult[] = [];
+            const seenUrls = new Set<string>();
 
-        for (let pageNumber = 0; allResults.length < limit; pageNumber += 1) {
-            if (pageNumber === 0) {
-                console.error(`🔎 Bing Playwright interactive search: ${query}`);
-                await openBingAndSearch(page, query);
-            } else {
-                const moved = await goToNextResultsPage(page);
-                if (!moved) {
-                    console.error('⚠️ No next page button found in Playwright mode, ending early.');
+            for (let pageNumber = 0; allResults.length < limit; pageNumber += 1) {
+                if (pageNumber === 0) {
+                    console.error(`🔎 Bing Playwright interactive search: ${query}`);
+                    await openBingAndSearch(page, query);
+                } else {
+                    const moved = await goToNextResultsPage(page);
+                    if (!moved) {
+                        console.error('⚠️ No next page button found in Playwright mode, ending early.');
+                        break;
+                    }
+                }
+
+                const html = await page.content();
+                const pageState = analyzeBlockedPage(html);
+                if (pageState.blocked) {
+                    throw new Error(`Bing returned a verification or anti-bot page in Playwright mode (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`);
+                }
+                if (pageState.hasResults && pageState.detectedKeywords.length > 0) {
+                    console.warn(`Playwright Bing page contains suspicious keywords but also has results, skipping block detection: ${pageState.detectedKeywords.join(', ')}`);
+                }
+
+                const pageResults = parseBingSearchResults(html, limit - allResults.length)
+                    .filter((result) => {
+                        if (seenUrls.has(result.url)) {
+                            return false;
+                        }
+                        seenUrls.add(result.url);
+                        return true;
+                    });
+
+                allResults.push(...pageResults);
+
+                if (pageResults.length === 0) {
+                    console.error('⚠️ No more Bing results from Playwright mode, ending early.');
                     break;
                 }
             }
 
-            const html = await page.content();
-            const pageState = analyzeBlockedPage(html);
-            if (pageState.blocked) {
-                throw new Error(`Bing returned a verification or anti-bot page in Playwright mode (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`);
-            }
-            if (pageState.hasResults && pageState.detectedKeywords.length > 0) {
-                console.warn(`Playwright Bing page contains suspicious keywords but also has results, skipping block detection: ${pageState.detectedKeywords.join(', ')}`);
-            }
-
-            const pageResults = parseBingSearchResults(html, limit - allResults.length)
-                .filter((result) => {
-                    if (seenUrls.has(result.url)) {
-                        return false;
-                    }
-                    seenUrls.add(result.url);
-                    return true;
-                });
-
-            allResults.push(...pageResults);
-
-            if (pageResults.length === 0) {
-                console.error('⚠️ No more Bing results from Playwright mode, ending early.');
-                break;
-            }
+            return allResults.slice(0, limit);
+        } finally {
+            await closePageContext();
         }
-
-        await context.close();
-        return allResults.slice(0, limit);
     } finally {
-        await browser.close();
+        await session.close();
     }
 }
 

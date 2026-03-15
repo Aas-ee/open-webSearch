@@ -79,6 +79,11 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PORT` | `3000`                  | 1-65535 | Server port |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
 | `BING_SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | Bing search strategy: request only, request then Playwright fallback, or force Playwright |
+| `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |
+| `PLAYWRIGHT_MODULE_PATH` | empty | Absolute path or project-relative path | Reuse an existing Playwright client package outside this project |
+| `PLAYWRIGHT_EXECUTABLE_PATH` | empty | Any valid browser binary path | Launch an existing Chromium/Chrome executable without installing bundled browsers |
+| `PLAYWRIGHT_WS_ENDPOINT` | empty | Valid Playwright `ws://` / `wss://` endpoint | Connect to an existing remote Playwright browser server |
+| `PLAYWRIGHT_CDP_ENDPOINT` | empty | Valid Chromium CDP endpoint | Connect to an existing Chromium instance over CDP |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Whether Playwright Chromium runs in headless mode |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing result waits |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool |
@@ -103,16 +108,41 @@ BING_SEARCH_MODE=request npx open-websearch@latest
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
 ```
 
-If you want browser-enhanced fallback, install Playwright yourself:
+Browser-enhanced Bing fallback is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
+
+1. Full local Playwright install:
 ```bash
 npm install playwright
 npx playwright install chromium
+BING_SEARCH_MODE=auto npx open-websearch@latest
+```
+
+2. Reuse an existing browser binary with a slim client:
+```bash
+npm install playwright-core
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium BING_SEARCH_MODE=auto npx open-websearch@latest
+```
+
+3. Reuse a Playwright package that already exists elsewhere on the machine:
+```bash
+PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright BING_SEARCH_MODE=playwright npx open-websearch@latest
+```
+
+4. Connect to an existing remote browser:
+```bash
+npm install playwright-core
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ BING_SEARCH_MODE=auto npx open-websearch@latest
 ```
 
 Mode behavior:
 - `request`: only uses request-based Bing scraping
-- `auto`: tries request first, and only falls back to Playwright when request fails and Playwright + Chromium are available
-- `playwright`: forces Playwright and errors if Playwright or Chromium are unavailable
+- `auto`: tries request first, and only falls back to Playwright when request fails and a manually accessible Playwright client + browser are available
+- `playwright`: forces Playwright and errors if the configured Playwright client or browser target is unavailable
+
+Notes:
+- `PLAYWRIGHT_MODULE_PATH` takes precedence over `PLAYWRIGHT_PACKAGE`
+- `PLAYWRIGHT_WS_ENDPOINT` takes precedence over `PLAYWRIGHT_CDP_ENDPOINT`
+- Remote endpoints ignore `PLAYWRIGHT_EXECUTABLE_PATH` and local proxy launch flags
 
 ### Local Installation
 
@@ -121,6 +151,7 @@ Mode behavior:
 ```bash
 npm install
 ```
+   This installs the core MCP server only. Browser fallback remains optional until you install or connect a Playwright client yourself.
 3. Build the server:
 ```bash
 npm run build
