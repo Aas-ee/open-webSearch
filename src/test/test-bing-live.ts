@@ -9,7 +9,8 @@ function parseArgs(argv: string[]): CliArgs {
     const parsed: CliArgs = {
         query: 'openclaw',
         limit: 20,
-        previewChars: 140
+        previewChars: 140,
+        mode: "auto"
     };
 
     for (const arg of argv) {
@@ -42,7 +43,7 @@ async function main(): Promise<void> {
     if (args.mode) {
         process.env.BING_SEARCH_MODE = args.mode;
         if (args.mode === 'auto' || args.mode === 'playwright') {
-            process.env.PLAYWRIGHT_HEADLESS = 'true';
+            process.env.PLAYWRIGHT_HEADLESS = 'false';
         }
     }
 
