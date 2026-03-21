@@ -39,7 +39,7 @@ export const config: AppConfig = {
         [],
     bingSearchMode: (process.env.BING_SEARCH_MODE as AppConfig['bingSearchMode']) || 'request',
     // Proxy configuration
-    proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:10809',
+    proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',
     playwrightPackage: (process.env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
     playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),
