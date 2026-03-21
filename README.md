@@ -143,6 +143,7 @@ Notes:
 - `PLAYWRIGHT_MODULE_PATH` takes precedence over `PLAYWRIGHT_PACKAGE`
 - `PLAYWRIGHT_WS_ENDPOINT` takes precedence over `PLAYWRIGHT_CDP_ENDPOINT`
 - Remote endpoints ignore `PLAYWRIGHT_EXECUTABLE_PATH` and local proxy launch flags
+- When Playwright is available, blocked CSDN/Zhihu article fetches and generic web fetches can also retry with browser-acquired cookies
 
 ### Local Installation
 

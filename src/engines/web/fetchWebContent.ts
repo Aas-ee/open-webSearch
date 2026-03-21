@@ -3,12 +3,18 @@ import * as cheerio from 'cheerio';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { getProxyUrl } from '../../config.js';
 import { assertPublicHttpUrl } from '../../utils/urlSafety.js';
+import {
+    fetchPageHtmlWithBrowser,
+    getBrowserCookieHeader,
+    looksLikeBotChallengePage
+} from '../../utils/browserCookies.js';
 
 export interface FetchWebContentResult {
     url: string;
     finalUrl: string;
     contentType: string;
     title: string;
+    retrievalMethod: 'request' | 'request-with-browser-cookies' | 'browser-html';
     truncated: boolean;
     content: string;
 }
@@ -18,6 +24,13 @@ const DEFAULT_MAX_CHARS = 30000;
 const MIN_MAX_CHARS = 1000;
 const MAX_MAX_CHARS = 200000;
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
+const MIN_METADATA_FALLBACK_CHARS = 200;
+
+type HtmlExtractionResult = {
+    title: string;
+    text: string;
+    mode: 'container' | 'body' | 'metadata';
+};
 
 function normalizeText(text: string): string {
     return text
@@ -46,7 +59,9 @@ function isMarkdownContentType(contentType: string): boolean {
     return ct.includes('text/markdown') || ct.includes('application/markdown') || ct.includes('text/x-markdown');
 }
 
-function extractMainTextFromHtml(html: string): { title: string; text: string } {
+let browserHtmlFetcher: typeof fetchPageHtmlWithBrowser = fetchPageHtmlWithBrowser;
+
+function extractMainTextFromHtml(html: string): HtmlExtractionResult {
     const $ = cheerio.load(html);
     const title = $('title').first().text().trim();
     const metaDescription = $('meta[name="description"]').attr('content')?.trim() ||
@@ -67,6 +82,7 @@ function extractMainTextFromHtml(html: string): { title: string; text: string } 
     ];
 
     let selectedText = '';
+    let mode: HtmlExtractionResult['mode'] = 'metadata';
     for (const selector of preferredContainers) {
         const container = $(selector).first();
         if (container.length === 0) {
@@ -76,6 +92,7 @@ function extractMainTextFromHtml(html: string): { title: string; text: string } 
         const candidate = normalizeText(container.text());
         if (candidate.length >= 120) {
             selectedText = candidate;
+            mode = 'container';
             break;
         }
     }
@@ -83,22 +100,28 @@ function extractMainTextFromHtml(html: string): { title: string; text: string } 
     if (!selectedText) {
         const body = $('body');
         selectedText = normalizeText((body.length > 0 ? body : $.root()).text());
+        if (selectedText) {
+            mode = 'body';
+        }
     }
 
     // SPA pages often render content by JS and leave body nearly empty.
     // Fall back to metadata so callers still get useful page info.
     if (!selectedText) {
         selectedText = normalizeText([title, metaDescription].filter(Boolean).join('\n\n'));
+        mode = 'metadata';
     }
 
-    return { title, text: selectedText };
+    return { title, text: selectedText, mode };
 }
 
-export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MAX_CHARS): Promise<FetchWebContentResult> {
-    const parsedUrl = new URL(url);
-    assertPublicHttpUrl(parsedUrl, 'Request URL');
-
+function buildRequestOptions(cookieHeader?: string): any {
     const effectiveProxyUrl = getProxyUrl();
+    const headers: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+        'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+    };
     const requestOptions: any = {
         timeout: DEFAULT_TIMEOUT_MS,
         maxRedirects: 5,
@@ -106,18 +129,84 @@ export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MA
         maxContentLength: MAX_DOWNLOAD_BYTES,
         maxBodyLength: MAX_DOWNLOAD_BYTES,
         decompress: true,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-            'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-        }
+        headers
     };
+
+    if (cookieHeader) {
+        headers.Cookie = cookieHeader;
+    }
 
     if (effectiveProxyUrl) {
         const proxyAgent = new HttpsProxyAgent(effectiveProxyUrl);
         requestOptions.httpAgent = proxyAgent;
         requestOptions.httpsAgent = proxyAgent;
     }
+
+    return requestOptions;
+}
+
+function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extraction?: HtmlExtractionResult): boolean {
+    if (looksLikeBotChallengePage(raw)) {
+        return true;
+    }
+
+    if (contentType.includes('text/html') || looksLikeHtml(raw)) {
+        return extraction?.mode === 'metadata' && extraction.text.length < MIN_METADATA_FALLBACK_CHARS;
+    }
+
+    return false;
+}
+
+async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string } | undefined> {
+    try {
+        const browserPage = await browserHtmlFetcher(url);
+        assertPublicHttpUrl(browserPage.finalUrl, 'Final URL');
+
+        return {
+            contentType: 'text/html; charset=utf-8',
+            finalUrl: browserPage.finalUrl,
+            raw: browserPage.html,
+            title: browserPage.title
+        };
+    } catch {
+        return undefined;
+    }
+}
+
+export function __setBrowserHtmlFetcherForTests(fetcher?: typeof fetchPageHtmlWithBrowser): void {
+    browserHtmlFetcher = fetcher || fetchPageHtmlWithBrowser;
+}
+
+async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: any; usedBrowserCookies: boolean }> {
+    let cookieHeader: string | undefined;
+    try {
+        cookieHeader = await getBrowserCookieHeader(url);
+    } catch {
+        return { response: undefined, usedBrowserCookies: false };
+    }
+
+    if (!cookieHeader) {
+        return { response: undefined, usedBrowserCookies: false };
+    }
+
+    try {
+        return {
+            response: await axios.get(url, buildRequestOptions(cookieHeader)),
+            usedBrowserCookies: true
+        };
+    } catch {
+        return {
+            response: undefined,
+            usedBrowserCookies: true
+        };
+    }
+}
+
+export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MAX_CHARS): Promise<FetchWebContentResult> {
+    const parsedUrl = new URL(url);
+    assertPublicHttpUrl(parsedUrl, 'Request URL');
+
+    const requestOptions = buildRequestOptions();
 
     // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
     try {
@@ -143,32 +232,87 @@ export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MA
         }
     }
 
-    const response = await axios.get(parsedUrl.toString(), requestOptions);
-    const contentType = String(response.headers['content-type'] || '').toLowerCase();
-    const finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
+    let response: any;
+    let usedBrowserCookies = false;
+    let retrievalMethod: FetchWebContentResult['retrievalMethod'] = 'request';
+
+    try {
+        response = await axios.get(parsedUrl.toString(), requestOptions);
+    } catch (error: any) {
+        const status = error?.response?.status;
+        if (![401, 403, 429].includes(status)) {
+            throw error;
+        }
+
+        const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
+        if (cookieRetry.response) {
+            response = cookieRetry.response;
+            usedBrowserCookies = cookieRetry.usedBrowserCookies;
+            retrievalMethod = 'request-with-browser-cookies';
+        } else {
+            response = {
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+                data: '',
+                request: { res: { responseUrl: parsedUrl.toString() } }
+            };
+        }
+    }
+
+    let contentType = String(response.headers['content-type'] || '').toLowerCase();
+    let finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
     assertPublicHttpUrl(finalUrl, 'Final URL');
+    let raw = typeof response.data === 'string'
+        ? response.data
+        : JSON.stringify(response.data, null, 2);
+
+    if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
+        const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
+        if (cookieRetry.response) {
+            response = cookieRetry.response;
+            usedBrowserCookies = true;
+            retrievalMethod = 'request-with-browser-cookies';
+            contentType = String(response.headers['content-type'] || '').toLowerCase();
+            finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
+            assertPublicHttpUrl(finalUrl, 'Final URL');
+            raw = typeof response.data === 'string'
+                ? response.data
+                : JSON.stringify(response.data, null, 2);
+        }
+    }
+
     const contentLength = Number(response.headers['content-length']);
     if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
         throw new Error(`Response body too large (${contentLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
     }
-    const raw = typeof response.data === 'string'
-        ? response.data
-        : JSON.stringify(response.data, null, 2);
 
     let title = '';
     let extractedContent = '';
+    let htmlExtraction: HtmlExtractionResult | undefined;
 
     // Keep raw markdown behavior for explicit markdown paths.
     if (isMarkdownPath(parsedUrl)) {
         extractedContent = normalizeText(raw);
     } else if (contentType.includes('text/html') || looksLikeHtml(raw)) {
-        const parsed = extractMainTextFromHtml(raw);
-        title = parsed.title;
-        extractedContent = parsed.text;
+        htmlExtraction = extractMainTextFromHtml(raw);
+        title = htmlExtraction.title;
+        extractedContent = htmlExtraction.text;
     } else if (isMarkdownContentType(contentType)) {
         extractedContent = normalizeText(raw);
     } else {
         extractedContent = normalizeText(raw);
+    }
+
+    if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
+        const browserResult = await fetchHtmlViaBrowser(parsedUrl.toString());
+        if (browserResult) {
+            contentType = browserResult.contentType;
+            finalUrl = browserResult.finalUrl;
+            raw = browserResult.raw;
+            retrievalMethod = 'browser-html';
+            htmlExtraction = extractMainTextFromHtml(raw);
+            title = htmlExtraction.title || browserResult.title;
+            extractedContent = htmlExtraction.text;
+        }
     }
 
     if (!extractedContent) {
@@ -186,6 +330,7 @@ export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MA
         finalUrl,
         contentType: contentType || 'unknown',
         title,
+        retrievalMethod,
         truncated,
         content
     };

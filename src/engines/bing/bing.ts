@@ -1,11 +1,10 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import { createRequire } from 'module';
-import path from 'path';
 import { config, getProxyUrl } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
+import { getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
 
 const BING_BASE_URL = 'https://cn.bing.com/search';
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
@@ -49,23 +48,6 @@ const BROWSER_CONTEXT_OPTIONS = {
     viewport: { width: 1920, height: 1080 },
     deviceScaleFactor: 1,
     colorScheme: 'light'
-};
-const PLAYWRIGHT_CONNECT_TIMEOUT_MS = Math.max(config.playwrightNavigationTimeoutMs, 30000);
-const require = createRequire(import.meta.url);
-
-type PlaywrightChromium = {
-    launch(options?: any): Promise<any>;
-    connect(options: { wsEndpoint: string; timeout?: number; headers?: Record<string, string> }): Promise<any>;
-    connectOverCDP(endpoint: string, options?: any): Promise<any>;
-};
-
-type PlaywrightModule = {
-    chromium: PlaywrightChromium;
-};
-
-type PlaywrightBrowserSession = {
-    browser: any;
-    close(): Promise<void>;
 };
 
 function buildBingSearchUrl(query: string, pageNumber: number): string {
@@ -130,28 +112,7 @@ function buildAxiosRequestOptions(): any {
     return requestOptions;
 }
 
-function buildPlaywrightProxy(): { server: string; username?: string; password?: string } | undefined {
-    const effectiveProxyUrl = getProxyUrl();
-    if (!effectiveProxyUrl) {
-        return undefined;
-    }
-
-    try {
-        const proxyUrl = new URL(effectiveProxyUrl);
-        return {
-            server: `${proxyUrl.protocol}//${proxyUrl.hostname}${proxyUrl.port ? `:${proxyUrl.port}` : ''}`,
-            username: proxyUrl.username ? decodeURIComponent(proxyUrl.username) : undefined,
-            password: proxyUrl.password ? decodeURIComponent(proxyUrl.password) : undefined
-        };
-    } catch (error) {
-        console.warn('Invalid proxy URL for Playwright, falling back without browser proxy:', error);
-        return undefined;
-    }
-}
-
-let playwrightModulePromise: Promise<PlaywrightModule | null> | null = null;
 let playwrightAvailabilityPromise: Promise<boolean> | null = null;
-let playwrightModuleSource: string | null = null;
 
 function randomDelay(minMs: number, maxMs: number): number {
     return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
@@ -397,121 +358,6 @@ async function createPlaywrightPage(browser: any): Promise<{ context: any | null
     throw new Error('Connected Playwright browser does not support creating a page');
 }
 
-function normalizeLoadedPlaywrightModule(loaded: any): PlaywrightModule | null {
-    if (loaded?.chromium) {
-        return loaded as PlaywrightModule;
-    }
-    if (loaded?.default?.chromium) {
-        return loaded.default as PlaywrightModule;
-    }
-    return null;
-}
-
-function getPlaywrightModuleCandidates(): Array<{ label: string; specifier: string }> {
-    const candidates: Array<{ label: string; specifier: string }> = [];
-    const seenSpecifiers = new Set<string>();
-
-    const pushCandidate = (label: string, specifier: string) => {
-        if (seenSpecifiers.has(specifier)) {
-            return;
-        }
-        seenSpecifiers.add(specifier);
-        candidates.push({ label, specifier });
-    };
-
-    if (config.playwrightModulePath) {
-        const resolvedModulePath = path.isAbsolute(config.playwrightModulePath)
-            ? config.playwrightModulePath
-            : path.resolve(process.cwd(), config.playwrightModulePath);
-        pushCandidate(`PLAYWRIGHT_MODULE_PATH (${resolvedModulePath})`, resolvedModulePath);
-    }
-
-    if (config.playwrightPackage === 'auto') {
-        pushCandidate('playwright package', 'playwright');
-        pushCandidate('playwright-core package', 'playwright-core');
-    } else {
-        pushCandidate(`${config.playwrightPackage} package`, config.playwrightPackage);
-    }
-
-    return candidates;
-}
-
-async function loadPlaywright(): Promise<PlaywrightModule | null> {
-    if (!playwrightModulePromise) {
-        playwrightModulePromise = (async () => {
-            const attempts: string[] = [];
-
-            for (const candidate of getPlaywrightModuleCandidates()) {
-                try {
-                    const loaded = require(candidate.specifier);
-                    const normalized = normalizeLoadedPlaywrightModule(loaded);
-                    if (!normalized) {
-                        attempts.push(`${candidate.label}: loaded module does not expose chromium`);
-                        continue;
-                    }
-
-                    playwrightModuleSource = candidate.label;
-                    console.error(`🧭 Playwright client resolved from ${candidate.label}`);
-                    return normalized;
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    attempts.push(`${candidate.label}: ${message}`);
-                }
-            }
-
-            console.warn([
-                'Playwright client is unavailable, falling back to HTTP Bing search.',
-                'Install `playwright` or `playwright-core`, or expose an existing client with PLAYWRIGHT_MODULE_PATH.',
-                `Attempts: ${attempts.join(' | ')}`
-            ].join(' '));
-            return null;
-        })();
-    }
-
-    return playwrightModulePromise;
-}
-
-async function openPlaywrightBrowser(playwright: PlaywrightModule, headless: boolean): Promise<PlaywrightBrowserSession> {
-    if (config.playwrightWsEndpoint) {
-        const browser = await playwright.chromium.connect({
-            wsEndpoint: config.playwrightWsEndpoint,
-            timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
-        });
-        return {
-            browser,
-            close: async () => {
-                await browser.close().catch(() => undefined);
-            }
-        };
-    }
-
-    if (config.playwrightCdpEndpoint) {
-        const browser = await playwright.chromium.connectOverCDP(config.playwrightCdpEndpoint, {
-            timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
-        });
-        return {
-            browser,
-            close: async () => {
-                await browser.close().catch(() => undefined);
-            }
-        };
-    }
-
-    const browser = await playwright.chromium.launch({
-        headless,
-        proxy: buildPlaywrightProxy(),
-        args: buildBrowserLaunchArgs(),
-        executablePath: config.playwrightExecutablePath
-    });
-
-    return {
-        browser,
-        close: async () => {
-            await browser.close().catch(() => undefined);
-        }
-    };
-}
-
 async function openBingAndSearch(page: any, query: string): Promise<void> {
     await page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 10000 });
     await waitRandom(page, 500, 1100);
@@ -570,16 +416,17 @@ async function goToNextResultsPage(page: any): Promise<boolean> {
 async function isPlaywrightAvailable(): Promise<boolean> {
     if (!playwrightAvailabilityPromise) {
         playwrightAvailabilityPromise = (async () => {
-            const playwright = await loadPlaywright();
+            const playwright = await loadPlaywrightClient();
             if (!playwright) {
                 return false;
             }
 
             try {
-                const session = await openPlaywrightBrowser(playwright, true);
+                const session = await openPlaywrightBrowser(true, buildBrowserLaunchArgs());
                 await session.close();
                 return true;
             } catch (error) {
+                const playwrightModuleSource = getPlaywrightModuleSource();
                 console.warn(`Playwright browser is unavailable${playwrightModuleSource ? ` via ${playwrightModuleSource}` : ''}, auto fallback will stay disabled:`, error);
                 return false;
             }
@@ -620,12 +467,12 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
 }
 
 async function searchBingWithPlaywright(query: string, limit: number): Promise<SearchResult[]> {
-    const playwright = await loadPlaywright();
+    const playwright = await loadPlaywrightClient();
     if (!playwright) {
         throw new Error('Playwright client is not available. Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.');
     }
 
-    const session = await openPlaywrightBrowser(playwright, config.playwrightHeadless);
+    const session = await openPlaywrightBrowser(config.playwrightHeadless, buildBrowserLaunchArgs());
 
     try {
         const { page, closePageContext } = await createPlaywrightPage(session.browser);

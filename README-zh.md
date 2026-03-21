@@ -232,6 +232,7 @@ PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ B
 - `PLAYWRIGHT_MODULE_PATH` 优先级高于 `PLAYWRIGHT_PACKAGE`
 - `PLAYWRIGHT_WS_ENDPOINT` 优先级高于 `PLAYWRIGHT_CDP_ENDPOINT`
 - 使用远端端点时，会忽略 `PLAYWRIGHT_EXECUTABLE_PATH` 和本地启动代理参数
+- 当 Playwright 可用时，CSDN/知乎文章抓取以及通用网页抓取在遇到拦截页时也会尝试复用浏览器拿到的 cookie 进行重试
 
 **Windows 用户注意事项：**
 - 在 PowerShell 中使用 `$env:VAR="value"; ` 语法
