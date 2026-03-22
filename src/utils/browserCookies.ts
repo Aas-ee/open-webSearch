@@ -114,7 +114,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
         return cached.cookieHeader;
     }
 
-    const playwright = await loadPlaywrightClient();
+    const playwright = await loadPlaywrightClient({ silent: true });
     if (!playwright) {
         return undefined;
     }
@@ -153,7 +153,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
 }
 
 export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string }> {
-    const playwright = await loadPlaywrightClient();
+    const playwright = await loadPlaywrightClient({ silent: true });
     if (!playwright) {
         throw new Error('Playwright client is not available for browser HTML fetch');
     }

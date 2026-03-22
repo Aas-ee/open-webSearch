@@ -20,8 +20,14 @@ export type PlaywrightBrowserSession = {
     close(): Promise<void>;
 };
 
+type LoadPlaywrightClientOptions = {
+    silent?: boolean;
+};
+
 let playwrightModulePromise: Promise<PlaywrightModule | null> | null = null;
 let playwrightModuleSource: string | null = null;
+let playwrightUnavailableMessage: string | null = null;
+let hasEmittedPlaywrightUnavailableWarning = false;
 
 function buildPlaywrightProxy(): { server: string; username?: string; password?: string } | undefined {
     const effectiveProxyUrl = getProxyUrl();
@@ -85,7 +91,16 @@ export function getPlaywrightModuleSource(): string | null {
     return playwrightModuleSource;
 }
 
-export async function loadPlaywrightClient(): Promise<PlaywrightModule | null> {
+function emitPlaywrightUnavailableWarning(options?: LoadPlaywrightClientOptions): void {
+    if (options?.silent || !playwrightUnavailableMessage || hasEmittedPlaywrightUnavailableWarning) {
+        return;
+    }
+
+    hasEmittedPlaywrightUnavailableWarning = true;
+    console.warn(playwrightUnavailableMessage);
+}
+
+export async function loadPlaywrightClient(options?: LoadPlaywrightClientOptions): Promise<PlaywrightModule | null> {
     if (!playwrightModulePromise) {
         playwrightModulePromise = (async () => {
             const attempts: string[] = [];
@@ -100,6 +115,8 @@ export async function loadPlaywrightClient(): Promise<PlaywrightModule | null> {
                     }
 
                     playwrightModuleSource = candidate.label;
+                    playwrightUnavailableMessage = null;
+                    hasEmittedPlaywrightUnavailableWarning = false;
                     console.error(`🧭 Playwright client resolved from ${candidate.label}`);
                     return normalized;
                 } catch (error) {
@@ -108,16 +125,20 @@ export async function loadPlaywrightClient(): Promise<PlaywrightModule | null> {
                 }
             }
 
-            console.warn([
+            playwrightUnavailableMessage = [
                 'Playwright client is unavailable, falling back to HTTP-only behavior.',
                 'Install `playwright` or `playwright-core`, or expose an existing client with PLAYWRIGHT_MODULE_PATH.',
                 `Attempts: ${attempts.join(' | ')}`
-            ].join(' '));
+            ].join(' ');
             return null;
         })();
     }
 
-    return playwrightModulePromise;
+    const playwright = await playwrightModulePromise;
+    if (!playwright) {
+        emitPlaywrightUnavailableWarning(options);
+    }
+    return playwright;
 }
 
 export async function openPlaywrightBrowser(headless: boolean, launchArgs: string[] = []): Promise<PlaywrightBrowserSession> {

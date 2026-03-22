@@ -421,7 +421,7 @@ async function isPlaywrightAvailable(): Promise<boolean> {
 
     if (!playwrightAvailabilityPromise) {
         playwrightAvailabilityPromise = (async () => {
-            const playwright = await loadPlaywrightClient();
+            const playwright = await loadPlaywrightClient({ silent: true });
             if (!playwright) {
                 return false;
             }
