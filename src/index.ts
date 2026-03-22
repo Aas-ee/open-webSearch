@@ -10,19 +10,33 @@ import { randomUUID } from "node:crypto";
 import cors from 'cors';
 import {config} from "./config.js";
 
-async function main() {
-  // Create MCP server
+type StreamableSession = {
+  server: McpServer;
+  transport: StreamableHTTPServerTransport;
+  closed: boolean;
+};
+
+type SseSession = {
+  server: McpServer;
+  transport: SSEServerTransport;
+  closed: boolean;
+};
+
+function createServer(): McpServer {
   const server = new McpServer({
     name: 'web-search',
     version: '1.2.0'
   });
 
-  // Set up server tools
   setupTools(server);
+  return server;
+}
 
+async function main() {
   // Enable STDIO mode if MODE is 'both' or 'stdio' or not specified
   if (process.env.MODE === undefined || process.env.MODE === 'both' || process.env.MODE === 'stdio') {
     console.error('🔌 Starting STDIO transport...');
+    const server = createServer();
     const stdioTransport = new StdioServerTransport();
     await server.connect(stdioTransport).then(() => {
       console.error('✅ STDIO transport enabled');
@@ -49,8 +63,8 @@ async function main() {
 
     // Store transports for each session type
     const transports = {
-      streamable: {} as Record<string, StreamableHTTPServerTransport>,
-      sse: {} as Record<string, SSEServerTransport>
+      streamable: {} as Record<string, StreamableSession>,
+      sse: {} as Record<string, SseSession>
     };
 
     // Handle POST requests for client-to-server communication
@@ -61,14 +75,17 @@ async function main() {
 
       if (sessionId && transports.streamable[sessionId]) {
         // Reuse existing transport
-        transport = transports.streamable[sessionId];
+        transport = transports.streamable[sessionId].transport;
       } else if (!sessionId && isInitializeRequest(req.body)) {
         // New initialization request
+        const server = createServer();
+        const session = {} as StreamableSession;
+
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sessionId) => {
             // Store the transport by session ID
-            transports.streamable[sessionId] = transport;
+            transports.streamable[sessionId] = session;
           },
           // DNS rebinding protection is disabled by default for backwards compatibility. If you are running this server
           // locally, make sure to set:
@@ -76,15 +93,36 @@ async function main() {
           // allowedHosts: ['127.0.0.1'],
         });
 
+        session.server = server;
+        session.transport = transport;
+        session.closed = false;
+
         // Clean up transport when closed
         transport.onclose = () => {
-          if (transport.sessionId) {
+          if (transport.sessionId && transports.streamable[transport.sessionId] === session) {
             delete transports.streamable[transport.sessionId];
           }
+
+          if (session.closed) {
+            return;
+          }
+
+          session.closed = true;
+          void server.close().catch(error => {
+            console.error('❌ Failed to close streamable MCP server:', error);
+          });
         };
 
         // Connect to the MCP server
-        await server.connect(transport);
+        try {
+          await server.connect(transport);
+        } catch (error) {
+          session.closed = true;
+          void server.close().catch(closeError => {
+            console.error('❌ Failed to close streamable MCP server after connect error:', closeError);
+          });
+          throw error;
+        }
       } else {
         // Invalid request
         res.status(400).json({
@@ -111,7 +149,7 @@ async function main() {
       }
 
       const transport = transports.streamable[sessionId];
-      await transport.handleRequest(req, res);
+      await transport.transport.handleRequest(req, res);
     };
 
     // Handle GET requests for server-to-client notifications via SSE
@@ -124,21 +162,48 @@ async function main() {
     app.get('/sse', async (req, res) => {
       // Create SSE transport for legacy clients
       const transport = new SSEServerTransport('/messages', res);
-      transports.sse[transport.sessionId] = transport;
+      const server = createServer();
+      const session: SseSession = {
+        server,
+        transport,
+        closed: false
+      };
 
-      res.on("close", () => {
+      transports.sse[transport.sessionId] = session;
+
+      transport.onclose = () => {
+        if (transports.sse[transport.sessionId] === session) {
+          delete transports.sse[transport.sessionId];
+        }
+
+        if (session.closed) {
+          return;
+        }
+
+        session.closed = true;
+        void server.close().catch(error => {
+          console.error('❌ Failed to close SSE MCP server:', error);
+        });
+      };
+
+      try {
+        await server.connect(transport);
+      } catch (error) {
         delete transports.sse[transport.sessionId];
-      });
-
-      await server.connect(transport);
+        session.closed = true;
+        void server.close().catch(closeError => {
+          console.error('❌ Failed to close SSE MCP server after connect error:', closeError);
+        });
+        throw error;
+      }
     });
 
     // Legacy message endpoint for older clients
     app.post('/messages', async (req, res) => {
       const sessionId = req.query.sessionId as string;
-      const transport = transports.sse[sessionId];
-      if (transport) {
-        await transport.handlePostMessage(req, res, req.body);
+      const session = transports.sse[sessionId];
+      if (session) {
+        await session.transport.handlePostMessage(req, res, req.body);
       } else {
         res.status(400).send('No transport found for sessionId');
       }
