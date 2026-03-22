@@ -8,7 +8,7 @@ type CliArgs = {
 
 const DEFAULT_URLS: Record<SupportedEngine, string> = {
     csdn: 'https://blog.csdn.net/weixin_45801664/article/details/149000138',
-    zhihu: 'https://zhuanlan.zhihu.com/p/1906730696836350163'
+    zhihu: 'https://zhuanlan.zhihu.com/p/1922711555658744918'
 };
 
 function parseArgs(argv: string[]): CliArgs {
