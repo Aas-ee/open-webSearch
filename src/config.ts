@@ -4,8 +4,9 @@ export interface AppConfig {
     defaultSearchEngine: 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'linuxdo'  | 'juejin';
     // List of allowed search engines (if empty, all engines are available)
     allowedSearchEngines: string[];
-    // Bing search mode: request only, auto request then fallback, or force Playwright
-    bingSearchMode: 'request' | 'auto' | 'playwright';
+    // Search mode: request only, auto request then fallback, or force Playwright
+    // Currently only affects Bing.
+    searchMode: 'request' | 'auto' | 'playwright';
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
@@ -37,7 +38,7 @@ export const config: AppConfig = {
     allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?
         process.env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
         [],
-    bingSearchMode: (process.env.BING_SEARCH_MODE as AppConfig['bingSearchMode']) || 'request',
+    searchMode: (process.env.SEARCH_MODE as AppConfig['searchMode']) || 'request',
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',
@@ -58,7 +59,7 @@ export const config: AppConfig = {
 
 // Valid search engines list
 const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'linuxdo', 'juejin'];
-const validBingSearchModes = ['request', 'auto', 'playwright'];
+const validSearchModes = ['request', 'auto', 'playwright'];
 const validPlaywrightPackages = ['auto', 'playwright', 'playwright-core'];
 
 // Validate default search engine
@@ -67,9 +68,9 @@ if (!validSearchEngines.includes(config.defaultSearchEngine)) {
     config.defaultSearchEngine = 'bing';
 }
 
-if (!validBingSearchModes.includes(config.bingSearchMode)) {
-    console.warn(`Invalid BING_SEARCH_MODE: "${config.bingSearchMode}", falling back to "request"`);
-    config.bingSearchMode = 'request';
+if (!validSearchModes.includes(config.searchMode)) {
+    console.warn(`Invalid SEARCH_MODE: "${config.searchMode}", falling back to "request"`);
+    config.searchMode = 'request';
 }
 
 if (!validPlaywrightPackages.includes(config.playwrightPackage)) {
@@ -119,7 +120,7 @@ if (config.allowedSearchEngines.length > 0) {
 } else {
     console.error(`🔍 No search engine restrictions, all available engines can be used`);
 }
-console.error(`🔍 Bing search mode: ${config.bingSearchMode.toUpperCase()}`);
+console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()} (currently only affects Bing)`);
 
 if (config.useProxy) {
     console.error(`🌐 Using proxy: ${config.proxyUrl}`);

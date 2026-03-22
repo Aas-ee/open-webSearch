@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
 
     if (args.mode) {
-        process.env.BING_SEARCH_MODE = args.mode;
+        process.env.SEARCH_MODE = args.mode;
         if (args.mode === 'auto' || args.mode === 'playwright') {
             process.env.PLAYWRIGHT_HEADLESS = 'false';
         }
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     console.log('Live Bing test config:', {
         query: args.query,
         limit: args.limit,
-        mode: process.env.BING_SEARCH_MODE || '(default)',
+        mode: process.env.SEARCH_MODE || '(default)',
         previewChars: args.previewChars,
         useProxy: process.env.USE_PROXY || 'false',
         proxyUrl: process.env.PROXY_URL || '(default)'

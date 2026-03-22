@@ -167,7 +167,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
-| `BING_SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | Bing 搜索策略：仅请求、请求失败后回退 Playwright、或强制 Playwright |
+| `SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | 搜索策略，当前仅对 Bing 生效：仅请求、请求失败后回退 Playwright、或强制 Playwright |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | 启用浏览器模式时优先解析哪种 Playwright 客户端包 |
 | `PLAYWRIGHT_MODULE_PATH` | 空 | 绝对路径或相对项目根目录路径 | 复用当前项目外部已经存在的 Playwright 客户端包 |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | 空 | 任意有效浏览器二进制路径 | 使用现有 Chromium/Chrome 可执行文件启动浏览器 |
@@ -188,10 +188,10 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
 
 # 先走请求，失败后再回退到 Playwright（如果已安装）
-BING_SEARCH_MODE=auto npx open-websearch@latest
+SEARCH_MODE=auto npx open-websearch@latest
 
 # 强制仅使用请求模式
-BING_SEARCH_MODE=request npx open-websearch@latest
+SEARCH_MODE=request npx open-websearch@latest
 
 # 完整配置
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
@@ -203,24 +203,50 @@ DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http:
 ```bash
 npm install playwright
 npx playwright install chromium
-BING_SEARCH_MODE=auto npx open-websearch@latest
+SEARCH_MODE=auto npx open-websearch@latest
 ```
 
 2. 只安装精简客户端并复用现有浏览器：
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium BING_SEARCH_MODE=auto npx open-websearch@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx open-websearch@latest
 ```
 
 3. 复用机器上其他位置已经安装好的 Playwright 包：
 ```bash
-PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright BING_SEARCH_MODE=playwright npx open-websearch@latest
+PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright SEARCH_MODE=playwright npx open-websearch@latest
 ```
 
 4. 连接现有远端浏览器：
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ BING_SEARCH_MODE=auto npx open-websearch@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ SEARCH_MODE=auto npx open-websearch@latest
+```
+
+5. 通过 CDP 复用本地 Chrome/Chromium 会话：
+```bash
+npm install playwright-core
+
+# 先启动带调试端口的 Chrome/Chromium
+chrome --remote-debugging-port=9222 --user-data-dir=/tmp/open-websearch-chrome
+
+# 再通过 CDP 连接
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_CDP_ENDPOINT=http://127.0.0.1:9222 SEARCH_MODE=auto npx open-websearch@latest
+```
+如果你想复用自己已经登录过或已经过验证的浏览器会话，这通常是最实用的接入方式。
+
+Windows PowerShell 示例：
+```powershell
+npm install playwright-core
+
+& "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-port=9222 `
+  --user-data-dir="$env:TEMP\open-websearch-chrome"
+[types](src/types)
+$env:PLAYWRIGHT_PACKAGE="playwright-core"
+$env:PLAYWRIGHT_CDP_ENDPOINT="http://127.0.0.1:9222"
+$env:SEARCH_MODE="auto"
+npx open-websearch@latest
 ```
 
 模式说明：
@@ -233,6 +259,7 @@ PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ B
 - `PLAYWRIGHT_WS_ENDPOINT` 优先级高于 `PLAYWRIGHT_CDP_ENDPOINT`
 - 使用远端端点时，会忽略 `PLAYWRIGHT_EXECUTABLE_PATH` 和本地启动代理参数
 - 当 Playwright 可用时，CSDN/知乎文章抓取以及通用网页抓取在遇到拦截页时也会尝试复用浏览器拿到的 cookie 进行重试
+- 没有 Playwright 时，`fetchWebContent` 会停留在纯请求路径。公开页面通常仍可抓取，但依赖浏览器 cookie 或浏览器渲染 HTML 的页面可能失败。
 
 **Windows 用户注意事项：**
 - 在 PowerShell 中使用 `$env:VAR="value"; ` 语法

@@ -78,7 +78,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
-| `BING_SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | Bing search strategy: request only, request then Playwright fallback, or force Playwright |
+| `SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: request only, request then Playwright fallback, or force Playwright |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |
 | `PLAYWRIGHT_MODULE_PATH` | empty | Absolute path or project-relative path | Reuse an existing Playwright client package outside this project |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | empty | Any valid browser binary path | Launch an existing Chromium/Chrome executable without installing bundled browsers |
@@ -99,10 +99,10 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
 
 # Request first, then fallback to Playwright if available
-BING_SEARCH_MODE=auto npx open-websearch@latest
+SEARCH_MODE=auto npx open-websearch@latest
 
 # Force request-only Bing search
-BING_SEARCH_MODE=request npx open-websearch@latest
+SEARCH_MODE=request npx open-websearch@latest
 
 # Full configuration
 DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 PORT=8080 npx open-websearch@latest
@@ -114,24 +114,50 @@ Browser-enhanced Bing fallback is opt-in. The published package does not bundle 
 ```bash
 npm install playwright
 npx playwright install chromium
-BING_SEARCH_MODE=auto npx open-websearch@latest
+SEARCH_MODE=auto npx open-websearch@latest
 ```
 
 2. Reuse an existing browser binary with a slim client:
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium BING_SEARCH_MODE=auto npx open-websearch@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium SEARCH_MODE=auto npx open-websearch@latest
 ```
 
 3. Reuse a Playwright package that already exists elsewhere on the machine:
 ```bash
-PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright BING_SEARCH_MODE=playwright npx open-websearch@latest
+PLAYWRIGHT_MODULE_PATH=/absolute/path/to/node_modules/playwright SEARCH_MODE=playwright npx open-websearch@latest
 ```
 
 4. Connect to an existing remote browser:
 ```bash
 npm install playwright-core
-PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ BING_SEARCH_MODE=auto npx open-websearch@latest
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_WS_ENDPOINT=ws://127.0.0.1:3000/ SEARCH_MODE=auto npx open-websearch@latest
+```
+
+5. Reuse a local Chrome/Chromium session over CDP:
+```bash
+npm install playwright-core
+
+# Start Chrome/Chromium with a debugging port first
+chrome --remote-debugging-port=9222 --user-data-dir=/tmp/open-websearch-chrome
+
+# Then connect through CDP
+PLAYWRIGHT_PACKAGE=playwright-core PLAYWRIGHT_CDP_ENDPOINT=http://127.0.0.1:9222 SEARCH_MODE=auto npx open-websearch@latest
+```
+This is the most practical setup when you want to reuse your own logged-in or previously verified browser session.
+
+Windows PowerShell example:
+```powershell
+npm install playwright-core
+
+& "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-port=9222 `
+  --user-data-dir="$env:TEMP\open-websearch-chrome"
+
+$env:PLAYWRIGHT_PACKAGE="playwright-core"
+$env:PLAYWRIGHT_CDP_ENDPOINT="http://127.0.0.1:9222"
+$env:SEARCH_MODE="auto"
+npx open-websearch@latest
 ```
 
 Mode behavior:
@@ -144,6 +170,7 @@ Notes:
 - `PLAYWRIGHT_WS_ENDPOINT` takes precedence over `PLAYWRIGHT_CDP_ENDPOINT`
 - Remote endpoints ignore `PLAYWRIGHT_EXECUTABLE_PATH` and local proxy launch flags
 - When Playwright is available, blocked CSDN/Zhihu article fetches and generic web fetches can also retry with browser-acquired cookies
+- Without Playwright, `fetchWebContent` stays on the request-only path. Public pages can still work, but pages that require browser cookies or browser-rendered HTML may fail.
 
 ### Local Installation
 

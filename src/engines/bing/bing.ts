@@ -113,6 +113,7 @@ function buildAxiosRequestOptions(): any {
 }
 
 let playwrightAvailabilityPromise: Promise<boolean> | null = null;
+let hasVerifiedPlaywrightAvailability = false;
 
 function randomDelay(minMs: number, maxMs: number): number {
     return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
@@ -414,6 +415,10 @@ async function goToNextResultsPage(page: any): Promise<boolean> {
 }
 
 async function isPlaywrightAvailable(): Promise<boolean> {
+    if (hasVerifiedPlaywrightAvailability) {
+        return true;
+    }
+
     if (!playwrightAvailabilityPromise) {
         playwrightAvailabilityPromise = (async () => {
             const playwright = await loadPlaywrightClient();
@@ -424,13 +429,18 @@ async function isPlaywrightAvailable(): Promise<boolean> {
             try {
                 const session = await openPlaywrightBrowser(true, buildBrowserLaunchArgs());
                 await session.close();
+                hasVerifiedPlaywrightAvailability = true;
                 return true;
             } catch (error) {
                 const playwrightModuleSource = getPlaywrightModuleSource();
-                console.warn(`Playwright browser is unavailable${playwrightModuleSource ? ` via ${playwrightModuleSource}` : ''}, auto fallback will stay disabled:`, error);
+                console.warn(`Playwright browser is unavailable${playwrightModuleSource ? ` via ${playwrightModuleSource}` : ''}, auto fallback will retry on the next blocked request:`, error);
                 return false;
             }
-        })();
+        })().finally(() => {
+            if (!hasVerifiedPlaywrightAvailability) {
+                playwrightAvailabilityPromise = null;
+            }
+        });
     }
 
     return playwrightAvailabilityPromise;
@@ -529,11 +539,11 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
 }
 
 export async function searchBing(query: string, limit: number): Promise<SearchResult[]> {
-    if (config.bingSearchMode === 'request') {
+    if (config.searchMode === 'request') {
         return searchBingWithHttp(query, limit);
     }
 
-    if (config.bingSearchMode === 'playwright') {
+    if (config.searchMode === 'playwright') {
         return searchBingWithPlaywright(query, limit);
     }
 
