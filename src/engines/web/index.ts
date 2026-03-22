@@ -1,1 +1,1 @@
-export { fetchWebContent } from './fetchWebContent.js';
+export { __setBrowserHtmlFetcherForTests, fetchWebContent } from './fetchWebContent.js';

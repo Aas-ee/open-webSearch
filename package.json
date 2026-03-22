@@ -18,10 +18,13 @@
     "test:stdio": "set MODE=stdio && node build/index.js",
     "test:http": "set MODE=http && node build/index.js",
     "test:both": "set MODE=both && node build/index.js",
+    "test:bing-parser": "tsc && node build/test/test-bing-parser.js",
     "test:engine-normalization": "tsc && node build/test/test-engine-normalization.js",
     "test:url-safety": "tsc && node build/test/test-url-safety.js",
     "test:web-content": "tsc && node build/test/test-web-content.js",
-    "test:web-content:live": "tsc && node build/test/test-web-content-live.js"
+    "test:web-content:live": "tsc && node build/test/test-web-content-live.js",
+    "test:bing:live": "tsc && node build/test/test-bing-live.js",
+    "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.2",

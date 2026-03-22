@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { fetchWebContent } from '../engines/web/index.js';
+import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
 
 type TestCase = {
     name: string;
@@ -8,8 +8,11 @@ type TestCase = {
 
 const originalAxiosGet = axios.get.bind(axios);
 const originalAxiosHead = axios.head.bind(axios);
+const requestAttempts = new Map<string, number>();
 
 function installAxiosMock(): void {
+    requestAttempts.clear();
+
     (axios as any).head = async (url: string) => {
         if (url.endsWith('/too-large.md')) {
             return {
@@ -30,6 +33,8 @@ function installAxiosMock(): void {
     };
 
     (axios as any).get = async (url: string) => {
+        requestAttempts.set(url, (requestAttempts.get(url) || 0) + 1);
+
         if (url.endsWith('/skill.md')) {
             return {
                 headers: { 'content-type': 'text/plain; charset=utf-8' },
@@ -86,6 +91,30 @@ function installAxiosMock(): void {
             };
         }
 
+        if (url.endsWith('/browser-spa')) {
+            return {
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+                data: `
+                <html>
+                  <head>
+                    <title>Browser SPA</title>
+                    <meta name="description" content="JS bootstrap shell">
+                  </head>
+                  <body>
+                    <div id="app"></div>
+                  </body>
+                </html>
+                `,
+                request: { res: { responseUrl: url } }
+            };
+        }
+
+        if (url.endsWith('/blocked-browser-spa')) {
+            const error = new Error('Request failed with status code 403') as Error & { response?: { status: number } };
+            error.response = { status: 403 };
+            throw error;
+        }
+
         throw new Error(`Unexpected mocked URL: ${url}`);
     };
 }
@@ -93,6 +122,7 @@ function installAxiosMock(): void {
 function restoreAxiosMock(): void {
     (axios as any).get = originalAxiosGet;
     (axios as any).head = originalAxiosHead;
+    __setBrowserHtmlFetcherForTests();
 }
 
 function assert(condition: unknown, message: string): void {
@@ -130,6 +160,7 @@ async function main(): Promise<void> {
             run: async () => {
                 const result = await fetchWebContent('https://example.com/page', 5000);
                 assert(result.title === 'Skill Page', 'html title should be extracted');
+                assert(result.retrievalMethod === 'request', 'plain html should use request mode');
                 assert(result.finalUrl.endsWith('/page?from=test'), 'finalUrl should follow redirect target');
                 assert(result.content.includes('Skill body content'), 'html content should be extracted');
             }
@@ -147,7 +178,59 @@ async function main(): Promise<void> {
             run: async () => {
                 const result = await fetchWebContent('https://example.com/spa', 5000);
                 assert(result.title === 'SPA Site', 'title should be extracted from html');
+                assert(result.retrievalMethod === 'request', 'metadata fallback should still report request mode');
                 assert(result.content.includes('Rendered by JS runtime'), 'meta description fallback should be used');
+            }
+        },
+        {
+            name: 'should fallback to browser html when html only contains shell metadata',
+            run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => ({
+                    html: `
+                    <html>
+                      <head><title>Browser SPA</title></head>
+                      <body>
+                        <main>
+                          <h1>Browser SPA</h1>
+                          <p>${'Rendered browser content '.repeat(12)}</p>
+                        </main>
+                      </body>
+                    </html>
+                    `,
+                    finalUrl: 'https://example.com/browser-spa?rendered=1',
+                    title: 'Browser SPA'
+                }));
+
+                const result = await fetchWebContent('https://example.com/browser-spa', 5000);
+                assert(result.title === 'Browser SPA', 'browser fallback title should be preserved');
+                assert(result.retrievalMethod === 'browser-html', 'browser html fallback should be reported');
+                assert(result.finalUrl.endsWith('rendered=1'), 'browser fallback finalUrl should be used');
+                assert(result.content.includes('Rendered browser content'), 'browser html content should replace shell metadata');
+            }
+        },
+        {
+            name: 'should fallback to browser html after cookie-assisted retry still fails',
+            run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => ({
+                    html: `
+                    <html>
+                      <head><title>Blocked Browser SPA</title></head>
+                      <body>
+                        <main>
+                          <h1>Blocked Browser SPA</h1>
+                          <p>${'Recovered after blocked request '.repeat(12)}</p>
+                        </main>
+                      </body>
+                    </html>
+                    `,
+                    finalUrl: 'https://example.com/blocked-browser-spa?rendered=1',
+                    title: 'Blocked Browser SPA'
+                }));
+
+                const result = await fetchWebContent('https://example.com/blocked-browser-spa', 5000);
+                assert(result.retrievalMethod === 'browser-html', 'blocked request should end in browser html fallback');
+                assert((requestAttempts.get('https://example.com/blocked-browser-spa') || 0) >= 1, 'blocked url should attempt request path first');
+                assert(result.content.includes('Recovered after blocked request'), 'browser fallback should recover readable content');
             }
         },
         {
