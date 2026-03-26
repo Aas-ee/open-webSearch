@@ -35,20 +35,32 @@ function createServer(): McpServer {
 
 /**
  * Check if a port is available
+ * Returns false if timeout (default 800ms) or port is in use
  */
-function isPortAvailable(port: number): Promise<boolean> {
+function isPortAvailable(port: number, timeoutMs: number = 800): Promise<boolean> {
   return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        tester.close(() => resolve(false));
+      }
+    }, timeoutMs);
+
     const tester = http.createServer();
     tester.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        resolve(false);
-      } else {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
         resolve(false);
       }
     });
     tester.once('listening', () => {
-      tester.close();
-      resolve(true);
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        tester.close(() => resolve(true));
+      }
     });
     tester.listen(port, '0.0.0.0');
   });
@@ -80,7 +92,7 @@ function checkExistingMcpService(port: number): Promise<{ running: boolean; name
         'Accept': 'application/json, text/event-stream',
         'Content-Length': Buffer.byteLength(postData)
       },
-      timeout: 3000
+      timeout: 1000
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
