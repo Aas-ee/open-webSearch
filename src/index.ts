@@ -9,6 +9,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import cors from 'cors';
 import {config} from "./config.js";
+import http from 'node:http';
 
 type StreamableSession = {
   server: McpServer;
@@ -30,6 +31,96 @@ function createServer(): McpServer {
 
   setupTools(server);
   return server;
+}
+
+/**
+ * Check if a port is available
+ */
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const tester = http.createServer();
+    tester.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(false);
+      } else {
+        resolve(false);
+      }
+    });
+    tester.once('listening', () => {
+      tester.close();
+      resolve(true);
+    });
+    tester.listen(port, '0.0.0.0');
+  });
+}
+
+/**
+ * Check if an existing MCP service is running on the port
+ */
+function checkExistingMcpService(port: number): Promise<{ running: boolean; name?: string; version?: string }> {
+  return new Promise((resolve) => {
+    const postData = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'port-checker', version: '1.0.0' }
+      }
+    });
+
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: '/mcp',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout: 3000
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          // Handle SSE format: "event: message\ndata: {...}"
+          let jsonStr = data;
+          if (data.includes('data: ')) {
+            const dataMatch = data.match(/data:\s*(\{.*\})/);
+            if (dataMatch) {
+              jsonStr = dataMatch[1];
+            }
+          }
+          const json = JSON.parse(jsonStr);
+          if (json.result?.serverInfo) {
+            resolve({
+              running: true,
+              name: json.result.serverInfo.name,
+              version: json.result.serverInfo.version
+            });
+          } else if (json.error) {
+            // Service is responding but returned an error (still a valid MCP service)
+            resolve({ running: true });
+          } else {
+            resolve({ running: true });
+          }
+        } catch {
+          resolve({ running: true });
+        }
+      });
+    });
+
+    req.on('error', () => resolve({ running: false }));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ running: false });
+    });
+    req.write(postData);
+    req.end();
+  });
 }
 
 async function main() {
@@ -212,9 +303,42 @@ async function main() {
     // Read the port number from the environment variable; use the default port 3000 if it is not set.
     const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-    app.listen(PORT, '0.0.0.0', () => {
-      console.error(`✅ HTTP server running on port ${PORT}`)
-    });
+    // Check if port is available
+    const portAvailable = await isPortAvailable(PORT);
+
+    if (!portAvailable) {
+      console.error(`⚠️ Port ${PORT} is already in use`);
+
+      // Check if there's an existing MCP service running
+      const existingService = await checkExistingMcpService(PORT);
+
+      if (existingService.running) {
+        if (existingService.name === 'web-search') {
+          console.error(`✅ Same MCP service (web-search v${existingService.version || 'unknown'}) is already running on port ${PORT}`);
+          console.error(`ℹ️ Skipping HTTP server startup - using existing service`);
+        } else {
+          console.error(`❌ A different MCP service "${existingService.name || 'unknown'}" is running on port ${PORT}`);
+          console.error(`💡 Use a different port by setting PORT environment variable`);
+        }
+      } else {
+        console.error(`❌ Port ${PORT} is occupied by a non-MCP service`);
+        console.error(`💡 Use a different port by setting PORT environment variable`);
+      }
+    } else {
+      // Port is available, start the server
+      const server = app.listen(PORT, '0.0.0.0', () => {
+        console.error(`✅ HTTP server running on port ${PORT}`);
+      });
+
+      // Handle server errors
+      server.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          console.error(`❌ Port ${PORT} became unavailable during startup`);
+        } else {
+          console.error(`❌ HTTP server error:`, err.message);
+        }
+      });
+    }
   } else {
     console.error('ℹ️ HTTP server disabled, running in STDIO mode only')
   }
