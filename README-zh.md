@@ -164,6 +164,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin` | 默认搜索引擎                               |
 | `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理                             |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL                             |
+| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验。只建议在目标站点证书链异常时临时使用 |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
@@ -186,6 +187,9 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 ```bash
 # 启用代理（适用于网络受限地区）
 USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 npx open-websearch@latest
+
+# 仅当目标网站证书链异常时使用
+FETCH_WEB_INSECURE_TLS=true npx open-websearch@latest
 
 # 先走请求，失败后再回退到 Playwright（如果已安装）
 SEARCH_MODE=auto npx open-websearch@latest
@@ -293,6 +297,37 @@ npm run build
   }
 }
 ```
+
+Windows 下的 NPX 配置：
+```json
+{
+  "mcpServers": {
+    "web-search": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "open-websearch@latest"
+      ],
+      "env": {
+        "MODE": "stdio",
+        "DEFAULT_SEARCH_ENGINE": "duckduckgo",
+        "SYSTEMROOT": "C:/Windows"
+      }
+    }
+  }
+}
+```
+
+代理与 TLS 说明：
+- open-websearch 现在会在内部显式关闭 Axios 对环境变量代理的自动读取，只走 `USE_PROXY` + `PROXY_URL` 这条显式代理路径。
+- 当 `USE_PROXY=true` 时，所有基于 Axios 的网络请求都会统一走配置的 `PROXY_URL` 路径，不再出现一部分请求直连、一部分请求读取环境变量代理的混合行为。
+- 如果 `PROXY_URL` 指向的是本地规则代理客户端，该客户端仍然可以自行决定哪些目标走 `DIRECT`、哪些目标走代理。
+- 如果 `PROXY_URL` 指向固定上游代理或固定出口，百度、CSDN、掘金、Linux.do、GitHub 这类对地区较敏感的站点表现可能会和之前不同。
+- 如果系统里已经设置了 `HTTP_PROXY` 或 `HTTPS_PROXY`，它们不再覆盖服务器内部请求行为。
+- Windows 上如果站点缺少中间证书，优先建议配置 `NODE_EXTRA_CA_CERTS`。
+- `FETCH_WEB_INSECURE_TLS=true` 只建议作为 `fetchWebContent` 的兜底方案使用，因为它会降低 TLS 校验强度。
 
 **VSCode版(Claude开发扩展):**
 ```json
