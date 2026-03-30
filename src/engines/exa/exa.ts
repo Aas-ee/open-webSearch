@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
-import { getProxyUrl } from "../../config.js";
-import { HttpsProxyAgent } from "https-proxy-agent";
+import { buildAxiosRequestOptions } from "../../utils/httpRequest.js";
 
 interface ExaResult {
     id: string;
@@ -12,10 +11,7 @@ interface ExaResult {
 }
 
 export async function searchExa(query: string, limit: number): Promise<SearchResult[]> {
-    const effectiveProxyUrl = getProxyUrl();
-
-    // Configure request options, no changes needed here
-    const requestOptions: any = {
+    const requestOptions = buildAxiosRequestOptions({
         headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
             "Connection": "keep-alive",
@@ -31,7 +27,7 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
             "sec-fetch-dest": "empty",
             "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
         }
-    };
+    });
 
     // The payload for the POST request
     const data = {
@@ -47,13 +43,6 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
         "fastMode": false,
         "rerankerType": "default"
     };
-
-    // If a proxy URL is provided, use it
-    if (effectiveProxyUrl) {
-        const proxyAgent = new HttpsProxyAgent(effectiveProxyUrl);
-        requestOptions.httpAgent = proxyAgent;
-        requestOptions.httpsAgent = proxyAgent;
-    }
 
     try {
         const response = await axios.post<{ results: ExaResult[] }>(

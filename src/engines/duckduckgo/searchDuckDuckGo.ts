@@ -1,8 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import {HttpsProxyAgent} from 'https-proxy-agent';
 import {SearchResult} from "../../types.js";
-import {getProxyUrl} from "../../config.js";
+import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
 
 
 /**
@@ -12,14 +11,9 @@ import {getProxyUrl} from "../../config.js";
  * @returns Array of search results
  */
 export async function searchDuckDuckGo(query: string, limit: number): Promise<SearchResult[]> {
-
-  // use the proxy from environment variables
-  const effectiveProxyUrl = getProxyUrl();
-
-
   // Try using the preloaded URL method
   try {
-    const results = await searchDuckDuckGoPreloadUrl(query, limit, effectiveProxyUrl);
+    const results = await searchDuckDuckGoPreloadUrl(query, limit);
     if (results.length > 0) {
       return results;
     }
@@ -27,19 +21,19 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
     console.warn('预加载URL方法失败，尝试HTML方法:', error);
   }
 
-  return await searchDuckDuckGoHtml(query, limit, effectiveProxyUrl);
+  return await searchDuckDuckGoHtml(query, limit);
   }
 
   /**
   * Extract preloaded d.js URL from DuckDuckGo search page and use it directly
   */
-  async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10, proxyUrl?: string): Promise<SearchResult[]> {
+  async function searchDuckDuckGoPreloadUrl(query: string, maxResults = 10): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
     let offset = 0;
 
     try {
       // Configure request options
-      const requestOptions: any = {
+      const requestOptions = buildAxiosRequestOptions({
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
           "Connection": "keep-alive",
@@ -56,14 +50,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
           "referer": "https://duckduckgo.com/",
           "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
         }
-      };
-
-      // If a proxy URL is provided, use it
-      if (proxyUrl) {
-        const proxyAgent = new HttpsProxyAgent(proxyUrl);
-        requestOptions.httpAgent = proxyAgent;
-        requestOptions.httpsAgent = proxyAgent;
-      }
+      });
 
       const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&t=h_&ia=web`;
       const response = await axios.get(searchUrl, requestOptions);
@@ -197,13 +184,13 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
     }
   }
 
-  async function searchDuckDuckGoHtml(query: string, maxResults = 10, proxyUrl?: string): Promise<SearchResult[]> {
+  async function searchDuckDuckGoHtml(query: string, maxResults = 10): Promise<SearchResult[]> {
   const requestUrl = 'https://html.duckduckgo.com/html/';
   const results: SearchResult[] = [];
   let offset = 0;
 
     // Configure request options
-    const requestOptions: any = {
+    const requestOptions = buildAxiosRequestOptions({
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
@@ -211,14 +198,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
       'Host': 'html.duckduckgo.com',
       'Connection': 'keep-alive'
     },
-  };
-
-    // If a proxy URL is provided, use it
-    if (proxyUrl) {
-    const proxyAgent = new HttpsProxyAgent(proxyUrl);
-    requestOptions.httpAgent = proxyAgent;
-    requestOptions.httpsAgent = proxyAgent;
-  }
+  });
 
   try {
     let response = await axios.post(

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 /**
  * GitHub README Fetcher - Extract repo info from URLs and fetch README content
@@ -57,12 +58,14 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
         console.error(`Fetching README from: ${apiUrl}`);
 
         const response = await axios.get(apiUrl, {
-            headers: {
-                'Accept': 'application/vnd.github.v3.raw',
-                'User-Agent': 'GitHub-README-Fetcher/1.0'
-            },
-            timeout: 10000,
-            validateStatus: (status) => status === 200
+            ...buildAxiosRequestOptions({
+                headers: {
+                    'Accept': 'application/vnd.github.v3.raw',
+                    'User-Agent': 'GitHub-README-Fetcher/1.0'
+                },
+                timeout: 10000,
+                validateStatus: (status) => status === 200
+            })
         });
 
         if (typeof response.data === 'string' && response.data.trim()) {

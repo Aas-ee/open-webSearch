@@ -1,8 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import { getProxyUrl } from '../../config.js';
 import { fetchPageHtmlWithBrowser, getBrowserCookieHeader, looksLikeBotChallengePage } from '../../utils/browserCookies.js';
+import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 function normalizeExtractedText(text: string): string {
     return text
@@ -30,17 +29,10 @@ function buildRequestOptions(url: string, cookieHeader?: string): any {
         'referer': url,
         'accept-language': 'zh-CN,zh;q=0.9'
     };
-    const effectiveProxyUrl = getProxyUrl();
-    const requestOptions: any = { headers };
+    const requestOptions = buildAxiosRequestOptions({ headers });
 
     if (cookieHeader) {
         headers.Cookie = cookieHeader;
-    }
-
-    if (effectiveProxyUrl) {
-        const proxyAgent = new HttpsProxyAgent(effectiveProxyUrl);
-        requestOptions.httpAgent = proxyAgent;
-        requestOptions.httpsAgent = proxyAgent;
     }
 
     return requestOptions;
