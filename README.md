@@ -15,6 +15,10 @@
 
 A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web search without API keys.
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/aas-ee-open-websearch).
+
 ## Features
 
 - Web search using multi-engine results
