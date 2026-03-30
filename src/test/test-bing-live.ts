@@ -7,7 +7,7 @@ type CliArgs = {
 
 function parseArgs(argv: string[]): CliArgs {
     const parsed: CliArgs = {
-        query: 'openclaw',
+        query: 'OpenClaw',
         limit: 20,
         previewChars: 140,
         mode: "auto"
