@@ -9,7 +9,10 @@ const README_CANDIDATES = [
     'README',
     'README.txt',
     'readme.md',
-    'readme'
+    'readme.mdx',
+    'readme.markdown',
+    'readme',
+    'readme.txt'
 ];
 
 /**
@@ -24,6 +27,8 @@ const README_CANDIDATES = [
  */
 function extractOwnerAndRepo(url: string): { owner: string; repo: string } | null {
     try {
+        const trimmedUrl = url.trim();
+
         // Regex patterns for HTTPS and SSH URLs
         const patterns = [
             /(?:https?:\/\/)?(?:www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+)/i,
@@ -31,7 +36,7 @@ function extractOwnerAndRepo(url: string): { owner: string; repo: string } | nul
         ];
 
         for (const pattern of patterns) {
-            const match = url.match(pattern);
+            const match = trimmedUrl.match(pattern);
             if (match) {
                 const [, owner, rawRepo] = match;
 
@@ -62,6 +67,8 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
         return null;
     }
 
+    let sawFetchFailure = false;
+
     for (const readmeFile of README_CANDIDATES) {
         const rawUrl = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/HEAD/${readmeFile}`;
 
@@ -85,17 +92,32 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
                 return response.data;
             }
 
+            sawFetchFailure = true;
             console.warn(`Empty or invalid README content for ${owner}/${repo} at ${readmeFile}`);
         } catch (error: any) {
-            if (error.code === 'ECONNABORTED') {
+            const isTimeout = error?.code === 'ECONNABORTED';
+            const status = typeof error?.response?.status === 'number' ? error.response.status : undefined;
+            const message = error instanceof Error ? error.message : String(error);
+
+            if (isTimeout) {
                 console.error(`Timeout fetching README for ${owner}/${repo} at ${readmeFile}`);
+            } else if (status !== undefined) {
+                console.error(`Failed to fetch README for ${owner}/${repo} at ${readmeFile} (HTTP ${status}):`, message);
             } else {
-                console.error(`Failed to fetch README for ${owner}/${repo} at ${readmeFile}:`, error.message);
+                console.error(`Network error fetching README for ${owner}/${repo} at ${readmeFile}:`, message);
             }
+
+            // Short-circuit on request failures that are unlikely to improve on later candidates.
+            return null;
         }
     }
 
-    console.warn(`README not found for ${owner}/${repo}`);
+    if (sawFetchFailure) {
+        console.warn(`Failed to fetch README for ${owner}/${repo}`);
+    } else {
+        console.warn(`README not found for ${owner}/${repo}`);
+    }
+
     return null;
 }
 
