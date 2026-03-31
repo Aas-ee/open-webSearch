@@ -132,15 +132,16 @@ const validateArticleUrl = (url: string, type: 'linuxdo' | 'csdn' | 'juejin'): b
 // 验证 GitHub URL
 const validateGithubUrl = (url: string): boolean => {
     try {
+        const trimmedUrl = url.trim();
 
-        const isSshGithub = /^git@github\.com:/.test(url);
+        const isSshGithub = /^git@github\.com:/.test(trimmedUrl);
 
         if (isSshGithub) {
             // SSH 格式: git@github.com:owner/repo.git
-            return /^git@github\.com:[^\/]+\/[^\/]+/.test(url);
+            return /^git@github\.com:[^\/]+\/[^\/]+/.test(trimmedUrl);
         }
 
-        const urlObj = new URL(url);
+        const urlObj = new URL(trimmedUrl);
 
         // 支持多种 GitHub URL 格式
         const isHttpsGithub = urlObj.hostname === 'github.com' || urlObj.hostname === 'www.github.com';

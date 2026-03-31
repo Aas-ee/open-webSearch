@@ -1,6 +1,21 @@
 import axios from 'axios';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
+// Avoid the GitHub README API here because anonymous API requests in this
+// environment hit rate limits quickly; raw URLs are more stable for this tool.
+const README_CANDIDATES = [
+    'README.md',
+    'README.mdx',
+    'README.markdown',
+    'README',
+    'README.txt',
+    'readme.md',
+    'readme.mdx',
+    'readme.markdown',
+    'readme',
+    'readme.txt'
+];
+
 /**
  * GitHub README Fetcher - Extract repo info from URLs and fetch README content
  */
@@ -13,7 +28,7 @@ import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
  */
 function extractOwnerAndRepo(url: string): { owner: string; repo: string } | null {
     try {
-        const normalizedUrl = url.trim().toLowerCase();
+        const trimmedUrl = url.trim();
 
         // Regex patterns for HTTPS and SSH URLs
         const patterns = [
@@ -22,7 +37,7 @@ function extractOwnerAndRepo(url: string): { owner: string; repo: string } | nul
         ];
 
         for (const pattern of patterns) {
-            const match = url.match(pattern);
+            const match = trimmedUrl.match(pattern);
             if (match) {
                 const [, owner, rawRepo] = match;
 
@@ -42,7 +57,7 @@ function extractOwnerAndRepo(url: string): { owner: string; repo: string } | nul
 }
 
 /**
- * Fetch README content from GitHub repository using API
+ * Fetch README content from GitHub repository raw URLs
  * @param owner Repository owner (username or org)
  * @param repo Repository name
  * @returns README content string or null if failed
@@ -53,37 +68,60 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
         return null;
     }
 
-    try {
-        const apiUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/readme`;
-        console.error(`Fetching README from: ${apiUrl}`);
+    let sawFetchFailure = false;
 
-        const response = await axios.get(apiUrl, {
-            ...buildAxiosRequestOptions({
-                headers: {
-                    'Accept': 'application/vnd.github.v3.raw',
-                    'User-Agent': 'GitHub-README-Fetcher/1.0'
-                },
-                timeout: 10000,
-                validateStatus: (status) => status === 200
-            })
-        });
+    for (const readmeFile of README_CANDIDATES) {
+        const rawUrl = `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/HEAD/${readmeFile}`;
 
-        if (typeof response.data === 'string' && response.data.trim()) {
-            return response.data;
-        } else {
-            console.warn(`Empty or invalid README content for ${owner}/${repo}`);
+        try {
+            console.error(`Fetching README from: ${rawUrl}`);
+
+            const response = await axios.get(rawUrl, {
+                ...buildAxiosRequestOptions({
+                    headers: {
+                        'User-Agent': 'GitHub-README-Fetcher/1.0'
+                    },
+                    timeout: 10000,
+                    responseType: 'text',
+                    validateStatus: (status) => status === 200 || status === 404
+                })
+            });
+
+            if (response.status === 404) {
+                continue;
+            }
+
+            if (typeof response.data === 'string' && response.data.trim()) {
+                return response.data;
+            }
+
+            sawFetchFailure = true;
+            console.warn(`Empty or invalid README content for ${owner}/${repo} at ${readmeFile}`);
+        } catch (error: any) {
+            const isTimeout = error?.code === 'ECONNABORTED';
+            const status = typeof error?.response?.status === 'number' ? error.response.status : undefined;
+            const message = error instanceof Error ? error.message : String(error);
+
+            if (isTimeout) {
+                console.error(`Timeout fetching README for ${owner}/${repo} at ${readmeFile}`);
+            } else if (status !== undefined) {
+                console.error(`Failed to fetch README for ${owner}/${repo} at ${readmeFile} (HTTP ${status}):`, message);
+            } else {
+                console.error(`Network error fetching README for ${owner}/${repo} at ${readmeFile}:`, message);
+            }
+
+            // Short-circuit on request failures that are unlikely to improve on later candidates.
             return null;
         }
-    } catch (error: any) {
-        if (error.response?.status === 404) {
-            console.warn(`README not found for ${owner}/${repo}`);
-        } else if (error.code === 'ECONNABORTED') {
-            console.error(`Timeout fetching README for ${owner}/${repo}`);
-        } else {
-            console.error(`Failed to fetch README for ${owner}/${repo}:`, error.message);
-        }
-        return null;
     }
+
+    if (sawFetchFailure) {
+        console.warn(`Failed to fetch README for ${owner}/${repo}`);
+    } else {
+        console.warn(`README not found for ${owner}/${repo}`);
+    }
+
+    return null;
 }
 
 /**
