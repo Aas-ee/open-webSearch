@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { JSDOM } from 'jsdom';
+import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 export async function fetchLinuxDoArticle(url: string): Promise<{ content: string }> {
     const match = url.match(/\/topic\/(\d+)/);
@@ -10,7 +11,7 @@ export async function fetchLinuxDoArticle(url: string): Promise<{ content: strin
     }
     const apiUrl = `https://linux.do/t/${topicId}.json`;
 
-    const response = await axios.get(apiUrl, {
+    const response = await axios.get(apiUrl, buildAxiosRequestOptions({
         headers: {
             'accept': 'application/json, text/javascript, */*; q=0.01',
             'accept-language': 'zh-CN,zh;q=0.9',
@@ -32,7 +33,7 @@ export async function fetchLinuxDoArticle(url: string): Promise<{ content: strin
             'Host': 'linux.do',
             'Connection': 'keep-alive'
         }
-    });
+    }));
 
     const cookedHtml = response.data?.post_stream?.posts?.[0]?.cooked || '';
     const dom = new JSDOM(cookedHtml);

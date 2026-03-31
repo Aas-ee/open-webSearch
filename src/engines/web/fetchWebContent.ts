@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import { getProxyUrl } from '../../config.js';
+import { config } from '../../config.js';
+import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl } from '../../utils/urlSafety.js';
 import {
     fetchPageHtmlWithBrowser,
@@ -116,30 +116,24 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
 }
 
 function buildRequestOptions(cookieHeader?: string): any {
-    const effectiveProxyUrl = getProxyUrl();
     const headers: Record<string, string> = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
         'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
     };
-    const requestOptions: any = {
-        timeout: DEFAULT_TIMEOUT_MS,
+    const requestOptions = buildAxiosRequestOptions({
+        allowInsecureTls: config.fetchWebAllowInsecureTls,
+        decompress: true,
+        headers,
+        maxBodyLength: MAX_DOWNLOAD_BYTES,
+        maxContentLength: MAX_DOWNLOAD_BYTES,
         maxRedirects: 5,
         responseType: 'text',
-        maxContentLength: MAX_DOWNLOAD_BYTES,
-        maxBodyLength: MAX_DOWNLOAD_BYTES,
-        decompress: true,
-        headers
-    };
+        timeout: DEFAULT_TIMEOUT_MS,
+    });
 
     if (cookieHeader) {
         headers.Cookie = cookieHeader;
-    }
-
-    if (effectiveProxyUrl) {
-        const proxyAgent = new HttpsProxyAgent(effectiveProxyUrl);
-        requestOptions.httpAgent = proxyAgent;
-        requestOptions.httpsAgent = proxyAgent;
     }
 
     return requestOptions;

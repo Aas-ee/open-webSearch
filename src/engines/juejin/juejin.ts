@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
+import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 interface JuejinSearchResponse {
     err_no: number;
@@ -43,7 +44,7 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
         while (allResults.length < limit) {
             console.error(`🔍 Searching Juejin with query: "${query}", cursor: ${cursor}`);
 
-            const response = await axios.get<JuejinSearchResponse>('https://api.juejin.cn/search_api/v1/search', {
+            const response = await axios.get<JuejinSearchResponse>('https://api.juejin.cn/search_api/v1/search', buildAxiosRequestOptions({
                 params: {
                     aid: '2608',
                     uuid: '7259393293459605051',
@@ -65,7 +66,7 @@ export async function searchJuejin(query: string, limit: number): Promise<Search
                     'Host': 'api.juejin.cn',
                     'Connection': 'keep-alive'
                 }
-            });
+            }));
 
             const responseData = response.data;
 

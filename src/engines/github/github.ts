@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 // Avoid the GitHub README API here because anonymous API requests in this
 // environment hit rate limits quickly; raw URLs are more stable for this tool.
@@ -76,12 +77,14 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
             console.error(`Fetching README from: ${rawUrl}`);
 
             const response = await axios.get(rawUrl, {
-                headers: {
-                    'User-Agent': 'GitHub-README-Fetcher/1.0'
-                },
-                timeout: 10000,
-                responseType: 'text',
-                validateStatus: (status) => status === 200 || status === 404
+                ...buildAxiosRequestOptions({
+                    headers: {
+                        'User-Agent': 'GitHub-README-Fetcher/1.0'
+                    },
+                    timeout: 10000,
+                    responseType: 'text',
+                    validateStatus: (status) => status === 200 || status === 404
+                })
             });
 
             if (response.status === 404) {

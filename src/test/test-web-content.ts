@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { config } from '../config.js';
 import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
 
 type TestCase = {
@@ -9,11 +10,16 @@ type TestCase = {
 const originalAxiosGet = axios.get.bind(axios);
 const originalAxiosHead = axios.head.bind(axios);
 const requestAttempts = new Map<string, number>();
+const requestConfigs = new Map<string, any[]>();
 
 function installAxiosMock(): void {
     requestAttempts.clear();
+    requestConfigs.clear();
 
-    (axios as any).head = async (url: string) => {
+    (axios as any).head = async (url: string, options?: any) => {
+        const configs = requestConfigs.get(url) || [];
+        configs.push({ method: 'HEAD', options });
+        requestConfigs.set(url, configs);
         if (url.endsWith('/too-large.md')) {
             return {
                 headers: { 'content-length': String(5 * 1024 * 1024) },
@@ -32,8 +38,11 @@ function installAxiosMock(): void {
         };
     };
 
-    (axios as any).get = async (url: string) => {
+    (axios as any).get = async (url: string, options?: any) => {
         requestAttempts.set(url, (requestAttempts.get(url) || 0) + 1);
+        const configs = requestConfigs.get(url) || [];
+        configs.push({ method: 'GET', options });
+        requestConfigs.set(url, configs);
 
         if (url.endsWith('/skill.md')) {
             return {
@@ -143,7 +152,9 @@ async function runCase(testCase: TestCase): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+    const originalFetchWebAllowInsecureTls = config.fetchWebAllowInsecureTls;
     installAxiosMock();
+    config.fetchWebAllowInsecureTls = false;
 
     const testCases: TestCase[] = [
         {
@@ -163,6 +174,10 @@ async function main(): Promise<void> {
                 assert(result.retrievalMethod === 'request', 'plain html should use request mode');
                 assert(result.finalUrl.endsWith('/page?from=test'), 'finalUrl should follow redirect target');
                 assert(result.content.includes('Skill body content'), 'html content should be extracted');
+                const configs = requestConfigs.get('https://example.com/page') || [];
+                const firstConfig = configs[0]?.options;
+                assert(firstConfig?.proxy === false, 'axios env proxy resolution should be disabled');
+                assert(firstConfig?.httpsAgent, 'httpsAgent should always be configured for direct https requests');
             }
         },
         {
@@ -176,6 +191,9 @@ async function main(): Promise<void> {
         {
             name: 'should fallback to metadata for js-rendered html pages',
             run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => {
+                    throw new Error('browser fallback disabled for metadata-only test');
+                });
                 const result = await fetchWebContent('https://example.com/spa', 5000);
                 assert(result.title === 'SPA Site', 'title should be extracted from html');
                 assert(result.retrievalMethod === 'request', 'metadata fallback should still report request mode');
@@ -279,6 +297,7 @@ async function main(): Promise<void> {
     }
 
     restoreAxiosMock();
+    config.fetchWebAllowInsecureTls = originalFetchWebAllowInsecureTls;
 
     const total = testCases.length;
     console.log(`\nResult: ${passed}/${total} passed`);
@@ -290,6 +309,7 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
     restoreAxiosMock();
+    config.fetchWebAllowInsecureTls = false;
     console.error('❌ test-web-content failed:', error);
     process.exit(1);
 });

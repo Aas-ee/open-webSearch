@@ -1,17 +1,12 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
-import {getProxyUrl} from "../../config.js";
-import {HttpsProxyAgent} from "https-proxy-agent";
+import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
 
 export async function searchBrave(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
     let pn = 0;
-    // use the proxy from environment variables
-    const effectiveProxyUrl = getProxyUrl();
-
-    // Configure request options
-    const requestOptions: any = {
+    const requestOptions = buildAxiosRequestOptions({
         headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
             "Connection": "keep-alive",
@@ -28,14 +23,7 @@ export async function searchBrave(query: string, limit: number): Promise<SearchR
             "referer": "https://duckduckgo.com/",
             "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
         }
-    };
-
-    // If a proxy URL is provided, use it
-    if (effectiveProxyUrl) {
-        const proxyAgent = new HttpsProxyAgent(effectiveProxyUrl);
-        requestOptions.httpAgent = proxyAgent;
-        requestOptions.httpsAgent = proxyAgent;
-    }
+    });
 
     const encodedQuery = encodeURIComponent(query);
     while (allResults.length < limit) {

@@ -1,13 +1,14 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
+import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 export async function searchCsdn(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
     let pn = 1;
 
     while (allResults.length < limit) {
-        const response = await axios.get('https://so.csdn.net/api/v3/search', {
+        const response = await axios.get('https://so.csdn.net/api/v3/search', buildAxiosRequestOptions({
             params: {
                 q: query,
                 p: pn
@@ -20,7 +21,7 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
                 'Host': 'so.csdn.net',
                 'Connection': 'keep-alive'
             }
-        });
+        }));
 
         const { result_vos } = response.data
 

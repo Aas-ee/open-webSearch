@@ -1,10 +1,10 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import { config, getProxyUrl } from '../../config.js';
+import { config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
+import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 const BING_BASE_URL = 'https://cn.bing.com/search';
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
@@ -96,20 +96,11 @@ function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boole
     };
 }
 
-function buildAxiosRequestOptions(): any {
-    const effectiveProxyUrl = getProxyUrl();
-    const requestOptions: any = {
+function buildBingAxiosRequestOptions(): any {
+    return buildSharedAxiosRequestOptions({
         headers: FALLBACK_HEADERS,
         timeout: config.playwrightNavigationTimeoutMs
-    };
-
-    if (effectiveProxyUrl) {
-        const proxyAgent = new HttpsProxyAgent(effectiveProxyUrl);
-        requestOptions.httpAgent = proxyAgent;
-        requestOptions.httpsAgent = proxyAgent;
-    }
-
-    return requestOptions;
+    });
 }
 
 let playwrightAvailabilityPromise: Promise<boolean> | null = null;
@@ -451,7 +442,7 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
     let pageNumber = 0;
 
     while (allResults.length < limit) {
-        const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildAxiosRequestOptions());
+        const response = await axios.get(buildBingSearchUrl(query, pageNumber), buildBingAxiosRequestOptions());
         const html = String(response.data || '');
 
         const pageState = analyzeBlockedPage(html);

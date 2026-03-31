@@ -1,11 +1,12 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 export async function fetchJuejinArticle(url: string): Promise<{ content: string }> {
     try {
         console.error(`🔍 Fetching Juejin article: ${url}`);
 
-        const response = await axios.get(url, {
+        const response = await axios.get(url, buildAxiosRequestOptions({
             headers: {
                 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
                 'Connection': 'keep-alive',
@@ -23,7 +24,7 @@ export async function fetchJuejinArticle(url: string): Promise<{ content: string
             },
             timeout: 30000,
             decompress: true
-        });
+        }));
 
         const $ = cheerio.load(response.data);
 
