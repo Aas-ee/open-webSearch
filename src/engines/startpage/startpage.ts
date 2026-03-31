@@ -17,7 +17,28 @@ let cachedScCode: string | undefined;
 let cachedScAt = 0;
 
 function isCaptchaPage(html: string): boolean {
-    return /\/sp\/captcha|captcha|verify you are human|human verification/i.test(html);
+    const normalized = html.toLowerCase();
+    const $ = cheerio.load(html);
+    const title = $('title').first().text().trim().toLowerCase();
+
+    if (normalized.includes('/sp/captcha')) {
+        return true;
+    }
+
+    const hasCaptchaUi = $([
+        'form[action*="/sp/captcha"]',
+        'iframe[src*="captcha"]',
+        '[id*="captcha"]',
+        '[class*="captcha"]'
+    ].join(',')).length > 0;
+
+    const hasVerificationText = [
+        'verify you are human',
+        'human verification',
+        'security check'
+    ].some((keyword) => normalized.includes(keyword) || title.includes(keyword));
+
+    return hasCaptchaUi || hasVerificationText;
 }
 
 function extractScCode(html: string): string | undefined {
@@ -117,10 +138,6 @@ function extractResultsFromHtml(html: string): SearchResult[] {
             engine: 'startpage'
         });
     });
-
-    if (results.length === 0) {
-        throw new Error('Failed to locate Startpage results in the response HTML');
-    }
 
     return results;
 }
