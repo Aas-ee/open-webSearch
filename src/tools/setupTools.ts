@@ -17,9 +17,10 @@ import { fetchJuejinArticle } from "../engines/juejin/fetchJuejinArticle.js";
 import { searchJuejin } from "../engines/juejin/index.js";
 import { fetchWebContent } from "../engines/web/index.js";
 import { isPublicHttpUrl } from "../utils/urlSafety.js";
+import { searchStartpage } from "../engines/startpage/index.js";
 
 // 支持的搜索引擎
-const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave','juejin'] as const;
+const SUPPORTED_ENGINES = ['baidu', 'bing', 'linuxdo', 'csdn', 'duckduckgo','exa','brave','juejin', 'startpage'] as const;
 type SupportedEngine = typeof SUPPORTED_ENGINES[number];
 
 // 搜索引擎调用函数映射
@@ -32,6 +33,7 @@ const engineMap: Record<SupportedEngine, (query: string, limit: number) => Promi
     exa: searchExa,
     brave: searchBrave,
     juejin: searchJuejin,
+    startpage: searchStartpage,
 };
 
 // Normalize engine names from different client representations (e.g. "Bing", "DuckDuckGo", "linux.do")
@@ -56,6 +58,8 @@ export function normalizeEngineName(engine: string): string {
             return 'brave';
         case 'juejin':
             return 'juejin';
+        case 'startpage':
+            return 'startpage';
         default:
             return cleaned;
     }
@@ -191,12 +195,14 @@ export const setupTools = (server: McpServer): void => {
     // 生成搜索工具的动态描述
     const getSearchDescription = () => {
         if (config.allowedSearchEngines.length === 0) {
-            return "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金)) with no API key required";
+            return "Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage) with no API key required";
         } else {
             const enginesText = config.allowedSearchEngines.map(e => {
                 switch (e) {
                     case 'juejin':
                         return 'Juejin(掘金)';
+                    case 'startpage':
+                        return 'Startpage';
                     default:
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }

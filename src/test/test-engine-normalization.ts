@@ -9,7 +9,8 @@ const SUPPORTED_ENGINES = [
     'duckduckgo',
     'exa',
     'brave',
-    'juejin'
+    'juejin',
+    'startpage'
 ] as const;
 
 const engineSchema = z.array(
@@ -35,7 +36,8 @@ const successCases: SuccessCase[] = [
     { input: ['DuckDuckGo'], expected: ['duckduckgo'] },
     { input: ['duck-duck-go'], expected: ['duckduckgo'] },
     { input: ['linux.do'], expected: ['linuxdo'] },
-    { input: ['  CSDN  ', 'JueJin'], expected: ['csdn', 'juejin'] }
+    { input: ['  CSDN  ', 'JueJin'], expected: ['csdn', 'juejin'] },
+    { input: ['StartPage'], expected: ['startpage'] }
 ];
 
 const failureCases: FailureCase[] = [
