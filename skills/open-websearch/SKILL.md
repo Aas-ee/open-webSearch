@@ -43,6 +43,7 @@ When capability is missing:
    - capability active
    - setup completed but activation pending reload/reconnect
    - setup incomplete or failed
+7. Do not bring up Playwright or browser setup by default for ordinary search or page fetch; only escalate to browser-assisted guidance when the user explicitly wants Bing Playwright mode, browser fallback is expected, or the failure strongly suggests missing browser support.
 
 ## Default behavior
 
@@ -89,6 +90,7 @@ Apply the decision rules above in order: direct URL fetch first, focused search 
 - If direct access fails in restricted networks, check `USE_PROXY` and `PROXY_URL`.
 - `FETCH_WEB_INSECURE_TLS` only affects `fetchWebContent`, not the search engines.
 - `SEARCH_MODE` currently matters for Bing only.
+- If an error mentions `browserType.launch`, `Executable doesn't exist`, `Playwright client is not available`, or a missing Chromium executable, treat it first as missing browser dependency or browser configuration, not as a generic `open-websearch` core failure.
 - Keep citations or source attributions tied to the fetched result URLs, not just the search engine name.
 
 ## MCP unavailable response

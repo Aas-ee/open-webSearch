@@ -61,6 +61,25 @@ Minimal steps:
 3. Configure CLI or MCP/client access to that endpoint as needed.
 4. Validate connectivity and check that the core tools appear.
 
+## Browser-assisted / Playwright mode
+
+Use when:
+- the user explicitly wants Bing Playwright mode
+- Bing auto fallback is expected but browser support is missing
+- browser-assisted cookie retry or browser-rendered HTML is needed
+- request mode is insufficient and the failure strongly suggests browser-only content or blocked request-mode access
+
+Minimal steps:
+1. First distinguish ordinary search/fetch setup from browser-assisted setup.
+2. Do not suggest Playwright installation for ordinary search, `fetchWebContent`, or `fetchGithubReadme` unless browser assistance is actually needed.
+3. If browser mode is required, explain that the published package does not bundle Playwright browser binaries by default.
+4. Prefer the smallest fitting path:
+   - local install: `npm install playwright` and `npx playwright install chromium`
+   - existing browser binary with a Playwright client (commonly `playwright-core`) and `PLAYWRIGHT_EXECUTABLE_PATH`
+   - existing Playwright package via `PLAYWRIGHT_MODULE_PATH`
+   - existing remote browser via `PLAYWRIGHT_WS_ENDPOINT` or `PLAYWRIGHT_CDP_ENDPOINT`
+5. After setup, validate the browser-assisted path before claiming success.
+
 ## Validation target
 
 After any setup path:

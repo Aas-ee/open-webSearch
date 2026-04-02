@@ -26,6 +26,7 @@ Use for:
 Notes:
 - supports Markdown files and normal public pages
 - may fail on pages that require browser cookies or unusual TLS chains
+- some pages may additionally require browser-assisted fallback; if the issue appears to be browser-only content or blocked request-mode access, check whether Playwright/browser support is available before assuming the fetch path itself is broken
 - `FETCH_WEB_INSECURE_TLS` applies only here
 - do not jump to TLS or environment explanations for an ordinary fetch failure; first try a better source URL, a more stable result, or a clearer page target
 
