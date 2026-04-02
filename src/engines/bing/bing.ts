@@ -50,6 +50,19 @@ const BROWSER_CONTEXT_OPTIONS = {
     colorScheme: 'light'
 };
 
+export function hasSiteOperator(query: string): boolean {
+    return /(^|\s)site:[^\s]+/i.test(query);
+}
+
+export function shouldSuggestRemovingSiteOperator(query: string, error: unknown): boolean {
+    if (!hasSiteOperator(query) || !(error instanceof Error)) {
+        return false;
+    }
+
+    const message = error.message.toLowerCase();
+    return message.includes('waitforselector') || message.includes('timeout');
+}
+
 function buildBingSearchUrl(query: string, pageNumber: number): string {
     const url = new URL(BING_BASE_URL);
     url.searchParams.set('q', query);
@@ -520,7 +533,17 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
                 }
             }
 
-            return allResults.slice(0, limit);
+            const finalResults = allResults.slice(0, limit);
+            if (finalResults.length === 0 && hasSiteOperator(query)) {
+                throw new Error('Bing Playwright mode returned no results for a site:-restricted query. Retry without the site: prefix.');
+            }
+
+            return finalResults;
+        } catch (error) {
+            if (shouldSuggestRemovingSiteOperator(query, error)) {
+                throw new Error('Bing Playwright mode did not return results for a site:-restricted query. Retry without the site: prefix.');
+            }
+            throw error;
         } finally {
             await closePageContext();
         }

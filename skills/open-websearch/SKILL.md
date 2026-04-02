@@ -67,6 +67,7 @@ When capability is missing:
 
 - Prefer `startpage` for general English-language web search when it is available.
 - Use `bing` as a secondary broad web engine when needed. If request-mode Bing is blocked, suggest `SEARCH_MODE=auto`.
+- If Bing Playwright mode returns no results for a `site:`-restricted query, retry once without the `site:` prefix before concluding the target has no usable results.
 - Use `baidu`, `csdn`, or `juejin` when the user clearly wants Chinese-language or China-hosted sources.
 - Treat engine choice as a heuristic, not a hard rule. If a preferred engine is unavailable or poor quality, switch.
 - Use multiple engines only when cross-checking is useful. Do not add engines just for variety.

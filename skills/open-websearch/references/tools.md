@@ -15,6 +15,7 @@ Returns:
 Good follow-up actions:
 - fetch one or more result URLs with `fetchWebContent`
 - fetch a repository with `fetchGithubReadme`
+- if Bing Playwright mode returns no results for a `site:` query, retry once without the `site:` prefix before assuming the search target is empty
 
 ## `fetchWebContent`
 
