@@ -9,6 +9,8 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import cors from 'cors';
 import {config} from "./config.js";
+import { commandNeedsRuntime, runCli } from './cli/runCli.js';
+import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
 
 type StreamableSession = {
   server: McpServer;
@@ -22,21 +24,38 @@ type SseSession = {
   closed: boolean;
 };
 
-function createServer(): McpServer {
+function createServer(runtime: OpenWebSearchRuntime): McpServer {
   const server = new McpServer({
     name: 'web-search',
     version: '1.2.0'
   });
 
-  setupTools(server);
+  setupTools(server, runtime);
   return server;
 }
 
 async function main() {
+  const argv = process.argv.slice(2);
+  const runtime = commandNeedsRuntime(argv)
+    ? (await import('./runtime/createRuntime.js')).createOpenWebSearchRuntime()
+    : ({
+        config,
+        services: {} as OpenWebSearchRuntime['services']
+      } satisfies OpenWebSearchRuntime);
+  const cliExitCode = await runCli(argv, runtime, {
+    stdout: (text) => console.log(text),
+    stderr: (text) => console.error(text)
+  });
+
+  if (cliExitCode !== null) {
+    process.exitCode = cliExitCode;
+    return;
+  }
+
   // Enable STDIO mode if MODE is 'both' or 'stdio' or not specified
   if (process.env.MODE === undefined || process.env.MODE === 'both' || process.env.MODE === 'stdio') {
     console.error('🔌 Starting STDIO transport...');
-    const server = createServer();
+    const server = createServer(runtime);
     const stdioTransport = new StdioServerTransport();
     await server.connect(stdioTransport).then(() => {
       console.error('✅ STDIO transport enabled');
@@ -78,7 +97,7 @@ async function main() {
         transport = transports.streamable[sessionId].transport;
       } else if (!sessionId && isInitializeRequest(req.body)) {
         // New initialization request
-        const server = createServer();
+        const server = createServer(runtime);
         const session = {} as StreamableSession;
 
         transport = new StreamableHTTPServerTransport({
@@ -162,7 +181,7 @@ async function main() {
     app.get('/sse', async (req, res) => {
       // Create SSE transport for legacy clients
       const transport = new SSEServerTransport('/messages', res);
-      const server = createServer();
+      const server = createServer(runtime);
       const session: SseSession = {
         server,
         transport,
