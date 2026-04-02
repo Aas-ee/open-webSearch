@@ -9,8 +9,9 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import cors from 'cors';
 import {config} from "./config.js";
-import { commandNeedsRuntime, runCli } from './cli/runCli.js';
+import { runCli } from './cli/runCli.js';
 import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
+import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
 
 type StreamableSession = {
   server: McpServer;
@@ -36,7 +37,7 @@ function createServer(runtime: OpenWebSearchRuntime): McpServer {
 
 async function main() {
   const argv = process.argv.slice(2);
-  const runtime = commandNeedsRuntime(argv)
+  const runtime = shouldCreateFullRuntimeForInvocation(argv)
     ? (await import('./runtime/createRuntime.js')).createOpenWebSearchRuntime()
     : ({
         config,

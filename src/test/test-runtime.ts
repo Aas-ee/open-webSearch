@@ -1,5 +1,6 @@
 import { AppConfig } from '../config.js';
 import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
+import { shouldCreateFullRuntimeForInvocation } from '../runtime/runtimeSelection.js';
 
 function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -117,7 +118,18 @@ async function testRuntimeUsesInjectedDependencies(): Promise<void> {
     console.log('✅ runtime uses injected dependencies');
 }
 
+function testRuntimeSelectionForInvocation(): void {
+    assert(shouldCreateFullRuntimeForInvocation([]) === true, 'no-arg startup should create full runtime for MCP mode');
+    assert(shouldCreateFullRuntimeForInvocation(['search', 'open web search']) === true, 'search command should create full runtime');
+    assert(shouldCreateFullRuntimeForInvocation(['serve']) === true, 'serve command should create full runtime');
+    assert(shouldCreateFullRuntimeForInvocation(['status']) === false, 'status command should not require full runtime');
+    assert(shouldCreateFullRuntimeForInvocation(['unknown-command']) === false, 'unknown commands should not force runtime creation');
+
+    console.log('✅ runtime selection for invocation');
+}
+
 async function main(): Promise<void> {
+    testRuntimeSelectionForInvocation();
     await testRuntimeUsesInjectedDependencies();
     console.log('\nRuntime tests passed.');
 }
