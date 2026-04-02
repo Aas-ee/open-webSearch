@@ -114,6 +114,12 @@ function testParseSearchArgs(): void {
     assertEqual(parsed.engines.join(','), 'bing,startpage', 'parsed engines');
     assertEqual(parsed.json, false, 'parsed json flag');
 
+    const parsedWithSearchMode = parseSearchArgs(
+        ['Open', 'WebSearch', '--search-mode', 'playwright', '--json'],
+        createStubRuntime()
+    );
+    assertEqual(parsedWithSearchMode.searchMode, 'playwright', 'parsed search mode');
+
     console.log('✅ CLI parseSearchArgs');
 }
 
@@ -167,6 +173,64 @@ async function testRunCliJsonSuccess(): Promise<void> {
     assertEqual(payload.data.results[0].description, 'Open WebSearch:2', 'CLI json description');
 
     console.log('✅ CLI runCli json success');
+}
+
+async function testRunCliSearchModeOverride(): Promise<void> {
+    const seenCalls: Array<{ searchMode?: string }> = [];
+    const runtime = createOpenWebSearchRuntime({
+        config: createTestConfig(),
+        dependencies: {
+            searchExecutors: {
+                bing: async (query, limit, context) => {
+                    seenCalls.push({ searchMode: context?.searchMode });
+                    return [{
+                        title: 'Result',
+                        url: 'https://example.com',
+                        description: `${query}:${limit}:${context?.searchMode ?? 'none'}`,
+                        source: 'example.com',
+                        engine: 'bing'
+                    }];
+                }
+            },
+            fetchGithubReadme: async () => '# README',
+            fetchWebContent: async (url, maxChars) => ({
+                url,
+                finalUrl: url,
+                contentType: 'text/plain',
+                title: 'Example',
+                retrievalMethod: 'request' as const,
+                truncated: false,
+                content: `ok:${maxChars}`
+            }),
+            fetchCsdnArticle: async () => ({ content: 'csdn' }),
+            fetchJuejinArticle: async () => ({ content: 'juejin' }),
+            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+        }
+    });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['search', 'Open WebSearch', '--engine', 'bing', '--search-mode', 'playwright', '--json'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 0, 'CLI search-mode override exit code');
+    assertEqual(stderr.length, 0, 'CLI search-mode override stderr');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        data: {
+            results: Array<{ description: string }>;
+        };
+    };
+    assertEqual(payload.status, 'ok', 'CLI search-mode override status');
+    assertEqual(payload.data.results[0].description, 'Open WebSearch:10:playwright', 'CLI search-mode override description');
+    assertEqual(seenCalls[0].searchMode, 'playwright', 'CLI should pass search mode to runtime');
+
+    console.log('✅ CLI runCli search-mode override');
 }
 
 async function testRunCliHumanReadable(): Promise<void> {
@@ -658,6 +722,7 @@ async function main(): Promise<void> {
     testParseSearchArgs();
     testParseFetchArgs();
     await testRunCliJsonSuccess();
+    await testRunCliSearchModeOverride();
     await testRunCliHumanReadable();
     await testRunCliInvalidArguments();
     await testRunCliUnknownArgument();

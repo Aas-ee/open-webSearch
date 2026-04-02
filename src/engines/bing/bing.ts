@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { config } from '../../config.js';
+import { AppConfig, config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
@@ -529,12 +529,18 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
     }
 }
 
-export async function searchBing(query: string, limit: number): Promise<SearchResult[]> {
-    if (config.searchMode === 'request') {
+export async function searchBing(
+    query: string,
+    limit: number,
+    options?: { searchMode?: AppConfig['searchMode'] }
+): Promise<SearchResult[]> {
+    const effectiveSearchMode = options?.searchMode ?? config.searchMode;
+
+    if (effectiveSearchMode === 'request') {
         return searchBingWithHttp(query, limit);
     }
 
-    if (config.searchMode === 'playwright') {
+    if (effectiveSearchMode === 'playwright') {
         return searchBingWithPlaywright(query, limit);
     }
 

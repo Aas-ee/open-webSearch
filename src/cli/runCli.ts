@@ -6,6 +6,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { AppConfig } from '../config.js';
 
 export type CliIo = {
     stdout: (text: string) => void;
@@ -35,6 +36,7 @@ export type ParsedSearchArgs = {
     query: string;
     limit: number;
     engines: SupportedSearchEngine[];
+    searchMode?: AppConfig['searchMode'];
     json: boolean;
 };
 
@@ -122,6 +124,7 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
     const positional: string[] = [];
     const requestedEngines: string[] = [];
     let limit = 10;
+    let searchMode: AppConfig['searchMode'] | undefined;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -162,6 +165,19 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
             continue;
         }
 
+        if (arg === '--search-mode') {
+            const next = argv[index + 1];
+            if (!next || isFlag(next)) {
+                throw new Error('Missing value for --search-mode');
+            }
+            if (next !== 'request' && next !== 'auto' && next !== 'playwright') {
+                throw new Error('search mode must be one of: request, auto, playwright');
+            }
+            searchMode = next;
+            index += 1;
+            continue;
+        }
+
         if (isFlag(arg)) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -190,6 +206,7 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
         query,
         limit,
         engines: resolvedEngines,
+        searchMode,
         json
     };
 }
@@ -634,11 +651,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch search <query> [--limit N] [--engine NAME] [--json]`.' }
+                    { hint: 'Use `open-websearch search <query> [--limit N] [--engine NAME] [--search-mode MODE] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--json]');
+                io.stderr('Usage: open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--json]');
             }
             return 1;
         }
@@ -650,7 +667,8 @@ export async function runCli(
                 {
                     query: parsed.query,
                     engines: parsed.engines,
-                    limit: parsed.limit
+                    limit: parsed.limit,
+                    searchMode: parsed.searchMode
                 },
                 options
             );
@@ -671,7 +689,8 @@ export async function runCli(
             const result = await runtime.services.search.execute({
                 query: parsed.query,
                 engines: parsed.engines,
-                limit: parsed.limit
+                limit: parsed.limit,
+                searchMode: parsed.searchMode
             });
 
             if (parsed.json) {

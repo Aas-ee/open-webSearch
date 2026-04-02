@@ -83,6 +83,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
+            searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
             engines: z.array(getEngineInputSchema()).min(1).default([runtime.config.defaultSearchEngine])
                 .transform(requestedEngines => resolveRequestedEngines(
                     requestedEngines,
@@ -90,7 +91,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     runtime.config.defaultSearchEngine
                 ) as [SupportedSearchEngine, ...SupportedSearchEngine[]])
         },
-        async ({query, limit = 10, engines}) => {
+        async ({query, limit = 10, searchMode, engines}) => {
             try {
                 const resolvedEngines = resolveRequestedEngines(
                     engines ?? [runtime.config.defaultSearchEngine],
@@ -103,7 +104,8 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 const searchResult = await runtime.services.search.execute({
                     query,
                     engines: resolvedEngines,
-                    limit
+                    limit,
+                    searchMode
                 });
                 for (const failure of searchResult.partialFailures) {
                     console.error(`Search failed for engine ${failure.engine}:`, failure.message);

@@ -182,6 +182,58 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
     console.log('✅ setupTools uses runtime.config defaults');
 }
 
+async function testSearchToolPassesSearchModeOverride(): Promise<void> {
+    const seenCalls: Array<{ searchMode?: string }> = [];
+    const runtime = createOpenWebSearchRuntime({
+        config: createTestConfig(),
+        dependencies: {
+            searchExecutors: {
+                bing: async (query, limit, context) => {
+                    seenCalls.push({ searchMode: context?.searchMode });
+                    return [{
+                        title: 'Result',
+                        url: 'https://example.com',
+                        description: `${query}:${limit}:${context?.searchMode ?? 'none'}`,
+                        source: 'example.com',
+                        engine: 'bing'
+                    }];
+                }
+            },
+            fetchGithubReadme: async () => '# README',
+            fetchWebContent: async (url, maxChars) => ({
+                url,
+                finalUrl: url,
+                contentType: 'text/plain',
+                title: 'Example',
+                retrievalMethod: 'request' as const,
+                truncated: false,
+                content: `ok:${maxChars}`
+            }),
+            fetchCsdnArticle: async () => ({ content: 'csdn' }),
+            fetchJuejinArticle: async () => ({ content: 'juejin' }),
+            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+        }
+    });
+    const server = new McpServer({ name: 'test', version: '1.0.0' });
+    setupTools(server, runtime);
+
+    const tools = (server as unknown as { _registeredTools: Record<string, { handler: (input: unknown) => Promise<{ content: Array<{ text: string }> }> }> })._registeredTools;
+    const response = await tools.search.handler({
+        query: 'Open WebSearch',
+        limit: 2,
+        searchMode: 'playwright',
+        engines: ['bing']
+    });
+    const payload = JSON.parse(response.content[0].text) as {
+        results: Array<{ description: string }>;
+    };
+
+    assertEqual(payload.results[0].description, 'Open WebSearch:2:playwright', 'MCP search should pass request-level search mode');
+    assertEqual(seenCalls[0].searchMode, 'playwright', 'MCP handler should forward search mode');
+
+    console.log('✅ MCP search tool passes search-mode override');
+}
+
 function testCustomToolNamesAndFallbacks(): void {
     const validOutput = runModuleWithEnv(
         `
@@ -324,6 +376,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
 async function main(): Promise<void> {
     await testSearchToolReturnsCompatiblePayload();
     await testSetupToolsUsesRuntimeConfigDefaults();
+    await testSearchToolPassesSearchModeOverride();
     testCustomToolNamesAndFallbacks();
     testConfigDrivenEngineSelectionAndMode();
     console.log('\nMCP adapter tests passed.');

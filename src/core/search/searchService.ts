@@ -1,7 +1,12 @@
 import { SearchResult } from '../../types.js';
+import { AppConfig } from '../../config.js';
 import { distributeLimit } from './searchEngines.js';
 
-export type SearchEngineExecutor = (query: string, limit: number) => Promise<SearchResult[]>;
+export type SearchExecutionContext = {
+    searchMode?: AppConfig['searchMode'];
+};
+
+export type SearchEngineExecutor = (query: string, limit: number, context?: SearchExecutionContext) => Promise<SearchResult[]>;
 export type SearchEngineExecutorMap = Partial<Record<string, SearchEngineExecutor>>;
 
 export type SearchExecutionFailure = {
@@ -22,11 +27,12 @@ export type SearchExecutionInput = {
     query: string;
     engines: string[];
     limit: number;
+    searchMode?: AppConfig['searchMode'];
 };
 
 export function createSearchService(engineMap: SearchEngineExecutorMap) {
     return {
-        async execute({ query, engines, limit }: SearchExecutionInput): Promise<SearchExecutionResult> {
+        async execute({ query, engines, limit, searchMode }: SearchExecutionInput): Promise<SearchExecutionResult> {
             const cleanQuery = query.trim();
             if (!cleanQuery) {
                 throw new Error('Query string cannot be empty');
@@ -49,7 +55,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap) {
                 }
 
                 try {
-                    return await executor(cleanQuery, engineLimit);
+                    return await executor(cleanQuery, engineLimit, { searchMode });
                 } catch (error) {
                     partialFailures.push({
                         engine,

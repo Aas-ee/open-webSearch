@@ -1,5 +1,6 @@
 import express from 'express';
 import http from 'node:http';
+import { AppConfig } from '../../config.js';
 import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
@@ -99,6 +100,18 @@ function parseLimit(limit: unknown): number {
     return limit;
 }
 
+function parseSearchMode(searchMode: unknown): AppConfig['searchMode'] | undefined {
+    if (searchMode === undefined) {
+        return undefined;
+    }
+
+    if (searchMode !== 'request' && searchMode !== 'auto' && searchMode !== 'playwright') {
+        throw new Error('searchMode must be one of: request, auto, playwright');
+    }
+
+    return searchMode;
+}
+
 function parseUrl(url: unknown): string {
     if (typeof url !== 'string' || !url.trim()) {
         throw new Error('url must be a non-empty string');
@@ -174,10 +187,12 @@ export async function startLocalDaemon(
 
             const limit = parseLimit(req.body?.limit);
             const engines = parseRequestedEngines(runtime, req.body?.engines);
+            const searchMode = parseSearchMode(req.body?.searchMode);
             const result = await runtime.services.search.execute({
                 query,
                 limit,
-                engines
+                engines,
+                searchMode
             });
             res.json(createSuccessEnvelope(result));
         } catch (error) {
@@ -190,7 +205,7 @@ export async function startLocalDaemon(
                 message,
                 {
                     hint: statusCode === 400
-                        ? 'Use a non-empty query, a limit between 1 and 50, and valid engine names.'
+                        ? 'Use a non-empty query, a limit between 1 and 50, valid engine names, and an optional searchMode of request/auto/playwright.'
                         : 'Retry with a different engine or inspect daemon/runtime configuration.'
                 }
             );

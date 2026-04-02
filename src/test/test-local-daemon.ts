@@ -44,10 +44,10 @@ function createStubRuntime() {
         config: createTestConfig(),
         dependencies: {
             searchExecutors: {
-                bing: async (query, limit) => [{
+                bing: async (query, limit, context) => [{
                     title: 'Result',
                     url: 'https://example.com',
-                    description: `${query}:${limit}`,
+                    description: `${query}:${limit}:${context?.searchMode ?? 'none'}`,
                     source: 'example.com',
                     engine: 'bing'
                 }],
@@ -160,13 +160,14 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         }>(daemon.baseUrl, '/search', {
             query: 'Open WebSearch',
             limit: 3,
-            engines: ['Bing', 'startpage']
+            engines: ['Bing', 'startpage'],
+            searchMode: 'playwright'
         });
         assertEqual(searchResult.response.status, 200, 'daemon /search http status');
         assertEqual(searchResult.payload.status, 'ok', 'daemon /search payload status');
         assertEqual(searchResult.payload.data.query, 'Open WebSearch', 'daemon /search query');
         assertEqual(searchResult.payload.data.totalResults, 2, 'daemon /search totalResults');
-        assert(searchResult.payload.data.results.some((item) => item.description === 'Open WebSearch:2'), 'daemon /search result content');
+        assert(searchResult.payload.data.results.some((item) => item.description === 'Open WebSearch:2:playwright'), 'daemon /search result content');
 
         const fetchWebResult = await postJson<{
             status: string;

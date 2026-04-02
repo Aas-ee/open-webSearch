@@ -119,6 +119,7 @@ Example:
 
 Notes:
 - default engine resolution follows runtime/config defaults
+- `searchMode` may be provided per request and currently only affects Bing
 - if a local daemon is reachable, CLI may satisfy the request through daemon HTTP
 - if the daemon is unavailable and no explicit daemon target was requested, CLI may fall back to direct runtime execution
 
@@ -227,6 +228,11 @@ Explicit daemon behavior:
   - attempts to start a local daemon for the requested local daemon URL
   - waits for health before retrying once
   - is intentionally explicit; CLI does not silently spawn by default
+
+CLI search arguments also support:
+- `--search-mode request|auto|playwright`
+  - request-level override
+  - currently only affects Bing
 
 ## Serve and status lifecycle
 

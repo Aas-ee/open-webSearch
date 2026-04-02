@@ -138,7 +138,8 @@ Request body:
 {
   "query": "open web search",
   "limit": 3,
-  "engines": ["startpage", "bing"]
+  "engines": ["startpage", "bing"],
+  "searchMode": "playwright"
 }
 ```
 
@@ -146,6 +147,8 @@ Notes:
 - `query` is required
 - `limit` is optional, integer `1-50`, default `10`
 - `engines` is optional
+- `searchMode` is optional: `request`, `auto`, or `playwright`
+- `searchMode` currently only affects Bing; other engines ignore it
 - if `engines` is omitted, the daemon uses its configured default engine
 
 Example:
@@ -153,7 +156,7 @@ Example:
 ```bash
 curl --noproxy '*' -X POST http://127.0.0.1:3210/search \
   -H "Content-Type: application/json" \
-  -d '{"query":"open web search","limit":3,"engines":["startpage"]}'
+  -d '{"query":"open web search","limit":3,"engines":["bing"],"searchMode":"playwright"}'
 ```
 
 ### `POST /fetch-web`

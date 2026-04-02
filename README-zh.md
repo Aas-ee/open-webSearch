@@ -462,7 +462,8 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 {
   "query": string,        // 搜索查询词
   "limit": number,        // 可选：返回结果数量（默认：10）
-  "engines": string[]     // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin) 默认bing
+  "engines": string[],    // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage) 默认使用当前运行配置
+  "searchMode": string    // 可选：request、auto 或 playwright（当前仅对 Bing 生效）
 }
 ```
 
