@@ -63,6 +63,7 @@ export const config: AppConfig = {
 const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'linuxdo', 'juejin', 'startpage'];
 const validSearchModes = ['request', 'auto', 'playwright'];
 const validPlaywrightPackages = ['auto', 'playwright', 'playwright-core'];
+const quietStartupLogs = process.env.OPEN_WEBSEARCH_QUIET_STARTUP === 'true';
 
 // Validate default search engine
 if (!validSearchEngines.includes(config.defaultSearchEngine)) {
@@ -115,49 +116,51 @@ if (config.allowedSearchEngines.length > 0) {
     }
 }
 
-// Log configuration
-console.error(`🔍 Default search engine: ${config.defaultSearchEngine}`);
-if (config.allowedSearchEngines.length > 0) {
-    console.error(`🔍 Allowed search engines: ${config.allowedSearchEngines.join(', ')}`);
-} else {
-    console.error(`🔍 No search engine restrictions, all available engines can be used`);
-}
-console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()} (currently only affects Bing)`);
-
-if (config.useProxy) {
-    console.error(`🌐 Using proxy: ${config.proxyUrl}`);
-} else {
-    console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
-}
-if (config.fetchWebAllowInsecureTls) {
-    console.error('⚠️ fetchWebContent TLS verification is disabled (FETCH_WEB_INSECURE_TLS=true)');
-} else {
-    console.error('🔐 fetchWebContent TLS verification is enabled');
-}
-
-console.error(`🧭 Playwright client source: ${config.playwrightPackage}`);
-if (config.playwrightModulePath) {
-    console.error(`🧭 Playwright module path override: ${config.playwrightModulePath}`);
-}
-if (config.playwrightWsEndpoint) {
-    console.error(`🧭 Playwright remote endpoint (ws): ${config.playwrightWsEndpoint}`);
-} else if (config.playwrightCdpEndpoint) {
-    console.error(`🧭 Playwright remote endpoint (cdp): ${config.playwrightCdpEndpoint}`);
-} else if (config.playwrightExecutablePath) {
-    console.error(`🧭 Playwright executable path: ${config.playwrightExecutablePath}`);
-}
-console.error(`🧭 Playwright headless: ${config.playwrightHeadless}`);
-console.error(`🧭 Playwright navigation timeout: ${config.playwrightNavigationTimeoutMs}ms`);
-
-// Determine server mode from config
-const mode = process.env.MODE || (config.enableHttpServer ? 'both' : 'stdio');
-console.error(`🖥️ Server mode: ${mode.toUpperCase()}`);
-
-if (config.enableHttpServer) {
-    if (config.enableCors) {
-        console.error(`🔒 CORS enabled with origin: ${config.corsOrigin}`);
+if (!quietStartupLogs) {
+    // Log configuration
+    console.error(`🔍 Default search engine: ${config.defaultSearchEngine}`);
+    if (config.allowedSearchEngines.length > 0) {
+        console.error(`🔍 Allowed search engines: ${config.allowedSearchEngines.join(', ')}`);
     } else {
-        console.error(`🔒 CORS disabled (set ENABLE_CORS=true to enable)`);
+        console.error(`🔍 No search engine restrictions, all available engines can be used`);
+    }
+    console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()} (currently only affects Bing)`);
+
+    if (config.useProxy) {
+        console.error(`🌐 Using proxy: ${config.proxyUrl}`);
+    } else {
+        console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
+    }
+    if (config.fetchWebAllowInsecureTls) {
+        console.error('⚠️ fetchWebContent TLS verification is disabled (FETCH_WEB_INSECURE_TLS=true)');
+    } else {
+        console.error('🔐 fetchWebContent TLS verification is enabled');
+    }
+
+    console.error(`🧭 Playwright client source: ${config.playwrightPackage}`);
+    if (config.playwrightModulePath) {
+        console.error(`🧭 Playwright module path override: ${config.playwrightModulePath}`);
+    }
+    if (config.playwrightWsEndpoint) {
+        console.error(`🧭 Playwright remote endpoint (ws): ${config.playwrightWsEndpoint}`);
+    } else if (config.playwrightCdpEndpoint) {
+        console.error(`🧭 Playwright remote endpoint (cdp): ${config.playwrightCdpEndpoint}`);
+    } else if (config.playwrightExecutablePath) {
+        console.error(`🧭 Playwright executable path: ${config.playwrightExecutablePath}`);
+    }
+    console.error(`🧭 Playwright headless: ${config.playwrightHeadless}`);
+    console.error(`🧭 Playwright navigation timeout: ${config.playwrightNavigationTimeoutMs}ms`);
+
+    // Determine server mode from config
+    const mode = process.env.MODE || (config.enableHttpServer ? 'both' : 'stdio');
+    console.error(`🖥️ Server mode: ${mode.toUpperCase()}`);
+
+    if (config.enableHttpServer) {
+        if (config.enableCors) {
+            console.error(`🔒 CORS enabled with origin: ${config.corsOrigin}`);
+        } else {
+            console.error(`🔒 CORS disabled (set ENABLE_CORS=true to enable)`);
+        }
     }
 }
 

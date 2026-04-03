@@ -698,6 +698,55 @@ async function testRunCliUnknownCommandJson(): Promise<void> {
     console.log('✅ CLI runCli unknown command json');
 }
 
+async function testRunCliUnknownMcpStyleCommandHint(): Promise<void> {
+    const runtime = createStubRuntime();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['fetchWebContent', '--json'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 1, 'CLI MCP-style command hint exit code');
+    assertEqual(stderr.length, 0, 'CLI MCP-style command hint stderr');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        error: { code: string; message: string };
+        hint: string;
+    };
+    assertEqual(payload.status, 'error', 'CLI MCP-style command hint status');
+    assertEqual(payload.error.code, 'invalid_arguments', 'CLI MCP-style command hint code');
+    assert(payload.error.message.includes('Did you mean `fetch-web`?'), 'CLI MCP-style command should suggest fetch-web');
+
+    console.log('✅ CLI MCP-style command hint');
+}
+
+async function testRunCliHelp(): Promise<void> {
+    const runtime = createStubRuntime();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['--help'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 0, 'CLI help exit code');
+    assertEqual(stderr.length, 0, 'CLI help stderr');
+    assert(stdout[0].includes('open-websearch CLI'), 'CLI help header');
+    assert(stdout[0].includes('open-websearch serve'), 'CLI help serve usage');
+    assert(stdout[0].includes('fetchWebContent -> fetch-web'), 'CLI help should distinguish MCP tool names');
+
+    console.log('✅ CLI help');
+}
+
 async function testRunCliNoArgsFallsThrough(): Promise<void> {
     const runtime = createStubRuntime();
     const stdout: string[] = [];
@@ -738,6 +787,8 @@ async function main(): Promise<void> {
     await testRunCliExplicitDaemonUnavailable();
     await testRunCliSpawnStartsDaemon();
     await testRunCliUnknownCommandJson();
+    await testRunCliUnknownMcpStyleCommandHint();
+    await testRunCliHelp();
     await testRunCliNoArgsFallsThrough();
     console.log('\nCLI command tests passed.');
 }

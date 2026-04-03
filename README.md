@@ -44,13 +44,13 @@
 - `CLI`
   - Best for one-shot local commands, shell scripts, and direct terminal usage.
 - `Local daemon`
-  - Best when you want a reusable long-lived local HTTP service exposing `status`, `GET /health`, and `POST /search` / `POST /fetch-*`.
+  - Best when you want a reusable long-lived local HTTP service exposing `status`, `GET /health`, and `POST /search` / `POST /fetch-*`. Start it explicitly with `open-websearch serve` and check it with `open-websearch status`.
 - `Skill`
   - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it typically works together with the CLI and/or local daemon to help an agent discover, activate, and use the smallest working path.
 
 ## CLI and Local Daemon
 
-CLI is for one-shot execution. The local daemon is a long-lived local HTTP service for repeated calls with lower startup friction.
+CLI is for one-shot execution. The local daemon is a long-lived local HTTP service for repeated calls with lower startup friction. Use `open-websearch serve` as the explicit daemon start command and `open-websearch status` as the explicit daemon status command.
 
 Build first:
 
@@ -62,12 +62,14 @@ Start the local daemon:
 
 ```bash
 npm run serve
+# globally installed: open-websearch serve
 ```
 
 Check status:
 
 ```bash
 npm run status -- --json
+# globally installed: open-websearch status --json
 ```
 
 Run a one-shot local CLI search:
@@ -75,6 +77,10 @@ Run a one-shot local CLI search:
 ```bash
 npm run search:cli -- "open web search" --json
 ```
+
+Notes:
+- Bare `open-websearch` is the MCP server compatibility entrypoint, not the recommended daemon start command for agent automation.
+- For content extraction, prefer searching first and then fetching a more specific result page. Some homepages and JS-heavy landing pages may not expose readable article text through `fetch-web`.
 
 For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`), see [docs/http-api.md](docs/http-api.md).
 

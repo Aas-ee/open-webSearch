@@ -132,13 +132,13 @@ MCP工具支持：
 - `CLI`
   - 适合一次性本地命令、shell 脚本和终端直用。
 - `本地 daemon`
-  - 适合需要复用的常驻本地 HTTP 服务，提供 `status`、`GET /health`、`POST /search` 和 `POST /fetch-*`。
+  - 适合需要复用的常驻本地 HTTP 服务，提供 `status`、`GET /health`、`POST /search` 和 `POST /fetch-*`。显式启动命令是 `open-websearch serve`，状态检查命令是 `open-websearch status`。
 - `skill`
   - 适合作为 agent 的引导层，帮助 agent 发现、启用并使用最小可行路径；skill 不替代 MCP、CLI 或本地 daemon，通常推荐与 CLI 和/或本地 daemon 搭配使用。
 
 ## CLI 与本地 daemon
 
-CLI 用于一次性执行。本地 daemon 是常驻的本地 HTTP 服务，适合重复调用并减少冷启动摩擦。
+CLI 用于一次性执行。本地 daemon 是常驻的本地 HTTP 服务，适合重复调用并减少冷启动摩擦。请用 `open-websearch serve` 显式启动 daemon，用 `open-websearch status` 显式检查状态。
 
 先构建：
 
@@ -150,12 +150,14 @@ npm run build
 
 ```bash
 npm run serve
+# 全局安装后：open-websearch serve
 ```
 
 查看状态：
 
 ```bash
 npm run status -- --json
+# 全局安装后：open-websearch status --json
 ```
 
 执行一次性本地 CLI 搜索：
@@ -163,6 +165,10 @@ npm run status -- --json
 ```bash
 npm run search:cli -- "open web search" --json
 ```
+
+说明：
+- 裸命令 `open-websearch` 走的是 MCP server 兼容入口，不是 agent 自动化里推荐的 daemon 启动方式。
+- 做正文提取时，优先先搜索，再对更具体的结果页调用 `fetch-web`。部分首页或重 JS 页面本身就不一定能提取出可读正文。
 
 本地 daemon HTTP API（`serve`、`status`、`GET /health`、`POST /search`、`POST /fetch-*`）请参考 [docs/http-api.md](docs/http-api.md)。
 

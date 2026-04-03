@@ -19,10 +19,13 @@ Use when:
 
 Minimal steps:
 1. Check whether the command is already available.
-2. If it is not, guide installation before writing config.
-3. Start or validate the local daemon path.
-4. Use `status` or an equivalent smoke check to confirm the daemon is ready.
-5. If the host runtime still needs MCP exposure, only then add or adjust MCP/client config.
+2. Before installation, check whether the user needs a proxy or alternate npm registry/mirror.
+3. If package installation is needed in a restricted network, ask before proceeding with long-running install steps.
+4. If it is not already installed, guide installation before writing config.
+5. Start or validate the local daemon path with explicit commands: `open-websearch serve` to start and `open-websearch status` to check readiness.
+6. Do not treat bare `open-websearch` as the recommended daemon start command for agent automation.
+7. If package installation hangs, times out, or fails on network access, suspect proxy or mirror configuration before treating it as an `open-websearch` failure.
+8. If the host runtime still needs MCP exposure, only then add or adjust MCP/client config.
 
 ## Existing MCP mode
 
@@ -79,6 +82,7 @@ Minimal steps:
    - existing Playwright package via `PLAYWRIGHT_MODULE_PATH`
    - existing remote browser via `PLAYWRIGHT_WS_ENDPOINT` or `PLAYWRIGHT_CDP_ENDPOINT`
 5. After setup, validate the browser-assisted path before claiming success.
+6. If Playwright package or browser installation hangs or fails on download, check proxy or npm mirror expectations before retrying.
 
 ## Validation target
 
