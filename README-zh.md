@@ -1,6 +1,6 @@
 <div align="center">
 
-# Open-WebSearch MCP 服务器
+# Open-WebSearch
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=%23de5a16)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
 [![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
@@ -12,7 +12,7 @@
 
 </div>
 
-一个基于多引擎搜索结果的模型上下文协议(MCP)服务器，支持免费网络搜索，无需API密钥。
+`open-websearch` 现已同时提供 MCP server、CLI 和本地 daemon，也可以配合 skill 引导的 agent 工作流一起使用，用于联网搜索与内容抓取，无需 API 密钥。
 
 
 <details>
@@ -125,6 +125,47 @@ MCP工具支持：
     - github（README文件）
     - 通用 HTTP(S) 网页 / Markdown 内容
 
+## 选择合适的入口
+
+- `MCP`
+  - 适合接入 Claude Desktop、Cherry Studio、Cursor 或其他 MCP 客户端。
+- `CLI`
+  - 适合一次性本地命令、shell 脚本和终端直用。
+- `本地 daemon`
+  - 适合需要复用的常驻本地 HTTP 服务，提供 `status`、`GET /health`、`POST /search` 和 `POST /fetch-*`。
+- `skill`
+  - 适合作为 agent 的引导层，帮助 agent 发现、启用并使用最小可行路径；skill 不替代 MCP、CLI 或本地 daemon。
+
+## CLI 与本地 daemon
+
+CLI 用于一次性执行。本地 daemon 是常驻的本地 HTTP 服务，适合重复调用并减少冷启动摩擦。
+
+先构建：
+
+```bash
+npm run build
+```
+
+启动本地 daemon：
+
+```bash
+npm run serve
+```
+
+查看状态：
+
+```bash
+npm run status -- --json
+```
+
+执行一次性本地 CLI 搜索：
+
+```bash
+npm run search:cli -- "open web search" --json
+```
+
+本地 daemon HTTP API（`serve`、`status`、`GET /health`、`POST /search`、`POST /fetch-*`）请参考 [docs/http-api.md](docs/http-api.md)。
+
 ## TODO
 - 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,Google等搜索引擎
 - 支持更多博客论坛、社交软件
@@ -132,6 +173,8 @@ MCP工具支持：
 - ~~支持GitHub README获取~~（已支持）
 
 ## 安装指南
+
+如果你是把 `open-websearch` 当作 MCP server 使用，请继续看下面的 MCP 安装方式。
 
 ### NPX 快速启动（推荐）
 
@@ -247,7 +290,6 @@ npm install playwright-core
 & "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe" `
   --remote-debugging-port=9222 `
   --user-data-dir="$env:TEMP\open-websearch-chrome"
-[types](src/types)
 $env:PLAYWRIGHT_PACKAGE="playwright-core"
 $env:PLAYWRIGHT_CDP_ENDPOINT="http://127.0.0.1:9222"
 $env:SEARCH_MODE="auto"

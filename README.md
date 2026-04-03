@@ -1,6 +1,6 @@
 <div align="center">
 
-# Open-WebSearch MCP Server
+# Open-WebSearch
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=%23de5a16)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Aas-ee/open-webSearch)](https://archestra.ai/mcp-catalog/aas-ee__open-websearch)
@@ -13,7 +13,7 @@
 
 </div>
 
-A Model Context Protocol (MCP) server based on multi-engine search results, supporting free web search without API keys.
+`open-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
 
 ## Features
 
@@ -37,6 +37,47 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
     - github (README files)
     - generic HTTP(S) page / Markdown content
 
+## Choose the Right Path
+
+- `MCP`
+  - Best when you want to connect `open-websearch` to Claude Desktop, Cherry Studio, Cursor, or another MCP client.
+- `CLI`
+  - Best for one-shot local commands, shell scripts, and direct terminal usage.
+- `Local daemon`
+  - Best when you want a reusable long-lived local HTTP service exposing `status`, `GET /health`, and `POST /search` / `POST /fetch-*`.
+- `Skill`
+  - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it helps an agent discover, activate, and use the smallest working path.
+
+## CLI and Local Daemon
+
+CLI is for one-shot execution. The local daemon is a long-lived local HTTP service for repeated calls with lower startup friction.
+
+Build first:
+
+```bash
+npm run build
+```
+
+Start the local daemon:
+
+```bash
+npm run serve
+```
+
+Check status:
+
+```bash
+npm run status -- --json
+```
+
+Run a one-shot local CLI search:
+
+```bash
+npm run search:cli -- "open web search" --json
+```
+
+For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`), see [docs/http-api.md](docs/http-api.md).
+
 ## TODO
 - Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), Google and other search engines
 - Support for more blogs, forums, and social platforms
@@ -44,6 +85,8 @@ A Model Context Protocol (MCP) server based on multi-engine search results, supp
 - ~~Support for GitHub README fetching~~ (already supported)
 
 ## Installation Guide
+
+If you are using `open-websearch` as an MCP server, continue with the MCP-oriented setup below.
 
 ### NPX Quick Start (Recommended)
 
