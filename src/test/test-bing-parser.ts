@@ -1,3 +1,4 @@
+import { hasSiteOperator, shouldSuggestRemovingSiteOperator } from '../engines/bing/bing.js';
 import { parseBingSearchResults } from '../engines/bing/parser.js';
 
 function assert(condition: unknown, message: string): void {
@@ -49,5 +50,22 @@ const fallbackResults = parseBingSearchResults(fallbackHtml, 5);
 assert(fallbackResults.length === 1, 'fallback layout should yield one result');
 assert(fallbackResults[0].title === 'Fallback title', 'fallback link title should parse');
 assert(fallbackResults[0].url === 'https://fallback.example.dev/path', 'fallback link url should parse');
+
+assert(hasSiteOperator('site:blink.new blink.new') === true, 'site operator should be detected');
+assert(hasSiteOperator('blink.new AI App Builder') === false, 'plain query should not be treated as site-restricted');
+assert(
+    shouldSuggestRemovingSiteOperator(
+        'site:blink.new blink.new',
+        new Error('page.waitForSelector: Timeout 15000ms exceeded.')
+    ) === true,
+    'site-restricted timeout should suggest removing site operator'
+);
+assert(
+    shouldSuggestRemovingSiteOperator(
+        'blink.new AI App Builder',
+        new Error('page.waitForSelector: Timeout 15000ms exceeded.')
+    ) === false,
+    'plain timeout should not suggest removing site operator'
+);
 
 console.log('Bing parser tests passed.');

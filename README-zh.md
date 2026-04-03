@@ -169,7 +169,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
-| `SEARCH_MODE` | `request` | `request`, `auto`, `playwright` | 搜索策略，当前仅对 Bing 生效：仅请求、请求失败后回退 Playwright、或强制 Playwright |
+| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | 搜索策略，当前仅对 Bing 生效：仅请求、请求失败后回退 Playwright、或强制 Playwright |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | 启用浏览器模式时优先解析哪种 Playwright 客户端包 |
 | `PLAYWRIGHT_MODULE_PATH` | 空 | 绝对路径或相对项目根目录路径 | 复用当前项目外部已经存在的 Playwright 客户端包 |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | 空 | 任意有效浏览器二进制路径 | 使用现有 Chromium/Chrome 可执行文件启动浏览器 |
@@ -454,13 +454,16 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 
 服务器提供六个工具：`search`、`fetchLinuxDoArticle`、`fetchCsdnArticle`、`fetchGithubReadme`、`fetchJuejinArticle` 和 `fetchWebContent`。
 
+本地 daemon HTTP API（`serve`、`status`、`GET /health`、`POST /search`、`POST /fetch-*`）请参考 [docs/http-api.md](docs/http-api.md)。
+
 ### search工具使用说明
 
 ```typescript
 {
   "query": string,        // 搜索查询词
   "limit": number,        // 可选：返回结果数量（默认：10）
-  "engines": string[]     // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin) 默认bing
+  "engines": string[],    // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage) 默认使用当前运行配置
+  "searchMode": string    // 可选：request、auto 或 playwright（当前仅对 Bing 生效）
 }
 ```
 

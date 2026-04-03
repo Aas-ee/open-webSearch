@@ -39,7 +39,7 @@ export const config: AppConfig = {
     allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?
         process.env.ALLOWED_SEARCH_ENGINES.split(',').map(e => e.trim()) :
         [],
-    searchMode: (process.env.SEARCH_MODE as AppConfig['searchMode']) || 'request',
+    searchMode: (process.env.SEARCH_MODE as AppConfig['searchMode']) || 'auto',
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',
@@ -71,8 +71,8 @@ if (!validSearchEngines.includes(config.defaultSearchEngine)) {
 }
 
 if (!validSearchModes.includes(config.searchMode)) {
-    console.warn(`Invalid SEARCH_MODE: "${config.searchMode}", falling back to "request"`);
-    config.searchMode = 'request';
+    console.warn(`Invalid SEARCH_MODE: "${config.searchMode}", falling back to "auto"`);
+    config.searchMode = 'auto';
 }
 
 if (!validPlaywrightPackages.includes(config.playwrightPackage)) {

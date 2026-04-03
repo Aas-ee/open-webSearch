@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { config } from '../../config.js';
+import { AppConfig, config } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
@@ -49,6 +49,19 @@ const BROWSER_CONTEXT_OPTIONS = {
     deviceScaleFactor: 1,
     colorScheme: 'light'
 };
+
+export function hasSiteOperator(query: string): boolean {
+    return /(^|\s)site:[^\s]+/i.test(query);
+}
+
+export function shouldSuggestRemovingSiteOperator(query: string, error: unknown): boolean {
+    if (!hasSiteOperator(query) || !(error instanceof Error)) {
+        return false;
+    }
+
+    const message = error.message.toLowerCase();
+    return message.includes('waitforselector') || message.includes('timeout');
+}
 
 function buildBingSearchUrl(query: string, pageNumber: number): string {
     const url = new URL(BING_BASE_URL);
@@ -520,7 +533,17 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
                 }
             }
 
-            return allResults.slice(0, limit);
+            const finalResults = allResults.slice(0, limit);
+            if (finalResults.length === 0 && hasSiteOperator(query)) {
+                throw new Error('Bing Playwright mode returned no results for a site:-restricted query. Retry without the site: prefix.');
+            }
+
+            return finalResults;
+        } catch (error) {
+            if (shouldSuggestRemovingSiteOperator(query, error)) {
+                throw new Error('Bing Playwright mode did not return results for a site:-restricted query. Retry without the site: prefix.');
+            }
+            throw error;
         } finally {
             await closePageContext();
         }
@@ -529,12 +552,18 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
     }
 }
 
-export async function searchBing(query: string, limit: number): Promise<SearchResult[]> {
-    if (config.searchMode === 'request') {
+export async function searchBing(
+    query: string,
+    limit: number,
+    options?: { searchMode?: AppConfig['searchMode'] }
+): Promise<SearchResult[]> {
+    const effectiveSearchMode = options?.searchMode ?? config.searchMode;
+
+    if (effectiveSearchMode === 'request') {
         return searchBingWithHttp(query, limit);
     }
 
-    if (config.searchMode === 'playwright') {
+    if (effectiveSearchMode === 'playwright') {
         return searchBingWithPlaywright(query, limit);
     }
 
