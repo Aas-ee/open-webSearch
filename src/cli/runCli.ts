@@ -59,6 +59,7 @@ function formatCliHelp(): string {
         'Notes:',
         '  - Use `open-websearch serve` to start the local daemon.',
         '  - Use `open-websearch status` to check daemon status.',
+        '  - `status` uses --base-url. Action commands such as `search` and `fetch-web` use --daemon-url.',
         '  - Bare `open-websearch` starts the MCP server compatibility path, not the recommended daemon path.',
         '  - MCP tool names differ from CLI commands. For example:',
         '      fetchWebContent -> fetch-web',
@@ -103,6 +104,8 @@ type DaemonTransportArgs = {
 };
 
 class DaemonUnavailableError extends Error {}
+class DaemonRequestTimeoutError extends Error {}
+class DaemonRequestFailedError extends Error {}
 
 export type RunCliOptions = {
     spawnDaemon?: (args: ParsedServeArgs) => Promise<void> | void;
@@ -117,10 +120,23 @@ function getDefaultDaemonBaseUrl(): string {
     return process.env.OPEN_WEBSEARCH_DAEMON_URL || `http://127.0.0.1:${process.env.OPEN_WEBSEARCH_DAEMON_PORT || '3210'}`;
 }
 
+function parsePositiveTimeout(value: string | undefined, fallback: number): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getDaemonActionTimeoutMs(transport: DaemonTransportArgs): number {
+    if (transport.daemonUrlExplicit) {
+        return parsePositiveTimeout(process.env.OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS, 15000);
+    }
+
+    return parsePositiveTimeout(process.env.OPEN_WEBSEARCH_DAEMON_DISCOVERY_TIMEOUT_MS, 300);
+}
+
 function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
     const passthrough: string[] = [];
     let daemonUrl = getDefaultDaemonBaseUrl();
-    let daemonUrlExplicit = false;
+    let daemonUrlExplicit = Boolean(process.env.OPEN_WEBSEARCH_DAEMON_URL);
     let shouldSpawn = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -129,6 +145,10 @@ function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
         if (arg === '--spawn') {
             shouldSpawn = true;
             continue;
+        }
+
+        if (arg === '--base-url') {
+            throw new Error('--base-url is only valid with `open-websearch status`. Use --daemon-url for search and fetch commands.');
         }
 
         if (arg === '--daemon-url') {
@@ -328,6 +348,10 @@ export function parseStatusArgs(argv: string[]): ParsedStatusArgs {
         if (arg === '--json') {
             json = true;
             continue;
+        }
+
+        if (arg === '--daemon-url') {
+            throw new Error('--daemon-url is only valid for search and fetch commands. Use --base-url with `open-websearch status`.');
         }
 
         if (arg === '--base-url') {
@@ -553,15 +577,25 @@ async function requestDaemonEnvelope<T>(
     path: string,
     body: Record<string, unknown>
 ): Promise<CliEnvelope<T>> {
+    const timeoutMs = getDaemonActionTimeoutMs(transport);
+
     try {
         return await requestJsonWithTimeout<CliEnvelope<T>>(new URL(path, transport.daemonUrl).toString(), {
             method: 'POST',
             body,
-            timeoutMs: transport.daemonUrlExplicit ? 2000 : 300
+            timeoutMs
         });
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new DaemonUnavailableError(`Local daemon at ${transport.daemonUrl} is not reachable: ${message}`);
+        if (message.includes('Timed out after')) {
+            throw new DaemonRequestTimeoutError(`Local daemon at ${transport.daemonUrl} timed out after ${timeoutMs}ms while processing ${path}`);
+        }
+
+        if (message.includes('ECONNREFUSED') || message.includes('ENOTFOUND') || message.includes('EHOSTUNREACH')) {
+            throw new DaemonUnavailableError(`Local daemon at ${transport.daemonUrl} is not reachable: ${message}`);
+        }
+
+        throw new DaemonRequestFailedError(`Local daemon at ${transport.daemonUrl} failed while processing ${path}: ${message}`);
     }
 }
 
@@ -581,7 +615,10 @@ async function tryDaemonRequest<T>(
             return await requestDaemonEnvelope<T>(transport, path, body);
         }
 
-        if (error instanceof DaemonUnavailableError && !transport.daemonUrlExplicit) {
+        if (
+            !transport.daemonUrlExplicit &&
+            (error instanceof DaemonUnavailableError || error instanceof DaemonRequestTimeoutError || error instanceof DaemonRequestFailedError)
+        ) {
             return null;
         }
         throw error;
@@ -603,6 +640,60 @@ function getUnknownCommandMessage(command: string): string {
     }
 
     return `Unknown CLI command: ${command}`;
+}
+
+function getDaemonCliErrorCode(error: unknown): string {
+    if (error instanceof DaemonUnavailableError) {
+        return 'daemon_unavailable';
+    }
+
+    if (error instanceof DaemonRequestTimeoutError) {
+        return 'daemon_timeout';
+    }
+
+    if (error instanceof DaemonRequestFailedError) {
+        return 'daemon_request_failed';
+    }
+
+    return 'engine_error';
+}
+
+function getDaemonCliErrorHint(error: unknown): string {
+    if (error instanceof DaemonUnavailableError) {
+        return 'Start the local daemon with `open-websearch serve`, or remove --daemon-url to use direct execution.';
+    }
+
+    if (error instanceof DaemonRequestTimeoutError) {
+        return 'The daemon is reachable but did not finish the request in time. Retry with a simpler request, raise OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS, or use direct execution without --daemon-url.';
+    }
+
+    if (error instanceof DaemonRequestFailedError) {
+        return 'The daemon accepted the request but did not complete it cleanly. Inspect daemon logs or retry without --daemon-url to use direct execution.';
+    }
+
+    return 'Retry with a different engine, or inspect proxy and search mode settings.';
+}
+
+function getDaemonCliErrorLabel(error: unknown, fallback: string): string {
+    if (error instanceof DaemonUnavailableError) {
+        return 'Local daemon unavailable';
+    }
+
+    if (error instanceof DaemonRequestTimeoutError) {
+        return 'Daemon request timed out';
+    }
+
+    if (error instanceof DaemonRequestFailedError) {
+        return 'Daemon request failed';
+    }
+
+    return fallback;
+}
+
+function isDaemonRequestError(error: unknown): boolean {
+    return error instanceof DaemonUnavailableError
+        || error instanceof DaemonRequestTimeoutError
+        || error instanceof DaemonRequestFailedError;
 }
 
 function resolveServeArgsFromDaemonUrl(daemonUrl: string): ParsedServeArgs {
@@ -751,14 +842,12 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    error instanceof DaemonUnavailableError ? 'daemon_unavailable' : 'engine_error',
+                    getDaemonCliErrorCode(error),
                     message,
-                    { hint: error instanceof DaemonUnavailableError
-                        ? 'Start the local daemon with `open-websearch serve`, or remove --daemon-url to use direct execution.'
-                        : 'Retry with a different engine, or inspect proxy and search mode settings.' }
+                    { hint: getDaemonCliErrorHint(error) }
                 ), null, 2));
             } else {
-                io.stderr(`${error instanceof DaemonUnavailableError ? 'Local daemon unavailable' : 'Search failed'}: ${message}`);
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Search failed')}: ${message}`);
             }
             return 1;
         }
@@ -824,14 +913,14 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    error instanceof DaemonUnavailableError ? 'daemon_unavailable' : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
                     message,
-                    { hint: error instanceof DaemonUnavailableError
-                        ? 'Start the local daemon with `open-websearch serve`, or remove --daemon-url to use direct execution.'
+                    { hint: isDaemonRequestError(error)
+                        ? getDaemonCliErrorHint(error)
                         : 'Use a public HTTP(S) URL and keep maxChars within the supported range.' }
                 ), null, 2));
             } else {
-                io.stderr(`Fetch failed: ${message}`);
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);
             }
             return 1;
         }
@@ -906,14 +995,14 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    error instanceof DaemonUnavailableError ? 'daemon_unavailable' : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
                     message,
-                    { hint: error instanceof DaemonUnavailableError
-                        ? 'Start the local daemon with `open-websearch serve`, or remove --daemon-url to use direct execution.'
+                    { hint: isDaemonRequestError(error)
+                        ? getDaemonCliErrorHint(error)
                         : 'Use a valid GitHub repository URL in HTTPS or SSH form.' }
                 ), null, 2));
             } else {
-                io.stderr(`Fetch failed: ${message}`);
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);
             }
             return 1;
         }
@@ -975,14 +1064,14 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    error instanceof DaemonUnavailableError ? 'daemon_unavailable' : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
                     message,
-                    { hint: error instanceof DaemonUnavailableError
-                        ? 'Start the local daemon with `open-websearch serve`, or remove --daemon-url to use direct execution.'
+                    { hint: isDaemonRequestError(error)
+                        ? getDaemonCliErrorHint(error)
                         : 'Use a valid blog.csdn.net article URL.' }
                 ), null, 2));
             } else {
-                io.stderr(`Fetch failed: ${message}`);
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);
             }
             return 1;
         }
@@ -1044,14 +1133,14 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    error instanceof DaemonUnavailableError ? 'daemon_unavailable' : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
                     message,
-                    { hint: error instanceof DaemonUnavailableError
-                        ? 'Start the local daemon with `open-websearch serve`, or remove --daemon-url to use direct execution.'
+                    { hint: isDaemonRequestError(error)
+                        ? getDaemonCliErrorHint(error)
                         : 'Use a valid juejin.cn post URL.' }
                 ), null, 2));
             } else {
-                io.stderr(`Fetch failed: ${message}`);
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);
             }
             return 1;
         }
@@ -1113,14 +1202,14 @@ export async function runCli(
             const message = error instanceof Error ? error.message : String(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    error instanceof DaemonUnavailableError ? 'daemon_unavailable' : 'validation_failed',
+                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
                     message,
-                    { hint: error instanceof DaemonUnavailableError
-                        ? 'Start the local daemon with `open-websearch serve`, or remove --daemon-url to use direct execution.'
+                    { hint: isDaemonRequestError(error)
+                        ? getDaemonCliErrorHint(error)
                         : 'Use a valid linux.do topic JSON URL.' }
                 ), null, 2));
             } else {
-                io.stderr(`Fetch failed: ${message}`);
+                io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);
             }
             return 1;
         }

@@ -93,10 +93,11 @@ Apply the decision rules above in order: direct URL fetch first, focused search 
 - If the user already has usable MCP tools, do not force them through CLI/daemon migration just for consistency.
 - If direct access fails in restricted networks, check `USE_PROXY` and `PROXY_URL`.
 - If setup requires `npm install`, `npm install -g`, `npx`, or Playwright browser downloads, confirm proxy or mirror expectations before starting the install step in restricted networks.
+- For npm-based installation, prefer npm-specific proxy or registry guidance first when the user's environment depends on it. Typical working paths include `npm --proxy ... --https-proxy ... install ...` for one-shot installs, or `npm config set proxy`, `npm config set https-proxy`, and `npm config set registry` before retrying.
 - `FETCH_WEB_INSECURE_TLS` only affects `fetchWebContent`, not the search engines.
 - `SEARCH_MODE` currently matters for Bing only.
 - If an error mentions `browserType.launch`, `Executable doesn't exist`, `Playwright client is not available`, or a missing Chromium executable, treat it first as missing browser dependency or browser configuration, not as a generic `open-websearch` core failure.
-- If package installation hangs, times out, or fails to reach a registry, suspect proxy, mirror, or outbound network configuration before assuming the package or skill is broken.
+- If package installation hangs, times out, or fails to reach a registry, suspect npm proxy, npm registry mirror, or outbound network configuration before assuming the package or skill is broken.
 - Keep citations or source attributions tied to the fetched result URLs, not just the search engine name.
 
 ## MCP unavailable response
