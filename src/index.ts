@@ -8,7 +8,6 @@ import express from 'express';
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import cors from 'cors';
-import {config} from "./config.js";
 import { runCli } from './cli/runCli.js';
 import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
@@ -35,8 +34,25 @@ function createServer(runtime: OpenWebSearchRuntime): McpServer {
   return server;
 }
 
+function shouldSuppressStartupLogs(argv: string[]): boolean {
+  if (argv.length === 0) {
+    return false;
+  }
+
+  const [command] = argv;
+  if (command === '--help' || command === '-h' || command === 'help' || command === 'status') {
+    return true;
+  }
+
+  return argv.includes('--json');
+}
+
 async function main() {
   const argv = process.argv.slice(2);
+  if (shouldSuppressStartupLogs(argv)) {
+    process.env.OPEN_WEBSEARCH_QUIET_STARTUP = 'true';
+  }
+  const { config } = await import('./config.js');
   const runtime = shouldCreateFullRuntimeForInvocation(argv)
     ? (await import('./runtime/createRuntime.js')).createOpenWebSearchRuntime()
     : ({

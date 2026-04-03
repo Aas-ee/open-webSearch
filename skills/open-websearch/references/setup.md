@@ -20,8 +20,8 @@ Use when:
 Minimal steps:
 1. Check whether the command is already available.
 2. If it is not, guide installation before writing config.
-3. Start or validate the local daemon path.
-4. Use `status` or an equivalent smoke check to confirm the daemon is ready.
+3. Start or validate the local daemon path with explicit commands: `open-websearch serve` to start and `open-websearch status` to check readiness.
+4. Do not treat bare `open-websearch` as the recommended daemon start command for agent automation.
 5. If the host runtime still needs MCP exposure, only then add or adjust MCP/client config.
 
 ## Existing MCP mode

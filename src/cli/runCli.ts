@@ -23,6 +23,14 @@ const COMMANDS_REQUIRING_RUNTIME = new Set([
     'serve'
 ]);
 
+const MCP_TO_CLI_COMMAND_HINTS: Record<string, string> = {
+    fetchWebContent: 'fetch-web',
+    fetchGithubReadme: 'fetch-github-readme',
+    fetchCsdnArticle: 'fetch-csdn',
+    fetchJuejinArticle: 'fetch-juejin',
+    fetchLinuxDoArticle: 'fetch-linuxdo'
+};
+
 export function commandNeedsRuntime(argv: string[]): boolean {
     if (argv.length === 0) {
         return false;
@@ -30,6 +38,32 @@ export function commandNeedsRuntime(argv: string[]): boolean {
 
     const [command] = argv;
     return COMMANDS_REQUIRING_RUNTIME.has(command);
+}
+
+function formatCliHelp(): string {
+    return [
+        'open-websearch CLI',
+        '',
+        'Explicit daemon commands:',
+        '  open-websearch serve [--host HOST] [--port PORT]',
+        '  open-websearch status [--base-url URL] [--json]',
+        '',
+        'One-shot CLI commands:',
+        '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--json]',
+        '  open-websearch fetch-web <url> [--max-chars N] [--json]',
+        '  open-websearch fetch-github-readme <url> [--json]',
+        '  open-websearch fetch-csdn <url> [--json]',
+        '  open-websearch fetch-juejin <url> [--json]',
+        '  open-websearch fetch-linuxdo <url> [--json]',
+        '',
+        'Notes:',
+        '  - Use `open-websearch serve` to start the local daemon.',
+        '  - Use `open-websearch status` to check daemon status.',
+        '  - Bare `open-websearch` starts the MCP server compatibility path, not the recommended daemon path.',
+        '  - MCP tool names differ from CLI commands. For example:',
+        '      fetchWebContent -> fetch-web',
+        '      fetchGithubReadme -> fetch-github-readme'
+    ].join('\n');
 }
 
 export type ParsedSearchArgs = {
@@ -562,6 +596,15 @@ function formatEnvelopeError(envelope: CliEnvelope<unknown>): string {
     return envelope.error?.message ?? 'Unknown daemon error';
 }
 
+function getUnknownCommandMessage(command: string): string {
+    const mapped = MCP_TO_CLI_COMMAND_HINTS[command];
+    if (mapped) {
+        return `Unknown CLI command: ${command}. Did you mean \`${mapped}\`?`;
+    }
+
+    return `Unknown CLI command: ${command}`;
+}
+
 function resolveServeArgsFromDaemonUrl(daemonUrl: string): ParsedServeArgs {
     const parsed = new URL(daemonUrl);
     if (parsed.protocol !== 'http:') {
@@ -638,6 +681,11 @@ export async function runCli(
     }
 
     const [command, ...rest] = argv;
+
+    if (command === '--help' || command === '-h' || command === 'help') {
+        io.stdout(formatCliHelp());
+        return 0;
+    }
 
     if (command === 'search') {
         let transport: DaemonTransportArgs;
@@ -1104,15 +1152,22 @@ export async function runCli(
             );
             if (parsed.json) {
                 io.stdout(JSON.stringify(payload, null, 2));
-            } else if (isSuccessEnvelope(payload)) {
-                io.stdout(formatStatusHumanReadable(payload.data));
+            }
+
+            if (isSuccessEnvelope(payload)) {
+                if (!parsed.json) {
+                    io.stdout(formatStatusHumanReadable(payload.data));
+                }
             } else {
-                io.stderr(`Local open-websearch daemon returned an error: ${formatEnvelopeError(payload)}`);
-                if (payload.hint) {
-                    io.stderr(payload.hint);
+                if (!parsed.json) {
+                    io.stderr(`Local open-websearch daemon returned an error: ${formatEnvelopeError(payload)}`);
+                    if (payload.hint) {
+                        io.stderr(payload.hint);
+                    }
                 }
                 return 1;
             }
+
             return 0;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -1186,16 +1241,23 @@ export async function runCli(
         }
     }
 
+    const unknownCommandMessage = getUnknownCommandMessage(command);
+    const unknownCommandHint = [
+        'Use `open-websearch --help` to see CLI commands.',
+        'MCP tool names are not always the same as CLI commands.'
+    ].join(' ');
+
     if (rest.includes('--json')) {
         io.stdout(JSON.stringify(createErrorEnvelope(
             'invalid_arguments',
-            `Unknown CLI command: ${command}`,
+            unknownCommandMessage,
             {
-                hint: 'Supported commands: search, fetch-web, fetch-github-readme, fetch-csdn, fetch-juejin, fetch-linuxdo, status, serve.'
+                hint: unknownCommandHint
             }
         ), null, 2));
     } else {
-        io.stderr(`Unknown CLI command: ${command}`);
+        io.stderr(unknownCommandMessage);
+        io.stderr(unknownCommandHint);
     }
     return 1;
 }

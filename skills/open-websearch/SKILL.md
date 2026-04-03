@@ -44,6 +44,7 @@ When capability is missing:
    - setup completed but activation pending reload/reconnect
    - setup incomplete or failed
 7. Do not bring up Playwright or browser setup by default for ordinary search or page fetch; only escalate to browser-assisted guidance when the user explicitly wants Bing Playwright mode, browser fallback is expected, or the failure strongly suggests missing browser support.
+8. When the goal is to start or validate the local daemon path, use explicit commands: `open-websearch serve` to start it and `open-websearch status` to check it. Do not treat bare `open-websearch` as the recommended daemon start command.
 
 ## Default behavior
 
@@ -87,6 +88,7 @@ Apply the decision rules above in order: direct URL fetch first, focused search 
 ## Reliability notes
 
 - If a local daemon is available, it is acceptable to prefer the CLI/daemon path over MCP for low-friction retrieval.
+- For agent automation, prefer explicit commands: `open-websearch serve` for daemon startup, `open-websearch status` for daemon checks, and one-shot commands such as `open-websearch search ...` or `open-websearch fetch-web ...` for direct actions.
 - If the user already has usable MCP tools, do not force them through CLI/daemon migration just for consistency.
 - If direct access fails in restricted networks, check `USE_PROXY` and `PROXY_URL`.
 - `FETCH_WEB_INSECURE_TLS` only affects `fetchWebContent`, not the search engines.
