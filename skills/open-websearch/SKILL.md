@@ -25,6 +25,7 @@ Assumption:
 2. If either path is available, use the retrieval rules below and prefer the smallest working path.
 3. If neither path is available, explain the missing capability, state the consequence, ask whether the user wants to continue with setup or enablement, and then follow the smallest matching setup path.
 4. Keep the line clear between `not configured`, `setup completed but not active in this runtime`, and `already searched`; do not imply live retrieval happened when it did not.
+5. Treat `open-websearch --help` as the primary CLI reference. When command names, daemon flags, spawn behavior, or action parameters are unclear, check `--help` before guessing.
 
 ## Setup and activation workflow
 
@@ -90,6 +91,7 @@ Apply the decision rules above in order: direct URL fetch first, focused search 
 
 - If a local daemon is available, it is acceptable to prefer the CLI/daemon path over MCP for low-friction retrieval.
 - For agent automation, prefer explicit commands: `open-websearch serve` for daemon startup, `open-websearch status` for daemon checks, and one-shot commands such as `open-websearch search ...` or `open-websearch fetch-web ...` for direct actions.
+- If CLI behavior is unclear, or if command names or flags may have changed, consult `open-websearch --help` first and follow the current help output rather than relying on memory.
 - If the user already has usable MCP tools, do not force them through CLI/daemon migration just for consistency.
 - If direct access fails in restricted networks, check `USE_PROXY` and `PROXY_URL`.
 - If setup requires `npm install`, `npm install -g`, `npx`, or Playwright browser downloads, confirm proxy or mirror expectations before starting the install step in restricted networks.

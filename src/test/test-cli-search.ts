@@ -861,6 +861,11 @@ async function testRunCliHelp(): Promise<void> {
     assert(stdout[0].includes('open-websearch CLI'), 'CLI help header');
     assert(stdout[0].includes('open-websearch serve'), 'CLI help serve usage');
     assert(stdout[0].includes('fetchWebContent -> fetch-web'), 'CLI help should distinguish MCP tool names');
+    assert(stdout[0].includes('--daemon-url URL'), 'CLI help should mention daemon-url');
+    assert(stdout[0].includes('--spawn'), 'CLI help should mention spawn');
+    assert(stdout[0].includes('--base-url URL'), 'CLI help should mention base-url');
+    assert(stdout[0].includes('--search-mode'), 'CLI help should mention search-mode');
+    assert(stdout[0].includes('--max-chars'), 'CLI help should mention max-chars');
 
     console.log('✅ CLI help');
 }

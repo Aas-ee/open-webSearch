@@ -140,6 +140,8 @@ MCP工具支持：
 
 CLI 用于一次性执行。本地 daemon 是常驻的本地 HTTP 服务，适合重复调用并减少冷启动摩擦。请用 `open-websearch serve` 显式启动 daemon，用 `open-websearch status` 显式检查状态。
 
+`search`、`fetch-web` 这类 action commands 会在默认本地 daemon 可用时优先尝试走 daemon；如果显式传入 `--daemon-url`，则会固定走该 daemon 路径，并关闭静默回退到 direct execution 的行为。
+
 先构建：
 
 ```bash
