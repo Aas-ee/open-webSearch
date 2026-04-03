@@ -1,6 +1,6 @@
 {
   "name": "open-websearch",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "description": "web search the internet",
   "type": "module",
   "bin": {
