@@ -23,6 +23,7 @@ Stage script:
    - Confirm whether the user wants a quick one-shot path or a reusable local CLI/daemon path.
    - Confirm whether the environment needs npm proxy, npm mirror, or runtime proxy settings.
    - Check whether the user already has a reusable local checkout instead of needing package installation.
+   - If daemon startup is expected to be followed immediately by live `search`, `fetch-web`, or other public-page retrieval, confirm runtime proxy needs before starting the daemon. If the goal is only `serve` plus `status`, runtime proxy can wait.
 2. Confirm risky actions.
    - Ask before package installation, global installation, daemon startup, or MCP/client config changes.
 3. Perform the smallest matching action.
@@ -41,6 +42,7 @@ Useful npm-oriented guidance:
 - One-shot proxied installs may work better with explicit npm flags such as `npm --proxy ... --https-proxy ... install ...`.
 - Persistent npm access may work better with `npm config set proxy`, `npm config set https-proxy`, and `npm config set registry`.
 - Do not assume runtime env vars like `USE_PROXY` or `PROXY_URL` will fix npm package downloads; they are for `open-websearch` runtime traffic, not npm registry access.
+- Keep that distinction explicit: npm proxy or registry settings help installation, while runtime proxy settings affect the networked search/fetch work that happens after `open-websearch serve`.
 
 ## Existing MCP mode
 
