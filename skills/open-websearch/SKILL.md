@@ -56,6 +56,7 @@ When capability is missing, follow this order:
 8. Do not bring up Playwright or browser setup by default for ordinary search or page fetch; only escalate to browser-assisted guidance when the user explicitly wants Bing Playwright mode, browser fallback is expected, or the failure strongly suggests missing browser support.
 9. When the goal is to start or validate the local daemon path, use explicit commands: `open-websearch serve` to start it and `open-websearch status` to check it. Do not treat bare `open-websearch` as the recommended daemon start command.
 10. During setup, when package installation is required, ask about proxy or npm mirror needs before long-running install steps in restricted networks. If installation repeatedly hangs, times out, or fails on package download, treat that as an environment or network issue first, not as an `open-websearch` core failure.
+11. If the next step after daemon startup is expected to perform live network actions such as `search`, `fetch-web`, or other public-page retrieval, ask about runtime proxy needs before starting `open-websearch serve`. If the goal is only minimal local validation such as `serve` followed by `status`, runtime proxy can wait until a real networked action is planned.
 
 ## Default behavior
 
@@ -107,6 +108,7 @@ Apply the decision rules above in order: direct URL fetch first, focused search 
 - If direct access fails in restricted networks, check `USE_PROXY` and `PROXY_URL`.
 - If setup requires `npm install`, `npm install -g`, `npx`, or Playwright browser downloads, confirm proxy or mirror expectations before starting the install step in restricted networks.
 - For npm-based installation, prefer npm-specific proxy or registry guidance first when the user's environment depends on it. Typical working paths include `npm --proxy ... --https-proxy ... install ...` for one-shot installs, or `npm config set proxy`, `npm config set https-proxy`, and `npm config set registry` before retrying.
+- Keep npm proxy or registry guidance separate from runtime proxy guidance: npm proxy or mirror settings help package installation, while runtime proxy settings affect `open-websearch serve` and the networked search/fetch actions that follow it.
 - `FETCH_WEB_INSECURE_TLS` only affects `fetchWebContent`, not the search engines.
 - `SEARCH_MODE` currently matters for Bing only.
 - If an error mentions `browserType.launch`, `Executable doesn't exist`, `Playwright client is not available`, or a missing Chromium executable, treat it first as missing browser dependency or browser configuration, not as a generic `open-websearch` core failure.
