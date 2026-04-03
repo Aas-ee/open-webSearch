@@ -136,6 +136,43 @@ MCP工具支持：
 - `skill`
   - 适合作为 agent 的引导层，帮助 agent 发现、启用并使用最小可行路径；skill 不替代 MCP、CLI 或本地 daemon，通常推荐与 CLI 和/或本地 daemon 搭配使用。
 
+## 配合 skill 使用
+
+先给 agent 安装 `open-websearch` skill：
+
+```bash
+npx skills add https://github.com/Aas-ee/open-webSearch --skill open-websearch
+```
+
+首次使用时，skill 通常会先检测当前环境里是否已经有可用的 `open-websearch` path；如果没有，则先引导安装、启用和验证，确认 capability active 之后，再通过最小可行路径执行搜索或抓取。
+
+如果当前环境里 agent 不能自动完成 setup 或 activation，你也可以明确让它先启动本地 daemon：
+
+```bash
+open-websearch serve
+open-websearch status
+```
+
+请把安装代理和运行时代理分开理解：
+
+- 安装阶段代理 / 镜像
+  - 用于 skill 或 agent 安装 `open-websearch`、`playwright` 等 npm 包时。
+  - 在受限网络里，npm 自己的代理参数或 npm config 往往比通用 shell 代理变量更稳，例如：
+
+```bash
+npm --proxy http://127.0.0.1:7890 --https-proxy http://127.0.0.1:7890 install -g open-websearch
+```
+
+- 运行时代理
+  - 用于 daemon 已安装并准备执行联网 `search` / `fetch` 时。
+  - 这影响的是 `open-websearch serve` 启动后的联网请求，例如：
+
+```bash
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 open-websearch serve
+```
+
+如果安装阶段需要 npm 代理，而 daemon 启动后联网 search/fetch 也需要代理，那么这两步要分别处理，不要混成同一种代理设置。
+
 ## CLI 与本地 daemon
 
 CLI 用于一次性执行。本地 daemon 是常驻的本地 HTTP 服务，适合重复调用并减少冷启动摩擦。请用 `open-websearch serve` 显式启动 daemon，用 `open-websearch status` 显式检查状态。

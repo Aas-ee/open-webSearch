@@ -48,6 +48,43 @@
 - `Skill`
   - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it typically works together with the CLI and/or local daemon to help an agent discover, activate, and use the smallest working path.
 
+## Use with a Skill
+
+Install the `open-websearch` skill for your agent first:
+
+```bash
+npx skills add https://github.com/Aas-ee/open-webSearch --skill open-websearch
+```
+
+On first use, the skill typically follows this path: detect whether a usable `open-websearch` path already exists, guide setup/enablement if it does not, validate that the capability is active, and only then continue with search or fetch through the smallest working path.
+
+If the current environment cannot complete setup or activation automatically, you can explicitly have the agent start the local daemon first:
+
+```bash
+open-websearch serve
+open-websearch status
+```
+
+Keep installation proxy settings separate from runtime proxy settings:
+
+- Installation proxy / mirror
+  - Use this when the skill or agent is installing `open-websearch`, `playwright`, or other npm packages.
+  - In restricted networks, npm-specific flags or npm config often work better than generic shell proxy variables, for example:
+
+```bash
+npm --proxy http://127.0.0.1:7890 --https-proxy http://127.0.0.1:7890 install -g open-websearch
+```
+
+- Runtime proxy
+  - Use this when the daemon is already installed and is about to perform live `search` / `fetch` work.
+  - This affects the `open-websearch` network traffic after `serve` starts, for example:
+
+```bash
+USE_PROXY=true PROXY_URL=http://127.0.0.1:7890 open-websearch serve
+```
+
+If the agent can only get through the package-install step with npm proxy settings, but live search/fetch also needs a proxy after startup, those are two separate configuration steps and should be handled separately.
+
 ## CLI and Local Daemon
 
 CLI is for one-shot execution. The local daemon is a long-lived local HTTP service for repeated calls with lower startup friction. Use `open-websearch serve` as the explicit daemon start command and `open-websearch status` as the explicit daemon status command.
