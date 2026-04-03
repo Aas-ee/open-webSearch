@@ -17,15 +17,25 @@ Use when:
 - the user wants the lowest-friction local setup
 - there is no already-working MCP or HTTP path to reuse
 
-Minimal steps:
-1. Check whether the command is already available.
-2. Before installation, check whether the user needs a proxy or alternate npm registry/mirror.
-3. If package installation is needed in a restricted network, ask before proceeding with long-running install steps.
-4. If it is not already installed, guide installation before writing config.
-5. Start or validate the local daemon path with explicit commands: `open-websearch serve` to start and `open-websearch status` to check readiness.
-6. Do not treat bare `open-websearch` as the recommended daemon start command for agent automation.
-7. If package installation hangs, times out, or fails on network access, suspect proxy or mirror configuration before treating it as an `open-websearch` failure.
-8. If the host runtime still needs MCP exposure, only then add or adjust MCP/client config.
+Stage script:
+1. Collect prerequisites.
+   - First check whether the command is already available.
+   - Confirm whether the user wants a quick one-shot path or a reusable local CLI/daemon path.
+   - Confirm whether the environment needs npm proxy, npm mirror, or runtime proxy settings.
+   - Check whether the user already has a reusable local checkout instead of needing package installation.
+2. Confirm risky actions.
+   - Ask before package installation, global installation, daemon startup, or MCP/client config changes.
+3. Perform the smallest matching action.
+   - If the command already exists, reuse it.
+   - If package installation is needed, guide installation before writing config.
+   - Start or validate the local daemon path with explicit commands: `open-websearch serve` to start and `open-websearch status` to check readiness.
+   - Do not treat bare `open-websearch` as the recommended daemon start command for agent automation.
+   - If the host runtime still needs MCP exposure, only then add or adjust MCP/client config.
+4. Validate.
+   - Confirm daemon readiness with `open-websearch status`.
+   - If possible, run a minimal one-shot smoke check.
+   - Do not treat installation alone as completion.
+5. If package installation hangs, times out, or fails on network access, suspect proxy or mirror configuration before treating it as an `open-websearch` failure.
 
 Useful npm-oriented guidance:
 - One-shot proxied installs may work better with explicit npm flags such as `npm --proxy ... --https-proxy ... install ...`.
@@ -38,11 +48,17 @@ Use when:
 - the workspace already should expose `open-websearch` tools
 - the likely problem is validation, reconnection, or reload
 
-Minimal steps:
-1. Confirm whether the current runtime should already see the tools.
-2. Check whether the issue is missing activation rather than missing installation.
-3. Reconnect, reload, or update the relevant client config only as needed.
-4. Validate that the runtime now exposes the core tools.
+Stage script:
+1. Collect prerequisites.
+   - Confirm whether the current runtime should already see the tools.
+   - Confirm whether the issue is activation/reconnection rather than installation.
+2. Confirm risky actions.
+   - Ask before changing MCP/client config or reconnecting a running client in a way that changes the user's environment.
+3. Perform.
+   - Reconnect, reload, or update the relevant client config only as needed.
+4. Validate.
+   - Confirm that the runtime now exposes the core tools.
+   - Do not stop at “config updated”; verify tool visibility.
 
 ## Local source/build mode
 
@@ -51,11 +67,18 @@ Use when:
 - a local project entrypoint such as `node build/index.js` is more appropriate than reinstalling
 - reusing the current checkout is smaller than creating a second install path
 
-Minimal steps:
-1. Check whether the local build output or entrypoint exists.
-2. Reuse that local entrypoint to start or validate the local daemon path.
-3. If needed, reuse that same entrypoint in MCP/client configuration.
-4. Validate that the runtime now exposes the core tools or a working local path.
+Stage script:
+1. Collect prerequisites.
+   - Check whether the local build output or entrypoint exists.
+   - Confirm that reusing the current checkout is smaller than creating a second install path.
+2. Confirm risky actions.
+   - Ask before changing local config, wiring that entrypoint into MCP/client config, or starting a long-lived daemon from that checkout.
+3. Perform.
+   - Reuse that local entrypoint to start or validate the local daemon path.
+   - If needed, reuse that same entrypoint in MCP/client configuration.
+4. Validate.
+   - Confirm that the entrypoint actually works.
+   - Confirm that the runtime now exposes the core tools or a working local path.
 
 ## Existing HTTP endpoint mode
 
@@ -63,11 +86,17 @@ Use when:
 - the user already has a reachable `open-websearch` HTTP endpoint
 - the goal is to connect the current workspace, not create a new local server
 
-Minimal steps:
-1. Confirm the endpoint details.
-2. Prefer connecting the current workflow to that endpoint rather than creating a new local process.
-3. Configure CLI or MCP/client access to that endpoint as needed.
-4. Validate connectivity and check that the core tools appear.
+Stage script:
+1. Collect prerequisites.
+   - Confirm the endpoint details.
+   - Confirm that connecting to the existing endpoint is smaller than creating a new local process.
+2. Confirm risky actions.
+   - Ask before writing endpoint-related config or switching the current workflow to a different remote/local HTTP service.
+3. Perform.
+   - Configure CLI or MCP/client access to that endpoint as needed.
+4. Validate.
+   - Validate connectivity first.
+   - Then check that the core tools or equivalent path appear.
 
 ## Browser-assisted / Playwright mode
 
@@ -77,18 +106,23 @@ Use when:
 - browser-assisted cookie retry or browser-rendered HTML is needed
 - request mode is insufficient and the failure strongly suggests browser-only content or blocked request-mode access
 
-Minimal steps:
-1. First distinguish ordinary search/fetch setup from browser-assisted setup.
-2. Do not suggest Playwright installation for ordinary search, `fetchWebContent`, or `fetchGithubReadme` unless browser assistance is actually needed.
-3. If browser mode is required, explain that the published package does not bundle Playwright browser binaries by default.
-4. Prefer the smallest fitting path:
+Stage script:
+1. Collect prerequisites.
+   - First distinguish ordinary search/fetch setup from browser-assisted setup.
+   - Do not suggest Playwright installation for ordinary search, `fetchWebContent`, or `fetchGithubReadme` unless browser assistance is actually needed.
+   - Confirm whether the user already has a Playwright client, a browser binary, or a remote browser endpoint.
+2. Confirm risky actions.
+   - Ask before installing Playwright packages, downloading browser binaries, or changing browser endpoint configuration.
+3. Perform the smallest fitting path.
    - local install: `npm install playwright` and `npx playwright install chromium`
    - existing browser binary with a Playwright client (commonly `playwright-core`) and `PLAYWRIGHT_EXECUTABLE_PATH`
    - existing Playwright package via `PLAYWRIGHT_MODULE_PATH`
    - existing remote browser via `PLAYWRIGHT_WS_ENDPOINT` or `PLAYWRIGHT_CDP_ENDPOINT`
-5. After setup, validate the browser-assisted path before claiming success.
-6. If Playwright package or browser installation hangs or fails on download, check proxy or npm mirror expectations before retrying.
-7. If Playwright is being installed through npm, the same npm proxy or registry guidance applies before treating the failure as a browser-mode problem.
+4. Validate.
+   - Validate the browser-assisted path before claiming success.
+   - If the user specifically wants Bing Playwright mode, verify that the browser-assisted path is actually reachable.
+5. If Playwright package or browser installation hangs or fails on download, check proxy or npm mirror expectations before retrying.
+6. If Playwright is being installed through npm, the same npm proxy or registry guidance applies before treating the failure as a browser-mode problem.
 
 ## Validation target
 

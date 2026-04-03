@@ -29,24 +29,33 @@ Assumption:
 
 ## Setup and activation workflow
 
-When capability is missing:
+When capability is missing, follow this order:
 
-1. First determine whether the user needs local CLI/daemon setup, local MCP configuration, HTTP connection setup, source/build reuse, or just validation/reconnection.
-2. Prefer the smallest setup path that matches the user's environment.
-3. Before making changes, ask whether the user wants to continue with MCP setup or enablement.
-4. If the user agrees, choose one path:
+1. Detect the current state.
+   - First determine whether the user needs local CLI/daemon setup, local MCP configuration, HTTP connection setup, source/build reuse, or only validation/reconnection.
+2. Choose the smallest matching path.
+   - Prefer the path that reuses what already exists instead of installing a second path.
+3. Collect required inputs before doing work.
+   - Confirm the target path: local CLI/daemon, existing MCP, local source/build reuse, or existing HTTP endpoint.
+   - Confirm whether the environment needs npm proxy, npm mirror, or runtime proxy settings.
+   - Confirm whether there is already a reusable local command, checkout, daemon, endpoint, or client config.
+   - If browser-assisted mode may be needed, confirm whether Playwright, a browser binary, or a remote browser endpoint already exists.
+4. Confirm risky actions before executing them.
+   - Ask before installing packages, downloading Playwright or browser binaries, editing MCP/client config, starting a long-lived daemon, or writing endpoint-related config.
+5. Perform the chosen path only after the required inputs and confirmations are in place.
    - local CLI/daemon mode when the runtime can launch `open-websearch` directly
    - existing MCP mode when the workspace already exposes the tools and only needs validation or reconnection
    - local source/build mode when the user already has a working local checkout
    - existing HTTP endpoint mode when the user already has a reachable `open-websearch` server
-5. After setup, validate before claiming success.
-6. Distinguish clearly between:
+6. Validate before claiming success.
+   - Do not silently skip validation, and do not treat package installation or config changes as success by themselves.
+7. Report the final state explicitly.
    - capability active
    - setup completed but activation pending reload/reconnect
    - setup incomplete or failed
-7. Do not bring up Playwright or browser setup by default for ordinary search or page fetch; only escalate to browser-assisted guidance when the user explicitly wants Bing Playwright mode, browser fallback is expected, or the failure strongly suggests missing browser support.
-8. When the goal is to start or validate the local daemon path, use explicit commands: `open-websearch serve` to start it and `open-websearch status` to check it. Do not treat bare `open-websearch` as the recommended daemon start command.
-9. During setup, when package installation is required, ask about proxy or npm mirror needs before long-running install steps in restricted networks. If installation repeatedly hangs, times out, or fails on package download, treat that as an environment or network issue first, not as an `open-websearch` core failure.
+8. Do not bring up Playwright or browser setup by default for ordinary search or page fetch; only escalate to browser-assisted guidance when the user explicitly wants Bing Playwright mode, browser fallback is expected, or the failure strongly suggests missing browser support.
+9. When the goal is to start or validate the local daemon path, use explicit commands: `open-websearch serve` to start it and `open-websearch status` to check it. Do not treat bare `open-websearch` as the recommended daemon start command.
+10. During setup, when package installation is required, ask about proxy or npm mirror needs before long-running install steps in restricted networks. If installation repeatedly hangs, times out, or fails on package download, treat that as an environment or network issue first, not as an `open-websearch` core failure.
 
 ## Default behavior
 
@@ -92,6 +101,8 @@ Apply the decision rules above in order: direct URL fetch first, focused search 
 - If a local daemon is available, it is acceptable to prefer the CLI/daemon path over MCP for low-friction retrieval.
 - For agent automation, prefer explicit commands: `open-websearch serve` for daemon startup, `open-websearch status` for daemon checks, and one-shot commands such as `open-websearch search ...` or `open-websearch fetch-web ...` for direct actions.
 - If CLI behavior is unclear, or if command names or flags may have changed, consult `open-websearch --help` first and follow the current help output rather than relying on memory.
+- In setup flows, collect required inputs before starting install or config work; do not wait for a half-completed setup to discover missing prerequisites.
+- For installation, config edits, daemon startup, Playwright downloads, or external endpoint changes, ask first and then act. Do not silently perform high-impact environment changes.
 - If the user already has usable MCP tools, do not force them through CLI/daemon migration just for consistency.
 - If direct access fails in restricted networks, check `USE_PROXY` and `PROXY_URL`.
 - If setup requires `npm install`, `npm install -g`, `npx`, or Playwright browser downloads, confirm proxy or mirror expectations before starting the install step in restricted networks.
@@ -119,6 +130,7 @@ When capability is missing, respond in this order:
 - Do not treat writing config as success by itself.
 - Validate whether the current runtime now exposes a usable `open-websearch` path and core tools.
 - When possible, run a minimal smoke check after setup.
+- Setup is not complete until validation finishes or the remaining activation step is reported explicitly.
 - Report the final state as one of:
   - capability active
   - setup completed, activation pending reload/reconnect
