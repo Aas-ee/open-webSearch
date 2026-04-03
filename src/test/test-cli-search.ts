@@ -306,6 +306,58 @@ async function testRunCliUnknownArgument(): Promise<void> {
     console.log('✅ CLI runCli unknown argument');
 }
 
+async function testRunCliWrongDaemonFlagForAction(): Promise<void> {
+    const runtime = createStubRuntime();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['search', 'Open WebSearch', '--base-url', 'http://127.0.0.1:3210', '--json'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 1, 'CLI wrong daemon flag for action exit code');
+    assertEqual(stderr.length, 0, 'CLI wrong daemon flag for action stderr');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        error: { code: string; message: string };
+    };
+    assertEqual(payload.status, 'error', 'CLI wrong daemon flag for action status');
+    assertEqual(payload.error.code, 'invalid_arguments', 'CLI wrong daemon flag for action code');
+    assert(payload.error.message.includes('Use --daemon-url for search and fetch commands'), 'CLI wrong daemon flag for action message');
+
+    console.log('✅ CLI wrong daemon flag for action');
+}
+
+async function testRunCliWrongStatusFlag(): Promise<void> {
+    const runtime = createStubRuntime();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['status', '--daemon-url', 'http://127.0.0.1:3210', '--json'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 1, 'CLI wrong status flag exit code');
+    assertEqual(stderr.length, 0, 'CLI wrong status flag stderr');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        error: { code: string; message: string };
+    };
+    assertEqual(payload.status, 'error', 'CLI wrong status flag status');
+    assertEqual(payload.error.code, 'invalid_arguments', 'CLI wrong status flag code');
+    assert(payload.error.message.includes('Use --base-url with `open-websearch status`'), 'CLI wrong status flag message');
+
+    console.log('✅ CLI wrong status flag');
+}
+
 async function testRunCliFetchWebJsonSuccess(): Promise<void> {
     const runtime = createStubRuntime();
     const stdout: string[] = [];
@@ -603,6 +655,72 @@ async function testRunCliExplicitDaemonUnavailable(): Promise<void> {
     console.log('✅ CLI explicit daemon unavailable');
 }
 
+async function testRunCliExplicitDaemonTimeout(): Promise<void> {
+    const localRuntime = createStubRuntime();
+    const delayedRuntime = createOpenWebSearchRuntime({
+        config: createTestConfig(),
+        dependencies: {
+            searchExecutors: {
+                bing: async () => {
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                    return [{
+                        title: 'Delayed Result',
+                        url: 'https://delayed.example.com',
+                        description: 'delayed',
+                        source: 'delayed.example.com',
+                        engine: 'bing'
+                    }];
+                }
+            },
+            fetchGithubReadme: async () => '# README',
+            fetchWebContent: async (url, maxChars) => ({
+                url,
+                finalUrl: url,
+                contentType: 'text/plain',
+                title: 'Example',
+                retrievalMethod: 'request' as const,
+                truncated: false,
+                content: `ok:${maxChars}`
+            }),
+            fetchCsdnArticle: async () => ({ content: 'csdn' }),
+            fetchJuejinArticle: async () => ({ content: 'juejin' }),
+            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+        }
+    });
+    const daemon = await startLocalDaemon(delayedRuntime, { port: 0, version: 'timeout-test' });
+
+    try {
+        await withEnv('OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS', '100', async () => {
+            const stdout: string[] = [];
+            const stderr: string[] = [];
+            const exitCode = await runCli(
+                ['search', 'Open WebSearch', '--daemon-url', daemon.baseUrl, '--json'],
+                localRuntime,
+                {
+                    stdout: (text) => stdout.push(text),
+                    stderr: (text) => stderr.push(text)
+                }
+            );
+
+            assertEqual(exitCode, 1, 'CLI explicit daemon timeout exit code');
+            assertEqual(stderr.length, 0, 'CLI explicit daemon timeout stderr');
+            const payload = JSON.parse(stdout[0]) as {
+                status: string;
+                error: { code: string; message: string };
+                hint: string;
+            };
+            assertEqual(payload.status, 'error', 'CLI explicit daemon timeout status');
+            assertEqual(payload.error.code, 'daemon_timeout', 'CLI explicit daemon timeout code');
+            assert(payload.error.message.includes('timed out'), 'CLI explicit daemon timeout message');
+            assert(payload.hint.includes('OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS'), 'CLI explicit daemon timeout hint');
+        });
+
+        console.log('✅ CLI explicit daemon timeout');
+    } finally {
+        await daemon.close();
+    }
+}
+
 async function testRunCliSpawnStartsDaemon(): Promise<void> {
     const runtime = createStubRuntime();
     const daemonRuntime = createOpenWebSearchRuntime({
@@ -770,26 +888,33 @@ async function testRunCliNoArgsFallsThrough(): Promise<void> {
 async function main(): Promise<void> {
     testParseSearchArgs();
     testParseFetchArgs();
-    await testRunCliJsonSuccess();
-    await testRunCliSearchModeOverride();
-    await testRunCliHumanReadable();
-    await testRunCliInvalidArguments();
-    await testRunCliUnknownArgument();
-    await testRunCliFetchWebJsonSuccess();
-    await testRunCliFetchGithubReadmeJsonSuccess();
-    await testRunCliFetchWebValidationFailure();
-    await testRunCliFetchCsdnJsonSuccess();
-    await testRunCliFetchJuejinJsonSuccess();
-    await testRunCliFetchCsdnValidationFailure();
-    await testRunCliFetchLinuxDoJsonSuccess();
-    await testRunCliFetchLinuxDoValidationFailure();
+    await withEnv('OPEN_WEBSEARCH_DAEMON_PORT', '65530', async () => {
+        await withEnv('OPEN_WEBSEARCH_DAEMON_URL', undefined, async () => {
+            await testRunCliJsonSuccess();
+            await testRunCliSearchModeOverride();
+            await testRunCliHumanReadable();
+            await testRunCliInvalidArguments();
+            await testRunCliUnknownArgument();
+            await testRunCliWrongDaemonFlagForAction();
+            await testRunCliWrongStatusFlag();
+            await testRunCliFetchWebJsonSuccess();
+            await testRunCliFetchGithubReadmeJsonSuccess();
+            await testRunCliFetchWebValidationFailure();
+            await testRunCliFetchCsdnJsonSuccess();
+            await testRunCliFetchJuejinJsonSuccess();
+            await testRunCliFetchCsdnValidationFailure();
+            await testRunCliFetchLinuxDoJsonSuccess();
+            await testRunCliFetchLinuxDoValidationFailure();
+            await testRunCliUnknownCommandJson();
+            await testRunCliUnknownMcpStyleCommandHint();
+            await testRunCliHelp();
+            await testRunCliNoArgsFallsThrough();
+        });
+    });
     await testRunCliPrefersDaemonWhenAvailable();
     await testRunCliExplicitDaemonUnavailable();
+    await testRunCliExplicitDaemonTimeout();
     await testRunCliSpawnStartsDaemon();
-    await testRunCliUnknownCommandJson();
-    await testRunCliUnknownMcpStyleCommandHint();
-    await testRunCliHelp();
-    await testRunCliNoArgsFallsThrough();
     console.log('\nCLI command tests passed.');
 }
 
