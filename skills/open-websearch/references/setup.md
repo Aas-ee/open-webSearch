@@ -27,6 +27,11 @@ Minimal steps:
 7. If package installation hangs, times out, or fails on network access, suspect proxy or mirror configuration before treating it as an `open-websearch` failure.
 8. If the host runtime still needs MCP exposure, only then add or adjust MCP/client config.
 
+Useful npm-oriented guidance:
+- One-shot proxied installs may work better with explicit npm flags such as `npm --proxy ... --https-proxy ... install ...`.
+- Persistent npm access may work better with `npm config set proxy`, `npm config set https-proxy`, and `npm config set registry`.
+- Do not assume runtime env vars like `USE_PROXY` or `PROXY_URL` will fix npm package downloads; they are for `open-websearch` runtime traffic, not npm registry access.
+
 ## Existing MCP mode
 
 Use when:
@@ -83,6 +88,7 @@ Minimal steps:
    - existing remote browser via `PLAYWRIGHT_WS_ENDPOINT` or `PLAYWRIGHT_CDP_ENDPOINT`
 5. After setup, validate the browser-assisted path before claiming success.
 6. If Playwright package or browser installation hangs or fails on download, check proxy or npm mirror expectations before retrying.
+7. If Playwright is being installed through npm, the same npm proxy or registry guidance applies before treating the failure as a browser-mode problem.
 
 ## Validation target
 
