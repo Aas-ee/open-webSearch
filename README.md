@@ -46,7 +46,7 @@
 - `Local daemon`
   - Best when you want a reusable long-lived local HTTP service exposing `status`, `GET /health`, and `POST /search` / `POST /fetch-*`.
 - `Skill`
-  - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it helps an agent discover, activate, and use the smallest working path.
+  - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it typically works together with the CLI and/or local daemon to help an agent discover, activate, and use the smallest working path.
 
 ## CLI and Local Daemon
 

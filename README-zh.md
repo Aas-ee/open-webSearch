@@ -134,7 +134,7 @@ MCP工具支持：
 - `本地 daemon`
   - 适合需要复用的常驻本地 HTTP 服务，提供 `status`、`GET /health`、`POST /search` 和 `POST /fetch-*`。
 - `skill`
-  - 适合作为 agent 的引导层，帮助 agent 发现、启用并使用最小可行路径；skill 不替代 MCP、CLI 或本地 daemon。
+  - 适合作为 agent 的引导层，帮助 agent 发现、启用并使用最小可行路径；skill 不替代 MCP、CLI 或本地 daemon，通常推荐与 CLI 和/或本地 daemon 搭配使用。
 
 ## CLI 与本地 daemon
 
