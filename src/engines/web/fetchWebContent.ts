@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { JSDOM } from 'jsdom';
 import { config } from '../../config.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl } from '../../utils/urlSafety.js';
@@ -17,7 +18,23 @@ export interface FetchWebContentResult {
     retrievalMethod: 'request' | 'request-with-browser-cookies' | 'browser-html';
     truncated: boolean;
     content: string;
+    readabilityApplied?: boolean;
+    readableHtml?: string;
+    links?: ExtractedLink[];
+    byline?: string;
+    excerpt?: string;
+    siteName?: string;
 }
+
+export type ExtractedLink = {
+    text: string;
+    href: string;
+};
+
+export type FetchWebContentOptions = {
+    readability?: boolean;
+    includeLinks?: boolean;
+};
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const DEFAULT_MAX_CHARS = 30000;
@@ -31,6 +48,18 @@ type HtmlExtractionResult = {
     text: string;
     mode: 'container' | 'body' | 'metadata';
 };
+
+type ReadabilityArticle = {
+    title?: string | null;
+    byline?: string | null;
+    content?: string | null;
+    textContent?: string | null;
+    excerpt?: string | null;
+    siteName?: string | null;
+    length?: number | null;
+};
+
+class ReadabilityUnavailableError extends Error {}
 
 function normalizeText(text: string): string {
     return text
@@ -54,12 +83,42 @@ function isMarkdownPath(url: URL): boolean {
     return pathname.endsWith('.md') || pathname.endsWith('.markdown') || pathname.endsWith('.mdx');
 }
 
+function shouldDebugReadabilityFallback(): boolean {
+    return process.env.OPEN_WEBSEARCH_DEBUG === '1';
+}
+
+function logReadabilityFallback(message: string, error?: unknown): void {
+    if (!shouldDebugReadabilityFallback()) {
+        return;
+    }
+
+    if (error instanceof Error) {
+        console.error(`[fetchWebContent/readability] ${message}: ${error.message}`);
+        return;
+    }
+
+    console.error(`[fetchWebContent/readability] ${message}`);
+}
+
 function isMarkdownContentType(contentType: string): boolean {
     const ct = contentType.toLowerCase();
     return ct.includes('text/markdown') || ct.includes('application/markdown') || ct.includes('text/x-markdown');
 }
 
 let browserHtmlFetcher: typeof fetchPageHtmlWithBrowser = fetchPageHtmlWithBrowser;
+let readabilityParser: (html: string, finalUrl: string) => Promise<ReadabilityArticle | null> = async (html, finalUrl) => {
+    try {
+        const moduleName = '@mozilla/readability';
+        const readabilityModule = await import(moduleName);
+        const dom = new JSDOM(html, { url: finalUrl });
+        return new readabilityModule.Readability(dom.window.document).parse();
+    } catch (error) {
+        if (error instanceof Error && /Cannot find package|Cannot find module|ERR_MODULE_NOT_FOUND/.test(error.message)) {
+            throw new ReadabilityUnavailableError('Mozilla Readability is not available. Install `@mozilla/readability` to use readability mode.');
+        }
+        throw error;
+    }
+};
 
 function extractMainTextFromHtml(html: string): HtmlExtractionResult {
     const $ = cheerio.load(html);
@@ -113,6 +172,45 @@ function extractMainTextFromHtml(html: string): HtmlExtractionResult {
     }
 
     return { title, text: selectedText, mode };
+}
+
+function extractReadableTextFromHtml(html: string): string {
+    const dom = new JSDOM(html);
+    return normalizeText(dom.window.document.body.textContent || '');
+}
+
+function extractReadableLinks(html: string, finalUrl: string): ExtractedLink[] {
+    const dom = new JSDOM(html, { url: finalUrl });
+    const anchors = Array.from(dom.window.document.querySelectorAll('a[href]'));
+    const seen = new Set<string>();
+    const links: ExtractedLink[] = [];
+
+    for (const anchor of anchors) {
+        const rawHref = anchor.getAttribute('href');
+        if (!rawHref) {
+            continue;
+        }
+
+        let href: string;
+        try {
+            href = new URL(rawHref, finalUrl).toString();
+            assertPublicHttpUrl(href, 'Extracted link URL');
+        } catch {
+            continue;
+        }
+
+        if (seen.has(href)) {
+            continue;
+        }
+        seen.add(href);
+
+        links.push({
+            text: normalizeText(anchor.textContent || ''),
+            href
+        });
+    }
+
+    return links;
 }
 
 function buildRequestOptions(cookieHeader?: string): any {
@@ -171,6 +269,22 @@ export function __setBrowserHtmlFetcherForTests(fetcher?: typeof fetchPageHtmlWi
     browserHtmlFetcher = fetcher || fetchPageHtmlWithBrowser;
 }
 
+export function __setReadabilityParserForTests(parser?: (html: string, finalUrl: string) => Promise<ReadabilityArticle | null>): void {
+    readabilityParser = parser || (async (html, finalUrl) => {
+        try {
+            const moduleName = '@mozilla/readability';
+            const readabilityModule = await import(moduleName);
+            const dom = new JSDOM(html, { url: finalUrl });
+            return new readabilityModule.Readability(dom.window.document).parse();
+        } catch (error) {
+            if (error instanceof Error && /Cannot find package|Cannot find module|ERR_MODULE_NOT_FOUND/.test(error.message)) {
+                throw new ReadabilityUnavailableError('Mozilla Readability is not available. Install `@mozilla/readability` to use readability mode.');
+            }
+            throw error;
+        }
+    });
+}
+
 async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: any; usedBrowserCookies: boolean }> {
     let cookieHeader: string | undefined;
     try {
@@ -196,7 +310,11 @@ async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: a
     }
 }
 
-export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MAX_CHARS): Promise<FetchWebContentResult> {
+export async function fetchWebContent(
+    url: string,
+    maxChars: number = DEFAULT_MAX_CHARS,
+    options: FetchWebContentOptions = {}
+): Promise<FetchWebContentResult> {
     const parsedUrl = new URL(url);
     assertPublicHttpUrl(parsedUrl, 'Request URL');
 
@@ -282,9 +400,17 @@ export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MA
     let title = '';
     let extractedContent = '';
     let htmlExtraction: HtmlExtractionResult | undefined;
+    let readabilityApplied = false;
+    let readableHtml: string | undefined;
+    let links: ExtractedLink[] | undefined;
+    let byline: string | undefined;
+    let excerpt: string | undefined;
+    let siteName: string | undefined;
 
-    // Keep raw markdown behavior for explicit markdown paths.
-    if (isMarkdownPath(parsedUrl)) {
+    const finalParsedUrl = new URL(finalUrl);
+
+    // Keep raw markdown behavior for the resolved final path.
+    if (isMarkdownPath(finalParsedUrl)) {
         extractedContent = normalizeText(raw);
     } else if (contentType.includes('text/html') || looksLikeHtml(raw)) {
         htmlExtraction = extractMainTextFromHtml(raw);
@@ -309,6 +435,33 @@ export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MA
         }
     }
 
+    if (options.readability && (contentType.includes('text/html') || looksLikeHtml(raw))) {
+        try {
+            const article = await readabilityParser(raw, finalUrl);
+            if (article?.content) {
+                const readableText = normalizeText(article.textContent || extractReadableTextFromHtml(article.content));
+                if (readableText) {
+                    readabilityApplied = true;
+                    readableHtml = article.content;
+                    links = options.includeLinks ? extractReadableLinks(article.content, finalUrl) : undefined;
+                    byline = article.byline?.trim() || undefined;
+                    excerpt = article.excerpt?.trim() || undefined;
+                    siteName = article.siteName?.trim() || undefined;
+                    title = article.title?.trim() || title;
+                    extractedContent = readableText;
+                }
+            } else {
+                logReadabilityFallback('parser returned no article content');
+            }
+        } catch (error) {
+            if (error instanceof ReadabilityUnavailableError) {
+                throw error;
+            }
+
+            logReadabilityFallback('falling back to existing extractor after parser error', error);
+        }
+    }
+
     if (!extractedContent) {
         throw new Error('No readable content was extracted from this URL');
     }
@@ -326,6 +479,12 @@ export async function fetchWebContent(url: string, maxChars: number = DEFAULT_MA
         title,
         retrievalMethod,
         truncated,
-        content
+        content,
+        ...(options.readability ? { readabilityApplied } : {}),
+        ...(readableHtml ? { readableHtml } : {}),
+        ...(links ? { links } : {}),
+        ...(byline ? { byline } : {}),
+        ...(excerpt ? { excerpt } : {}),
+        ...(siteName ? { siteName } : {})
     };
 }

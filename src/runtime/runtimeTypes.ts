@@ -15,7 +15,12 @@ export type GithubReadmeService = {
 };
 
 export type FetchWebService = {
-    execute(input: { url: string; maxChars: number }): Promise<FetchWebContentResult>;
+    execute(input: {
+        url: string;
+        maxChars: number;
+        readability?: boolean;
+        includeLinks?: boolean;
+    }): Promise<FetchWebContentResult>;
 };
 
 export type OpenWebSearchRuntimeServices = {

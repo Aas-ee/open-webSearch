@@ -132,6 +132,16 @@ function parseMaxChars(maxChars: unknown): number {
     return maxChars;
 }
 
+function parseBooleanFlag(value: unknown, name: string): boolean | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== 'boolean') {
+        throw new Error(`${name} must be a boolean`);
+    }
+    return value;
+}
+
 export async function startLocalDaemon(
     runtime: OpenWebSearchRuntime,
     options: LocalDaemonOptions = {}
@@ -216,12 +226,14 @@ export async function startLocalDaemon(
         try {
             const url = parseUrl(req.body?.url);
             const maxChars = parseMaxChars(req.body?.maxChars);
-            const result = await runtime.services.fetchWeb.execute({ url, maxChars });
+            const readability = parseBooleanFlag(req.body?.readability, 'readability');
+            const includeLinks = parseBooleanFlag(req.body?.includeLinks, 'includeLinks');
+            const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             sendError(res, 400, 'validation_failed', message, {
-                hint: 'Use a public HTTP(S) URL and keep maxChars within the supported range.'
+                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, and pass readability/includeLinks only as booleans.'
             });
         }
     });

@@ -53,8 +53,8 @@ function formatCliHelp(): string {
         'One-shot action commands:',
         '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--daemon-url URL] [--spawn] [--json]',
         '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing.',
-        '  open-websearch fetch-web <url> [--max-chars N] [--daemon-url URL] [--spawn] [--json]',
-        '    Fetch readable page content. `--max-chars` controls the extraction limit.',
+        '  open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--daemon-url URL] [--spawn] [--json]',
+        '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links.',
         '  open-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
         '  open-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
         '  open-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
@@ -92,6 +92,8 @@ export type ParsedSearchArgs = {
 export type ParsedFetchWebArgs = {
     url: string;
     maxChars: number;
+    readability: boolean;
+    includeLinks: boolean;
     json: boolean;
 };
 
@@ -282,6 +284,8 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
 export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     const positional: string[] = [];
     let maxChars = 30000;
+    let readability = false;
+    let includeLinks = false;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -299,6 +303,16 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
             }
             maxChars = Number(next);
             index += 1;
+            continue;
+        }
+
+        if (arg === '--readability') {
+            readability = true;
+            continue;
+        }
+
+        if (arg === '--include-links') {
+            includeLinks = true;
             continue;
         }
 
@@ -320,6 +334,8 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     return {
         url,
         maxChars,
+        readability,
+        includeLinks,
         json
     };
 }
@@ -462,10 +478,16 @@ function formatFetchWebHumanReadable(result: Awaited<ReturnType<OpenWebSearchRun
         `Title: ${result.title ?? '(none)'}`,
         `Content-Type: ${result.contentType}`,
         `Retrieval: ${result.retrievalMethod}`,
+        `Readability: ${result.readabilityApplied ? 'yes' : 'no'}`,
         `Truncated: ${result.truncated ? 'yes' : 'no'}`,
         '',
         result.content
     ];
+
+    if (result.links && result.links.length > 0) {
+        lines.push('');
+        lines.push(`Links: ${result.links.length}`);
+    }
 
     return lines.join('\n');
 }
@@ -883,7 +905,7 @@ export async function runCli(
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch fetch-web <url> [--max-chars N] [--json]');
+                io.stderr('Usage: open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--json]');
             }
             return 1;
         }
@@ -894,7 +916,9 @@ export async function runCli(
                 '/fetch-web',
                 {
                     url: parsed.url,
-                    maxChars: parsed.maxChars
+                    maxChars: parsed.maxChars,
+                    readability: parsed.readability,
+                    includeLinks: parsed.includeLinks
                 },
                 options
             );
@@ -914,7 +938,9 @@ export async function runCli(
 
             const result = await runtime.services.fetchWeb.execute({
                 url: parsed.url,
-                maxChars: parsed.maxChars
+                maxChars: parsed.maxChars,
+                readability: parsed.readability,
+                includeLinks: parsed.includeLinks
             });
 
             if (parsed.json) {
