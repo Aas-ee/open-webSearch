@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { config } from '../config.js';
 import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
+import { __setReadabilityParserForTests } from '../engines/web/fetchWebContent.js';
 
 type TestCase = {
     name: string;
@@ -227,6 +228,52 @@ async function main(): Promise<void> {
             }
         },
         {
+            name: 'should apply readability extraction and preserve links when requested',
+            run: async () => {
+                __setReadabilityParserForTests(async () => ({
+                    title: 'Readable Skill Page',
+                    byline: 'Aasee',
+                    excerpt: 'Readable excerpt',
+                    siteName: 'Example Docs',
+                    content: `
+                    <article>
+                      <h1>Readable Skill Page</h1>
+                      <p>Readability content with a <a href="/guide">Guide</a>.</p>
+                    </article>
+                    `,
+                    textContent: 'Readable Skill Page\n\nReadability content with a Guide.'
+                }));
+
+                const result = await fetchWebContent('https://example.com/page', 5000, {
+                    readability: true,
+                    includeLinks: true
+                });
+                assert(result.readabilityApplied === true, 'readability flag should be true');
+                assert(result.title === 'Readable Skill Page', 'readability title should override page title');
+                assert(result.content.includes('Readability content with a Guide.'), 'readability text should be used');
+                assert(result.readableHtml?.includes('<article>'), 'readable html should be returned');
+                assert(result.links?.[0]?.href === 'https://example.com/guide', 'relative links should be resolved');
+                assert(result.byline === 'Aasee', 'byline should be returned');
+                assert(result.excerpt === 'Readable excerpt', 'excerpt should be returned');
+                assert(result.siteName === 'Example Docs', 'siteName should be returned');
+            }
+        },
+        {
+            name: 'should fallback to existing extractor when readability returns null',
+            run: async () => {
+                __setReadabilityParserForTests(async () => null);
+
+                const result = await fetchWebContent('https://example.com/page', 5000, {
+                    readability: true,
+                    includeLinks: true
+                });
+                assert(result.readabilityApplied === false, 'readability should fall back when parser returns null');
+                assert(result.title === 'Skill Page', 'fallback title should use existing extractor');
+                assert(result.content.includes('Skill body content'), 'fallback should keep existing extracted text');
+                assert(result.links === undefined, 'fallback should not synthesize readability links');
+            }
+        },
+        {
             name: 'should fallback to browser html after cookie-assisted retry still fails',
             run: async () => {
                 __setBrowserHtmlFetcherForTests(async () => ({
@@ -298,6 +345,8 @@ async function main(): Promise<void> {
 
     restoreAxiosMock();
     config.fetchWebAllowInsecureTls = originalFetchWebAllowInsecureTls;
+    __setReadabilityParserForTests();
+    __setBrowserHtmlFetcherForTests();
 
     const total = testCases.length;
     console.log(`\nResult: ${passed}/${total} passed`);
@@ -310,6 +359,8 @@ async function main(): Promise<void> {
 main().catch((error) => {
     restoreAxiosMock();
     config.fetchWebAllowInsecureTls = false;
+    __setReadabilityParserForTests();
+    __setBrowserHtmlFetcherForTests();
     console.error('❌ test-web-content failed:', error);
     process.exit(1);
 });
