@@ -64,14 +64,16 @@ function createStubRuntime(configOverrides: Partial<AppConfig> = {}) {
                 }]
             },
             fetchGithubReadme: async () => '# README',
-            fetchWebContent: async (url, maxChars) => ({
+            fetchWebContent: async (url, maxChars, options) => ({
                 url,
                 finalUrl: url,
                 contentType: 'text/plain',
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `ok:${maxChars}`
+                content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                readabilityApplied: options?.readability ?? false,
+                links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
@@ -128,10 +130,14 @@ function testParseFetchArgs(): void {
         'https://example.com',
         '--max-chars',
         '5000',
+        '--readability',
+        '--include-links',
         '--json'
     ]);
     assertEqual(parsedWeb.url, 'https://example.com', 'parsed fetch-web url');
     assertEqual(parsedWeb.maxChars, 5000, 'parsed fetch-web maxChars');
+    assertEqual(parsedWeb.readability, true, 'parsed fetch-web readability');
+    assertEqual(parsedWeb.includeLinks, true, 'parsed fetch-web include-links');
     assertEqual(parsedWeb.json, true, 'parsed fetch-web json flag');
 
     const parsedGithub = parseFetchGithubArgs([
@@ -375,14 +381,41 @@ async function testRunCliFetchWebJsonSuccess(): Promise<void> {
     assertEqual(stderr.length, 0, 'CLI fetch-web json success stderr');
     const payload = JSON.parse(stdout[0]) as {
         status: string;
-        data: { url: string; title: string; content: string };
+        data: { url: string; title: string; content: string; readabilityApplied?: boolean; links?: Array<{ href: string }> };
     };
     assertEqual(payload.status, 'ok', 'CLI fetch-web json status');
     assertEqual(payload.data.url, 'https://example.com', 'CLI fetch-web json url');
     assertEqual(payload.data.title, 'Example', 'CLI fetch-web json title');
-    assertEqual(payload.data.content, 'ok:4321', 'CLI fetch-web json content');
+    assertEqual(payload.data.content, 'ok:4321:plain', 'CLI fetch-web json content');
 
     console.log('✅ CLI runCli fetch-web json success');
+}
+
+async function testRunCliFetchWebReadabilityJsonSuccess(): Promise<void> {
+    const runtime = createStubRuntime();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['fetch-web', 'https://example.com', '--max-chars', '4321', '--readability', '--include-links', '--json'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 0, 'CLI fetch-web readability json success exit code');
+    assertEqual(stderr.length, 0, 'CLI fetch-web readability json success stderr');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        data: { content: string; readabilityApplied?: boolean; links?: Array<{ href: string }> };
+    };
+    assertEqual(payload.status, 'ok', 'CLI fetch-web readability json status');
+    assertEqual(payload.data.content, 'ok:4321:readability', 'CLI fetch-web readability json content');
+    assertEqual(payload.data.readabilityApplied, true, 'CLI fetch-web readability flag');
+    assertEqual(payload.data.links?.[0]?.href, 'https://example.com/doc', 'CLI fetch-web readability links');
+
+    console.log('✅ CLI runCli fetch-web readability json success');
 }
 
 async function testRunCliFetchGithubReadmeJsonSuccess(): Promise<void> {
@@ -866,6 +899,8 @@ async function testRunCliHelp(): Promise<void> {
     assert(stdout[0].includes('--base-url URL'), 'CLI help should mention base-url');
     assert(stdout[0].includes('--search-mode'), 'CLI help should mention search-mode');
     assert(stdout[0].includes('--max-chars'), 'CLI help should mention max-chars');
+    assert(stdout[0].includes('--readability'), 'CLI help should mention readability');
+    assert(stdout[0].includes('--include-links'), 'CLI help should mention include-links');
 
     console.log('✅ CLI help');
 }
@@ -903,6 +938,7 @@ async function main(): Promise<void> {
             await testRunCliWrongDaemonFlagForAction();
             await testRunCliWrongStatusFlag();
             await testRunCliFetchWebJsonSuccess();
+            await testRunCliFetchWebReadabilityJsonSuccess();
             await testRunCliFetchGithubReadmeJsonSuccess();
             await testRunCliFetchWebValidationFailure();
             await testRunCliFetchCsdnJsonSuccess();

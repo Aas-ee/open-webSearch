@@ -29,14 +29,16 @@ function createStubRuntime() {
                 }]
             },
             fetchGithubReadme: async () => '# README',
-            fetchWebContent: async (url, maxChars) => ({
+            fetchWebContent: async (url, maxChars, options) => ({
                 url,
                 finalUrl: url,
                 contentType: 'text/plain',
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `ok:${maxChars}`
+                content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                readabilityApplied: options?.readability ?? false,
+                links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
@@ -143,14 +145,16 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
                 }]
             },
             fetchGithubReadme: async () => '# README',
-            fetchWebContent: async (url, maxChars) => ({
+            fetchWebContent: async (url, maxChars, options) => ({
                 url,
                 finalUrl: url,
                 contentType: 'text/plain',
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `ok:${maxChars}`
+                content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                readabilityApplied: options?.readability ?? false,
+                links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
@@ -200,14 +204,16 @@ async function testSearchToolPassesSearchModeOverride(): Promise<void> {
                 }
             },
             fetchGithubReadme: async () => '# README',
-            fetchWebContent: async (url, maxChars) => ({
+            fetchWebContent: async (url, maxChars, options) => ({
                 url,
                 finalUrl: url,
                 contentType: 'text/plain',
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `ok:${maxChars}`
+                content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                readabilityApplied: options?.readability ?? false,
+                links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
@@ -232,6 +238,66 @@ async function testSearchToolPassesSearchModeOverride(): Promise<void> {
     assertEqual(seenCalls[0].searchMode, 'playwright', 'MCP handler should forward search mode');
 
     console.log('✅ MCP search tool passes search-mode override');
+}
+
+async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
+    const seenCalls: Array<{ readability?: boolean; includeLinks?: boolean }> = [];
+    const runtime = createOpenWebSearchRuntime({
+        config: createTestConfig(),
+        dependencies: {
+            searchExecutors: {
+                bing: async (query, limit) => [{
+                    title: 'Result',
+                    url: 'https://example.com',
+                    description: `${query}:${limit}`,
+                    source: 'example.com',
+                    engine: 'bing'
+                }]
+            },
+            fetchGithubReadme: async () => '# README',
+            fetchWebContent: async (url, maxChars, options) => {
+                seenCalls.push({
+                    readability: options?.readability,
+                    includeLinks: options?.includeLinks
+                });
+                return {
+                    url,
+                    finalUrl: url,
+                    contentType: 'text/plain',
+                    title: 'Example',
+                    retrievalMethod: 'request' as const,
+                    truncated: false,
+                    content: `ok:${maxChars}`,
+                    readabilityApplied: options?.readability ?? false,
+                    links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
+                };
+            },
+            fetchCsdnArticle: async () => ({ content: 'csdn' }),
+            fetchJuejinArticle: async () => ({ content: 'juejin' }),
+            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+        }
+    });
+    const server = new McpServer({ name: 'test', version: '1.0.0' });
+    setupTools(server, runtime);
+
+    const tools = (server as unknown as { _registeredTools: Record<string, { handler: (input: unknown) => Promise<{ content: Array<{ text: string }> }> }> })._registeredTools;
+    const response = await tools.fetchWebContent.handler({
+        url: 'https://example.com',
+        maxChars: 3000,
+        readability: true,
+        includeLinks: true
+    });
+    const payload = JSON.parse(response.content[0].text) as {
+        readabilityApplied?: boolean;
+        links?: Array<{ href: string }>;
+    };
+
+    assertEqual(seenCalls[0].readability, true, 'MCP fetch-web should pass readability');
+    assertEqual(seenCalls[0].includeLinks, true, 'MCP fetch-web should pass includeLinks');
+    assertEqual(payload.readabilityApplied, true, 'MCP fetch-web should expose readabilityApplied');
+    assertEqual(payload.links?.[0]?.href, 'https://example.com/doc', 'MCP fetch-web should expose links');
+
+    console.log('✅ MCP fetch-web tool passes readability flags');
 }
 
 function testCustomToolNamesAndFallbacks(): void {
@@ -377,6 +443,7 @@ async function main(): Promise<void> {
     await testSearchToolReturnsCompatiblePayload();
     await testSetupToolsUsesRuntimeConfigDefaults();
     await testSearchToolPassesSearchModeOverride();
+    await testFetchWebToolPassesReadabilityFlags();
     testCustomToolNamesAndFallbacks();
     testConfigDrivenEngineSelectionAndMode();
     console.log('\nMCP adapter tests passed.');

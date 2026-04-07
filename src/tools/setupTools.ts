@@ -257,12 +257,14 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 (url) => validatePublicWebUrl(url),
                 "URL must be a public HTTP(S) address (private/local network targets are blocked)"
             ),
-            maxChars: z.number().int().min(1000).max(200000).default(30000)
+            maxChars: z.number().int().min(1000).max(200000).default(30000),
+            readability: z.boolean().optional(),
+            includeLinks: z.boolean().optional()
         },
-        async ({url, maxChars = 30000}) => {
+        async ({url, maxChars = 30000, readability, includeLinks}) => {
             try {
                 console.error(`Fetching web content: ${url}`);
-                const result = await runtime.services.fetchWeb.execute({ url, maxChars });
+                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
 
                 return {
                     content: [{

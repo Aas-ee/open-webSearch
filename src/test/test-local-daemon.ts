@@ -60,14 +60,16 @@ function createStubRuntime() {
                 }]
             },
             fetchGithubReadme: async () => '# README',
-            fetchWebContent: async (url, maxChars) => ({
+            fetchWebContent: async (url, maxChars, options) => ({
                 url,
                 finalUrl: url,
                 contentType: 'text/plain',
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `ok:${maxChars}`
+                content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                readabilityApplied: options?.readability ?? false,
+                links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
             fetchCsdnArticle: async () => ({ content: 'csdn' }),
             fetchJuejinArticle: async () => ({ content: 'juejin' }),
@@ -174,12 +176,15 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
             data: { url: string; title: string; content: string };
         }>(daemon.baseUrl, '/fetch-web', {
             url: 'https://example.com',
-            maxChars: 1234
+            maxChars: 1234,
+            readability: true,
+            includeLinks: true
         });
         assertEqual(fetchWebResult.response.status, 200, 'daemon /fetch-web http status');
         assertEqual(fetchWebResult.payload.status, 'ok', 'daemon /fetch-web payload status');
         assertEqual(fetchWebResult.payload.data.url, 'https://example.com', 'daemon /fetch-web url');
-        assertEqual(fetchWebResult.payload.data.content, 'ok:1234', 'daemon /fetch-web content');
+        assertEqual(fetchWebResult.payload.data.content, 'ok:1234:readability', 'daemon /fetch-web content');
+        assertEqual((fetchWebResult.payload.data as { readabilityApplied?: boolean }).readabilityApplied, true, 'daemon /fetch-web readability flag');
 
         const fetchGithubResult = await postJson<{
             status: string;
