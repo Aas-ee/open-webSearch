@@ -40,8 +40,9 @@
     "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js"
   },
   "dependencies": {
-    "@mozilla/readability": "^0.6.0",
     "@modelcontextprotocol/sdk": "^1.11.2",
+    "@mozilla/readability": "^0.6.0",
+    "@tavily/core": "^0.7.2",
     "@types/cheerio": "^0.22.35",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
