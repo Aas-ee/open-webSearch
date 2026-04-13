@@ -8,6 +8,7 @@ import { searchExa } from '../engines/exa/index.js';
 import { searchBrave } from '../engines/brave/index.js';
 import { searchJuejin } from '../engines/juejin/index.js';
 import { searchStartpage } from '../engines/startpage/index.js';
+import { searchTavily } from '../engines/tavily/tavily.js';
 import { fetchLinuxDoArticle } from '../engines/linuxdo/fetchLinuxDoArticle.js';
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
@@ -39,7 +40,7 @@ export type CreateOpenWebSearchRuntimeOptions = {
 };
 
 function createDefaultSearchExecutors(): SearchEngineExecutorMap {
-    return {
+    const executors: SearchEngineExecutorMap = {
         baidu: searchBaidu,
         bing: searchBing,
         linuxdo: searchLinuxDo,
@@ -50,6 +51,12 @@ function createDefaultSearchExecutors(): SearchEngineExecutorMap {
         juejin: searchJuejin,
         startpage: searchStartpage
     };
+
+    if (config.tavilyApiKey) {
+        executors.tavily = searchTavily;
+    }
+
+    return executors;
 }
 
 export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOptions = {}): OpenWebSearchRuntime {

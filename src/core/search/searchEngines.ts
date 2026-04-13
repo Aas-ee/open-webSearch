@@ -7,7 +7,8 @@ export const SUPPORTED_SEARCH_ENGINES = [
     'exa',
     'brave',
     'juejin',
-    'startpage'
+    'startpage',
+    'tavily'
 ] as const;
 
 export type SupportedSearchEngine = typeof SUPPORTED_SEARCH_ENGINES[number];
@@ -35,6 +36,8 @@ export function normalizeEngineName(engine: string): string {
             return 'juejin';
         case 'startpage':
             return 'startpage';
+        case 'tavily':
+            return 'tavily';
         default:
             return cleaned;
     }
