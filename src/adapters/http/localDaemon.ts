@@ -4,6 +4,7 @@ import { AppConfig } from '../../config.js';
 import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
+import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -328,14 +329,21 @@ export async function startLocalDaemon(
         baseUrl,
         server,
         getStatus,
-        close: () => new Promise<void>((resolve, reject) => {
-            server.close((error) => {
-                if (error) {
-                    reject(error);
-                    return;
-                }
-                resolve();
+        close: async () => {
+            await new Promise<void>((resolve, reject) => {
+                server.close((error) => {
+                    if (error) {
+                        reject(error);
+                        return;
+                    }
+                    resolve();
+                });
             });
-        })
+
+            // 修复本地 daemon 结束后浏览器残留的问题：
+            // daemon 原来只关闭 HTTP server，没有显式销毁共享 Playwright 浏览器会话。
+            // 这里在服务停止后同步回收当前进程持有的浏览器实例，确保 Edge 根进程一并退出。
+            await shutdownLocalPlaywrightBrowserSessions();
+        }
     };
 }

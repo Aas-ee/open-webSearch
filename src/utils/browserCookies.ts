@@ -1,5 +1,5 @@
 import { config, getProxyUrl } from '../config.js';
-import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
+import { acquirePooledPlaywrightPage, openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
 
 const COOKIE_CACHE_TTL_MS = 10 * 60 * 1000;
 const COOKIE_WARMUP_DELAY_MS = 1200;
@@ -56,41 +56,16 @@ export function looksLikeBotChallengePage(html: string): boolean {
 }
 
 async function createCookieCollectionPage(browser: any): Promise<{ page: any; close(): Promise<void> }> {
-    if (typeof browser.newContext === 'function') {
-        const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
-        const page = await context.newPage();
-        return {
-            page,
-            close: async () => {
-                await context.close().catch(() => undefined);
-            }
-        };
-    }
+    const session = await acquirePooledPlaywrightPage(browser, {
+        poolKey: 'browser-cookie-collection',
+        contextOptions: COOKIE_CONTEXT_OPTIONS,
+        preferExistingContext: false
+    });
 
-    if (typeof browser.contexts === 'function') {
-        const contexts = browser.contexts();
-        if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
-            const page = await contexts[0].newPage();
-            return {
-                page,
-                close: async () => {
-                    await page.close().catch(() => undefined);
-                }
-            };
-        }
-    }
-
-    if (typeof browser.newPage === 'function') {
-        const page = await browser.newPage();
-        return {
-            page,
-            close: async () => {
-                await page.close().catch(() => undefined);
-            }
-        };
-    }
-
-    throw new Error('Connected Playwright browser does not support creating a page for cookie collection');
+    return {
+        page: session.page,
+        close: session.closePageContext
+    };
 }
 
 async function readCookiesFromPage(page: any, url: string): Promise<string> {
