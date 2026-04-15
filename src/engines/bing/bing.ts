@@ -50,6 +50,20 @@ const BROWSER_CONTEXT_OPTIONS = {
     colorScheme: 'light'
 };
 
+type PooledPlaywrightPageEntry = {
+    context: any | null;
+    page: any;
+    busy: boolean;
+    prepared: boolean;
+};
+
+type BrowserPlaywrightPagePool = {
+    sharedContext: any | null;
+    entries: PooledPlaywrightPageEntry[];
+};
+
+const browserPlaywrightPagePools = new WeakMap<any, BrowserPlaywrightPagePool>();
+
 export function hasSiteOperator(query: string): boolean {
     return /(^|\s)site:[^\s]+/i.test(query);
 }
@@ -118,6 +132,7 @@ function buildBingAxiosRequestOptions(): any {
 
 let playwrightAvailabilityPromise: Promise<boolean> | null = null;
 let hasVerifiedPlaywrightAvailability = false;
+let hasLoggedHiddenHeadedMode = false;
 
 function randomDelay(minMs: number, maxMs: number): number {
     return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
@@ -127,8 +142,27 @@ async function waitRandom(page: any, minMs: number, maxMs: number): Promise<void
     await page.waitForTimeout(randomDelay(minMs, maxMs));
 }
 
-function buildBrowserLaunchArgs(): string[] {
-    return [
+function shouldUseHiddenHeadedBingBrowser(): boolean {
+    return process.platform === 'win32'
+        && config.playwrightHeadless
+        && !config.playwrightWsEndpoint
+        && !config.playwrightCdpEndpoint;
+}
+
+function getEffectiveBingPlaywrightHeadless(): boolean {
+    if (shouldUseHiddenHeadedBingBrowser()) {
+        if (!hasLoggedHiddenHeadedMode) {
+            hasLoggedHiddenHeadedMode = true;
+            console.warn('Bing Playwright search is using a hidden headed browser on Windows because PLAYWRIGHT_HEADLESS=true is more likely to trigger anti-bot detection.');
+        }
+        return false;
+    }
+
+    return config.playwrightHeadless;
+}
+
+function buildBrowserLaunchArgs(hideWindow: boolean): string[] {
+    const args = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-blink-features=AutomationControlled',
@@ -146,6 +180,15 @@ function buildBrowserLaunchArgs(): string[] {
         '--disable-features=TranslateUI',
         '--disable-ipc-flooding-protection'
     ];
+
+    if (hideWindow) {
+        args.push('--disable-extensions');
+        args.push('--no-default-browser-check');
+        args.push('--window-position=-32000,-32000');
+        args.push('--window-size=1,1');
+    }
+
+    return args;
 }
 
 async function setupAntiDetection(page: any): Promise<void> {
@@ -319,66 +362,163 @@ async function preparePlaywrightPage(page: any): Promise<void> {
     });
 }
 
-async function createPlaywrightPage(browser: any): Promise<{ context: any | null; page: any; closePageContext(): Promise<void> }> {
-    if (typeof browser.newContext === 'function') {
-        const context = await browser.newContext(BROWSER_CONTEXT_OPTIONS);
-        const page = await context.newPage();
-        await preparePlaywrightPage(page);
-        return {
-            context,
-            page,
-            closePageContext: async () => {
-                await context.close().catch(() => undefined);
-            }
-        };
+function getBrowserPlaywrightPagePool(browser: any): BrowserPlaywrightPagePool {
+    const existingPool = browserPlaywrightPagePools.get(browser);
+    if (existingPool) {
+        return existingPool;
     }
 
+    const pool: BrowserPlaywrightPagePool = {
+        sharedContext: null,
+        entries: []
+    };
+    browserPlaywrightPagePools.set(browser, pool);
+    return pool;
+}
+
+function isPageClosed(page: any): boolean {
+    try {
+        return typeof page?.isClosed === 'function' ? page.isClosed() : false;
+    } catch {
+        return true;
+    }
+}
+
+function syncPoolWithExistingContextPages(pool: BrowserPlaywrightPagePool, context: any): void {
+    if (typeof context?.pages !== 'function') {
+        return;
+    }
+
+    const existingPages = context.pages();
+    if (!Array.isArray(existingPages)) {
+        return;
+    }
+
+    for (const page of existingPages) {
+        if (pool.entries.some((entry) => entry.page === page)) {
+            continue;
+        }
+
+        pool.entries.push({
+            context,
+            page,
+            busy: false,
+            prepared: false
+        });
+    }
+}
+
+async function createPooledPlaywrightPageEntry(browser: any, pool: BrowserPlaywrightPagePool): Promise<PooledPlaywrightPageEntry> {
     if (typeof browser.contexts === 'function') {
         const contexts = browser.contexts();
         if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
-            const page = await contexts[0].newPage();
-            await preparePlaywrightPage(page);
-            return {
-                context: contexts[0],
+            const context = contexts[0];
+            syncPoolWithExistingContextPages(pool, context);
+            const page = await context.newPage();
+            const entry: PooledPlaywrightPageEntry = {
+                context,
                 page,
-                closePageContext: async () => {
-                    await page.close().catch(() => undefined);
-                }
+                busy: false,
+                prepared: false
             };
+            pool.entries.push(entry);
+            return entry;
         }
+    }
+
+    if (typeof browser.newContext === 'function') {
+        if (!pool.sharedContext) {
+            pool.sharedContext = await browser.newContext(BROWSER_CONTEXT_OPTIONS);
+        }
+
+        const page = await pool.sharedContext.newPage();
+        const entry: PooledPlaywrightPageEntry = {
+            context: pool.sharedContext,
+            page,
+            busy: false,
+            prepared: false
+        };
+        pool.entries.push(entry);
+        return entry;
     }
 
     if (typeof browser.newPage === 'function') {
         const page = await browser.newPage();
-        await preparePlaywrightPage(page);
-        return {
+        const entry: PooledPlaywrightPageEntry = {
             context: null,
             page,
-            closePageContext: async () => {
-                await page.close().catch(() => undefined);
-            }
+            busy: false,
+            prepared: false
         };
+        pool.entries.push(entry);
+        return entry;
     }
 
     throw new Error('Connected Playwright browser does not support creating a page');
 }
 
-async function openBingAndSearch(page: any, query: string): Promise<void> {
-    await page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 10000 });
-    await waitRandom(page, 500, 1100);
-    await page.goto(BING_HOME_URL, {
-        waitUntil: 'load',
-        timeout: Math.max(config.playwrightNavigationTimeoutMs, 30000)
-    });
-    await waitRandom(page, 700, 1600);
+async function createPlaywrightPage(browser: any): Promise<{ context: any | null; page: any; closePageContext(): Promise<void> }> {
+    const pool = getBrowserPlaywrightPagePool(browser);
 
-    let searchInput: any = null;
+    if (typeof browser.contexts === 'function') {
+        const contexts = browser.contexts();
+        if (Array.isArray(contexts) && contexts.length > 0) {
+            syncPoolWithExistingContextPages(pool, contexts[0]);
+        }
+    }
+
+    pool.entries = pool.entries.filter((entry) => !isPageClosed(entry.page));
+
+    let entry = pool.entries.find((candidate) => !candidate.busy) ?? null;
+    if (!entry) {
+        entry = await createPooledPlaywrightPageEntry(browser, pool);
+    }
+
+    entry.busy = true;
+
+    if (!entry.prepared) {
+        await preparePlaywrightPage(entry.page);
+        entry.prepared = true;
+    }
+
+    return {
+        context: entry.context,
+        page: entry.page,
+        closePageContext: async () => {
+            if (isPageClosed(entry.page)) {
+                pool.entries = pool.entries.filter((candidate) => candidate !== entry);
+                return;
+            }
+
+            entry.busy = false;
+        }
+    };
+}
+
+async function findBingSearchInput(page: any): Promise<any | null> {
     for (const selector of SEARCH_INPUT_SELECTORS) {
         const candidate = await page.$(selector).catch(() => null);
         if (candidate) {
-            searchInput = candidate;
-            break;
+            return candidate;
         }
+    }
+
+    return null;
+}
+
+async function openBingAndSearch(page: any, query: string): Promise<void> {
+    let searchInput = await findBingSearchInput(page);
+
+    // 修复页面池复用后每次都退回 Bing 首页再搜索的问题：
+    // 结果页本身就有搜索框，优先直接在当前 Bing 页面改关键词继续搜索。
+    // 只有当前页拿不到搜索框时，才回退到首页重新进入搜索流程。
+    if (!searchInput) {
+        await page.goto(BING_HOME_URL, {
+            waitUntil: 'load',
+            timeout: Math.max(config.playwrightNavigationTimeoutMs, 30000)
+        });
+        await waitRandom(page, 700, 1600);
+        searchInput = await findBingSearchInput(page);
     }
 
     if (!searchInput) {
@@ -387,6 +527,13 @@ async function openBingAndSearch(page: any, query: string): Promise<void> {
 
     await searchInput.click();
     await waitRandom(page, 180, 420);
+    if (typeof searchInput.fill === 'function') {
+        await searchInput.fill('');
+    } else {
+        await page.keyboard.press('Control+A').catch(() => undefined);
+        await page.keyboard.press('Backspace').catch(() => undefined);
+    }
+    await waitRandom(page, 120, 260);
     await searchInput.type(query, { delay: randomDelay(45, 120) });
     await waitRandom(page, 260, 700);
     await page.keyboard.press('Enter');
@@ -431,7 +578,7 @@ async function isPlaywrightAvailable(): Promise<boolean> {
             }
 
             try {
-                const session = await openPlaywrightBrowser(true, buildBrowserLaunchArgs());
+                const session = await openPlaywrightBrowser(true, buildBrowserLaunchArgs(false), { hideWindow: false });
                 await session.close();
                 hasVerifiedPlaywrightAvailability = true;
                 return true;
@@ -486,7 +633,12 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
         throw new Error('Playwright client is not available. Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.');
     }
 
-    const session = await openPlaywrightBrowser(config.playwrightHeadless, buildBrowserLaunchArgs());
+    const effectiveHeadless = getEffectiveBingPlaywrightHeadless();
+    const session = await openPlaywrightBrowser(
+        effectiveHeadless,
+        buildBrowserLaunchArgs(shouldUseHiddenHeadedBingBrowser()),
+        { hideWindow: shouldUseHiddenHeadedBingBrowser() }
+    );
 
     try {
         const { page, closePageContext } = await createPlaywrightPage(session.browser);
