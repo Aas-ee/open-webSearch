@@ -10,6 +10,9 @@ interface ExaResult {
     author?: string;
 }
 
+/**
+ * Search using Exa - the fastest and most accurate web search API for AI.
+ */
 export async function searchExa(query: string, limit: number): Promise<SearchResult[]> {
     const requestOptions = buildAxiosRequestOptions({
         headers: {
