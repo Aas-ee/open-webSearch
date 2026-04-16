@@ -68,4 +68,17 @@ assert(
     'plain timeout should not suggest removing site operator'
 );
 
+// /ck/a 跳转链接解析测试
+const ckRedirectHtml = `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a href="https://www.bing.com/ck/a?!&&p=abc&u=a1${Buffer.from('https://real-target.example.com/page').toString('base64url')}&ntb=1">CK Redirect Result</a></h2>
+    <div class="b_caption"><p>Result behind /ck/a redirect.</p></div>
+  </li>
+</ol>`;
+const ckResults = parseBingSearchResults(ckRedirectHtml, 5);
+assert(ckResults.length === 1, '/ck/a redirect should yield one result');
+assert(ckResults[0].url === 'https://real-target.example.com/page', '/ck/a redirect target should be decoded from base64url u param');
+assert(ckResults[0].title === 'CK Redirect Result', '/ck/a result title should parse');
+
 console.log('Bing parser tests passed.');

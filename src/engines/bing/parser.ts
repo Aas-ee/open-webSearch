@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 
@@ -13,6 +14,26 @@ const RESULT_SELECTORS = [
 
 function normalizeWhitespace(value: string): string {
     return value.replace(/\s+/g, ' ').trim();
+}
+
+function decodeBingRedirectTarget(url: URL): string {
+    const encodedTarget = url.searchParams.get('u')?.trim();
+    if (!encodedTarget) {
+        return '';
+    }
+
+    const base64Payload = encodedTarget.startsWith('a1') ? encodedTarget.slice(2) : encodedTarget;
+    try {
+        // Bing 的 u 参数使用 base64url 编码（-/_ 替代 +/，无填充），Node.js 原生支持
+        const decodedTarget = Buffer.from(base64Payload, 'base64url').toString('utf8').trim();
+        if (decodedTarget.startsWith('http://') || decodedTarget.startsWith('https://')) {
+            return decodedTarget;
+        }
+    } catch {
+        return '';
+    }
+
+    return '';
 }
 
 function sanitizeBingUrl(rawUrl?: string): string {
@@ -42,6 +63,13 @@ function sanitizeBingUrl(rawUrl?: string): string {
         const url = new URL(resolvedUrl);
         const hostname = url.hostname.toLowerCase();
         const pathname = url.pathname.toLowerCase();
+
+        // 解决 Bing 新结果页把真实目标站点包装成 /ck/a 跳转链接后被解析器整条丢弃的问题。
+        // 这里先从 u 参数中解出真实目标 URL，再按外链继续走统一清洗逻辑，避免 Playwright 页面明明有结果却最终返回 0 条。
+        if (hostname.endsWith('bing.com') && pathname.startsWith('/ck/a')) {
+            const decodedTarget = decodeBingRedirectTarget(url);
+            return decodedTarget ? sanitizeBingUrl(decodedTarget) : '';
+        }
 
         if (hostname.endsWith('bing.com') && (pathname.startsWith('/search') || pathname.startsWith('/ck/a') || pathname.startsWith('/newtabredir'))) {
             return '';

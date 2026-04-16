@@ -57,6 +57,7 @@ async function main(): Promise<void> {
     });
 
     const { searchBing } = await import('../engines/bing/index.js');
+    const { shutdownLocalPlaywrightBrowserSessions } = await import('../utils/playwrightClient.js');
 
     const start = Date.now();
     try {
@@ -99,6 +100,8 @@ async function main(): Promise<void> {
             console.error('Bing anti-bot response detected. You can retry later or try --mode=auto / --mode=playwright if available.');
         }
         process.exit(1);
+    } finally {
+        await shutdownLocalPlaywrightBrowserSessions().catch(() => undefined);
     }
 }
 

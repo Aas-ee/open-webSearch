@@ -11,6 +11,7 @@ import cors from 'cors';
 import { runCli } from './cli/runCli.js';
 import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
+import { shutdownLocalPlaywrightBrowserSessions } from './utils/playwrightClient.js';
 
 type StreamableSession = {
   server: McpServer;
@@ -65,6 +66,7 @@ async function main() {
   });
 
   if (cliExitCode !== null) {
+    await shutdownLocalPlaywrightBrowserSessions();
     process.exitCode = cliExitCode;
     return;
   }

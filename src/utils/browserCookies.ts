@@ -56,41 +56,17 @@ export function looksLikeBotChallengePage(html: string): boolean {
 }
 
 async function createCookieCollectionPage(browser: any): Promise<{ page: any; close(): Promise<void> }> {
-    if (typeof browser.newContext === 'function') {
-        const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
-        const page = await context.newPage();
-        return {
-            page,
-            close: async () => {
-                await context.close().catch(() => undefined);
-            }
-        };
-    }
+    // 解决 Cookie 采集复用页导致上下文状态串用的问题。
+    // 这里显式为每次采集创建独立 context，确保 cookies/storage/open pages 不会跨调用污染。
+    const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
+    const page = await context.newPage();
 
-    if (typeof browser.contexts === 'function') {
-        const contexts = browser.contexts();
-        if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
-            const page = await contexts[0].newPage();
-            return {
-                page,
-                close: async () => {
-                    await page.close().catch(() => undefined);
-                }
-            };
+    return {
+        page,
+        close: async () => {
+            await context.close().catch(() => undefined);
         }
-    }
-
-    if (typeof browser.newPage === 'function') {
-        const page = await browser.newPage();
-        return {
-            page,
-            close: async () => {
-                await page.close().catch(() => undefined);
-            }
-        };
-    }
-
-    throw new Error('Connected Playwright browser does not support creating a page for cookie collection');
+    };
 }
 
 async function readCookiesFromPage(page: any, url: string): Promise<string> {
