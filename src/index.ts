@@ -11,6 +11,7 @@ import cors from 'cors';
 import { runCli } from './cli/runCli.js';
 import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
+import { shutdownLocalPlaywrightBrowserSessions } from './utils/playwrightClient.js';
 
 type StreamableSession = {
   server: McpServer;
@@ -65,6 +66,12 @@ async function main() {
   });
 
   if (cliExitCode !== null) {
+    // best-effort 清理：shutdown 失败不应覆盖 CLI 本身的退出码
+    try {
+      await shutdownLocalPlaywrightBrowserSessions();
+    } catch (error) {
+      console.error('Failed to shut down local Playwright browser sessions:', error);
+    }
     process.exitCode = cliExitCode;
     return;
   }

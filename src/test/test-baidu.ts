@@ -28,4 +28,11 @@ async function testBaiduSearch() {
 }
 
 // Run the test
-testBaiduSearch().catch(console.error);
+testBaiduSearch()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

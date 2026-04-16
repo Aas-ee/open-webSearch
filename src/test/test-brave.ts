@@ -28,4 +28,11 @@ async function testBraveSearch() {
 }
 
 // Run the test
-testBraveSearch().catch(console.error);
+testBraveSearch()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

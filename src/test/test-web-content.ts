@@ -354,6 +354,8 @@ async function main(): Promise<void> {
     if (passed !== total) {
         process.exit(1);
     }
+
+    process.exit(0);
 }
 
 main().catch((error) => {

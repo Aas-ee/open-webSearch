@@ -27,5 +27,15 @@ async function testBingSearch() {
   }
 }
 
-// Run the test
-testBingSearch().catch(console.error);
+async function main(): Promise<void> {
+  await testBingSearch();
+}
+
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

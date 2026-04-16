@@ -56,41 +56,44 @@ export function looksLikeBotChallengePage(html: string): boolean {
 }
 
 async function createCookieCollectionPage(browser: any): Promise<{ page: any; close(): Promise<void> }> {
+    // 解决 Cookie 采集复用页导致上下文状态串用的问题。
+    // 这里显式为每次采集创建独立 context，确保 cookies/storage/open pages 不会跨调用污染。
+    // 但 connectOverCDP 返回的浏览器通常只有一个默认持久化 context，不支持 newContext()，
+    // 所以当 newContext 不可用时回退到默认 context + 手动清理。
     if (typeof browser.newContext === 'function') {
-        const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
-        const page = await context.newPage();
-        return {
-            page,
-            close: async () => {
-                await context.close().catch(() => undefined);
-            }
-        };
+        try {
+            const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
+            const page = await context.newPage();
+            return {
+                page,
+                close: async () => {
+                    await context.close().catch(() => undefined);
+                }
+            };
+        } catch {
+            // newContext 可能在 CDP 连接上抛异常，回退到默认 context
+        }
     }
 
+    // CDP 回退：复用默认 context 并在清理时手动重置状态
     if (typeof browser.contexts === 'function') {
         const contexts = browser.contexts();
         if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
-            const page = await contexts[0].newPage();
+            const context = contexts[0];
+            const page = await context.newPage();
             return {
                 page,
                 close: async () => {
                     await page.close().catch(() => undefined);
+                    if (typeof context.clearCookies === 'function') {
+                        await context.clearCookies().catch(() => undefined);
+                    }
                 }
             };
         }
     }
 
-    if (typeof browser.newPage === 'function') {
-        const page = await browser.newPage();
-        return {
-            page,
-            close: async () => {
-                await page.close().catch(() => undefined);
-            }
-        };
-    }
-
-    throw new Error('Connected Playwright browser does not support creating a page for cookie collection');
+    throw new Error('Browser does not support creating a page for cookie collection');
 }
 
 async function readCookiesFromPage(page: any, url: string): Promise<string> {
