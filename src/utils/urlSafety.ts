@@ -1,121 +1,22 @@
 import { isIP } from 'node:net';
+import ipaddr from 'ipaddr.js';
 
-const MAX_UNSIGNED_INT32 = 0xffffffff;
-
-function parseIpv4(ip: string): number[] | null {
-    const parts = ip.split('.');
-    if (parts.length !== 4) {
-        return null;
+// Fast-path only. The authoritative SSRF boundary is request-filtering-agent
+// in src/utils/httpRequest.ts, which re-validates at connect time.
+export function isPrivateOrLocalHostname(hostname: string): boolean {
+    const raw = hostname.trim().toLowerCase();
+    const host = raw.startsWith('[') && raw.endsWith(']') ? raw.slice(1, -1) : raw;
+    if (!host || host === 'localhost' || host.endsWith('.localhost')) {
+        return true;
     }
-
-    const values: number[] = [];
-    for (const part of parts) {
-        if (!/^\d+$/.test(part)) {
-            return null;
-        }
-        const value = Number(part);
-        if (!Number.isInteger(value) || value < 0 || value > 255) {
-            return null;
-        }
-        values.push(value);
-    }
-
-    return values;
-}
-
-function parseIntegerIpv4Literal(hostname: string): string | null {
-    if (!/^\d+$/.test(hostname)) {
-        return null;
-    }
-    const value = Number(hostname);
-    if (!Number.isInteger(value) || value < 0 || value > MAX_UNSIGNED_INT32) {
-        return null;
-    }
-
-    const a = (value >>> 24) & 255;
-    const b = (value >>> 16) & 255;
-    const c = (value >>> 8) & 255;
-    const d = value & 255;
-    return `${a}.${b}.${c}.${d}`;
-}
-
-function isPrivateIpv4(ip: string): boolean {
-    const parts = parseIpv4(ip);
-    if (!parts) {
+    if (isIP(host) === 0) {
         return false;
     }
-
-    const [a, b] = parts;
-    return (
-        a === 10 ||
-        a === 127 ||
-        a === 0 ||
-        (a === 100 && b >= 64 && b <= 127) ||
-        (a === 169 && b === 254) ||
-        (a === 172 && b >= 16 && b <= 31) ||
-        (a === 192 && b === 168) ||
-        (a === 198 && (b === 18 || b === 19))
-    );
-}
-
-function isPrivateIpv6(ip: string): boolean {
-    const normalized = ip.toLowerCase();
-
-    if (normalized === '::1' || normalized === '::') {
-        return true;
+    try {
+        return ipaddr.parse(host).range() !== 'unicast';
+    } catch {
+        return false;
     }
-
-    if (normalized.startsWith('::ffff:')) {
-        const mapped = normalized.slice('::ffff:'.length);
-        return isPrivateIpv4(mapped);
-    }
-
-    if (/^(fc|fd)/.test(normalized)) {
-        return true;
-    }
-
-    if (/^fe[89ab]/.test(normalized)) {
-        return true;
-    }
-
-    return false;
-}
-
-function isPrivateOrLocalIp(ip: string): boolean {
-    const version = isIP(ip);
-    if (version === 4) {
-        return isPrivateIpv4(ip);
-    }
-    if (version === 6) {
-        return isPrivateIpv6(ip);
-    }
-    return false;
-}
-
-export function isPrivateOrLocalHostname(hostname: string): boolean {
-    const host = hostname.trim().toLowerCase();
-    if (!host) {
-        return true;
-    }
-
-    if (host === 'localhost' || host.endsWith('.localhost')) {
-        return true;
-    }
-
-    if (host === 'metadata.google.internal' || host === 'metadata.azure.internal') {
-        return true;
-    }
-
-    const integerIp = parseIntegerIpv4Literal(host);
-    if (integerIp && isPrivateIpv4(integerIp)) {
-        return true;
-    }
-
-    if (isPrivateOrLocalIp(host)) {
-        return true;
-    }
-
-    return false;
 }
 
 export function isPublicHttpUrl(url: string): boolean {

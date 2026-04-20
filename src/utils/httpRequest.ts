@@ -1,6 +1,9 @@
 import type { AxiosRequestConfig, RawAxiosRequestHeaders, ResponseType } from 'axios';
-import https from 'node:https';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import {
+    RequestFilteringHttpAgent,
+    RequestFilteringHttpsAgent
+} from 'request-filtering-agent';
 import { getProxyUrl } from '../config.js';
 
 type BuildAxiosRequestOptions = {
@@ -16,20 +19,32 @@ type BuildAxiosRequestOptions = {
     validateStatus?: AxiosRequestConfig['validateStatus'];
 };
 
-const directHttpsAgents = new Map<boolean, https.Agent>();
+// SSRF boundary: when no outbound proxy is configured, every axios request
+// goes through request-filtering-agent so that DNS-resolved private IPs and
+// literal-IP connects both get rejected at connect time (GHSA-v228-72c7-fx8j).
+let filteringHttpAgent: RequestFilteringHttpAgent | null = null;
+let secureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
+let insecureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
 const proxyAgents = new Map<string, HttpsProxyAgent<string>>();
 
-function getDirectHttpsAgent(allowInsecureTls: boolean): https.Agent {
-    const cachedAgent = directHttpsAgents.get(allowInsecureTls);
-    if (cachedAgent) {
-        return cachedAgent;
+function getFilteringHttpAgent(): RequestFilteringHttpAgent {
+    if (!filteringHttpAgent) {
+        filteringHttpAgent = new RequestFilteringHttpAgent();
     }
+    return filteringHttpAgent;
+}
 
-    const agent = new https.Agent({
-        rejectUnauthorized: !allowInsecureTls
-    });
-    directHttpsAgents.set(allowInsecureTls, agent);
-    return agent;
+function getFilteringHttpsAgent(allowInsecureTls: boolean): RequestFilteringHttpsAgent {
+    if (allowInsecureTls) {
+        if (!insecureFilteringHttpsAgent) {
+            insecureFilteringHttpsAgent = new RequestFilteringHttpsAgent({ rejectUnauthorized: false });
+        }
+        return insecureFilteringHttpsAgent;
+    }
+    if (!secureFilteringHttpsAgent) {
+        secureFilteringHttpsAgent = new RequestFilteringHttpsAgent({ rejectUnauthorized: true });
+    }
+    return secureFilteringHttpsAgent;
 }
 
 function getProxyAgent(proxyUrl: string, allowInsecureTls: boolean): HttpsProxyAgent<string> {
@@ -98,7 +113,8 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         requestOptions.httpAgent = proxyAgent;
         requestOptions.httpsAgent = proxyAgent;
     } else {
-        requestOptions.httpsAgent = getDirectHttpsAgent(allowInsecureTls);
+        requestOptions.httpAgent = getFilteringHttpAgent();
+        requestOptions.httpsAgent = getFilteringHttpsAgent(allowInsecureTls);
     }
 
     return requestOptions;

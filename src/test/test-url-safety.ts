@@ -49,9 +49,45 @@ function runUrlCases(): void {
     }
 }
 
+// Regression coverage for GHSA-v228-72c7-fx8j.
+function runAdvisoryBypassCases(): void {
+    const bypassUrls = [
+        'http://[::1]/',
+        'http://[::]/',
+        'http://[::ffff:127.0.0.1]/',
+        'http://[::ffff:7f00:1]/',
+        'http://[0:0:0:0:0:ffff:127.0.0.1]/',
+        'http://[0:0:0:0:0:0:0:1]/',
+        'http://[::0:1]/',
+        'http://[0:0::1]/',
+        'http://[::ffff:a00:1]/',
+        'http://[::ffff:c0a8:1]/',
+        'http://[::ffff:a9fe:1]/',
+        'http://[::ffff:169.254.169.254]/latest/meta-data'
+    ];
+
+    for (const url of bypassUrls) {
+        const actual = isPublicHttpUrl(url);
+        assertEqual(actual, false, `advisory bypass vector not blocked: ${url}`);
+        console.log(`✅ advisory bypass blocked: ${url}`);
+    }
+
+    const publicUrls = [
+        'http://[2001:4860:4860::8888]/',
+        'https://[2606:4700:4700::1111]/',
+        'https://example.com/'
+    ];
+    for (const url of publicUrls) {
+        const actual = isPublicHttpUrl(url);
+        assertEqual(actual, true, `public control URL wrongly blocked: ${url}`);
+        console.log(`✅ public control allowed: ${url}`);
+    }
+}
+
 function main(): void {
     runHostCases();
     runUrlCases();
+    runAdvisoryBypassCases();
     console.log('\nURL safety tests passed.');
 }
 

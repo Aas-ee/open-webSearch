@@ -40,15 +40,17 @@
     "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js"
   },
   "dependencies": {
-    "@mozilla/readability": "^0.6.0",
     "@modelcontextprotocol/sdk": "^1.11.2",
+    "@mozilla/readability": "^0.6.0",
     "@types/cheerio": "^0.22.35",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
     "express": "^4.22.1",
     "https-proxy-agent": "^7.0.6",
+    "ipaddr.js": "^2.3.0",
     "jsdom": "^26.1.0",
+    "request-filtering-agent": "^3.2.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
