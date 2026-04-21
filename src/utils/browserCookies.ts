@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { config, getProxyUrl } from '../config.js';
 import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
@@ -56,10 +57,86 @@ export function looksLikeBotChallengePage(html: string): boolean {
     return BOT_KEYWORDS.some((keyword) => normalized.includes(keyword));
 }
 
-// Intercepts every navigation the page makes (including cross-origin redirects)
-// and aborts ones whose target is private/loopback. Sub-resource requests are
-// allowed through unless they're private — the validator rejects on either
-// literal-private or DNS-resolved-private.
+// Hostname-level TTL cache used by the subresource guard so a page loading
+// N assets from one CDN costs one DNS lookup, not N. Bounded to keep memory
+// capped; short TTL shrinks the DNS-rebinding window for subresources.
+const SUBRESOURCE_CLASSIFICATION_TTL_MS = 60 * 1000;
+const SUBRESOURCE_CLASSIFICATION_MAX_ENTRIES = 1024;
+type SubresourceClassification = { allowed: boolean; expiresAt: number };
+const subresourceClassificationCache = new Map<string, SubresourceClassification>();
+
+function readSubresourceClassification(hostname: string): boolean | undefined {
+    const entry = subresourceClassificationCache.get(hostname);
+    if (!entry) {
+        return undefined;
+    }
+    if (entry.expiresAt <= Date.now()) {
+        subresourceClassificationCache.delete(hostname);
+        return undefined;
+    }
+    return entry.allowed;
+}
+
+function writeSubresourceClassification(hostname: string, allowed: boolean): void {
+    if (subresourceClassificationCache.size >= SUBRESOURCE_CLASSIFICATION_MAX_ENTRIES) {
+        // Map preserves insertion order; drop the oldest.
+        const oldestKey = subresourceClassificationCache.keys().next().value;
+        if (oldestKey !== undefined) {
+            subresourceClassificationCache.delete(oldestKey);
+        }
+    }
+    subresourceClassificationCache.set(hostname, {
+        allowed,
+        expiresAt: Date.now() + SUBRESOURCE_CLASSIFICATION_TTL_MS
+    });
+}
+
+// Async variant for sub-resource requests. Uses the TTL cache so that common
+// page-load patterns (dozens of assets from one CDN) don't trigger one DNS
+// lookup per asset, while hostname-to-private resolutions are still caught.
+export async function classifyBrowserSubresourceUrl(targetUrl: string): Promise<void> {
+    const parsed = new URL(targetUrl);
+    // Protocol + literal-IP private check first (sync, free).
+    assertPublicHttpUrl(parsed, 'Browser subresource URL');
+
+    const bracketless = parsed.hostname.startsWith('[') && parsed.hostname.endsWith(']')
+        ? parsed.hostname.slice(1, -1)
+        : parsed.hostname;
+    if (isIP(bracketless) !== 0) {
+        return;
+    }
+
+    const cacheKey = bracketless.toLowerCase();
+    const cached = readSubresourceClassification(cacheKey);
+    if (cached === true) {
+        return;
+    }
+    if (cached === false) {
+        throw new Error('Browser subresource URL points to a private or local network target, which is not allowed');
+    }
+
+    try {
+        await assertPublicHttpUrlResolved(parsed, 'Browser subresource URL');
+        writeSubresourceClassification(cacheKey, true);
+    } catch (err) {
+        writeSubresourceClassification(cacheKey, false);
+        throw err;
+    }
+}
+
+export function __resetBrowserSubresourceCacheForTests(): void {
+    subresourceClassificationCache.clear();
+}
+
+export function __getBrowserSubresourceCacheEntryForTests(hostname: string): { allowed: boolean } | undefined {
+    const entry = subresourceClassificationCache.get(hostname.toLowerCase());
+    return entry ? { allowed: entry.allowed } : undefined;
+}
+
+// Intercepts every request the page makes (navigation + sub-resources) and
+// aborts ones whose target is private/loopback at either the literal or
+// DNS-resolved level. Navigation hits DNS fresh every time to keep the
+// rebinding window tight; sub-resources go through a hostname TTL cache.
 async function installNavigationGuard(page: any): Promise<void> {
     if (typeof page.route !== 'function') {
         return;
@@ -79,11 +156,7 @@ async function installNavigationGuard(page: any): Promise<void> {
                 if (isNav) {
                     await assertPublicHttpUrlResolved(targetUrl, 'Browser navigation URL');
                 } else {
-                    // Subresources: literal-only check. Skipping per-resource DNS
-                    // keeps a page load with dozens of assets fast; literal-private
-                    // targets (image/script/XHR to 127.0.0.1, 169.254.169.254, …)
-                    // are still blocked.
-                    assertPublicHttpUrl(targetUrl, 'Browser subresource URL');
+                    await classifyBrowserSubresourceUrl(targetUrl);
                 }
                 await route.continue();
             } catch {

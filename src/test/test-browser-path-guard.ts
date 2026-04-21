@@ -1,4 +1,10 @@
-import { fetchPageHtmlWithBrowser, getBrowserCookieHeader } from '../utils/browserCookies.js';
+import {
+    __getBrowserSubresourceCacheEntryForTests,
+    __resetBrowserSubresourceCacheForTests,
+    classifyBrowserSubresourceUrl,
+    fetchPageHtmlWithBrowser,
+    getBrowserCookieHeader
+} from '../utils/browserCookies.js';
 
 async function assertRejects(
     fn: () => Promise<unknown>,
@@ -68,6 +74,62 @@ async function run(): Promise<void> {
         'fetchPageHtmlWithBrowser with DNS-resolved private'
     );
     console.log('✅ fetchPageHtmlWithBrowser rejects DNS-resolved private pre-navigation');
+
+    // Subresource guard: literal-private blocked sync, DNS-private blocked via
+    // classifyBrowserSubresourceUrl, repeat calls served from the TTL cache.
+    __resetBrowserSubresourceCacheForTests();
+
+    await assertRejects(
+        () => classifyBrowserSubresourceUrl('http://127.0.0.1/internal.js'),
+        /private or local network/,
+        'subresource literal private IPv4'
+    );
+    console.log('✅ subresource guard rejects literal private IPv4');
+
+    await assertRejects(
+        () => classifyBrowserSubresourceUrl('http://[::1]/internal.js'),
+        /private or local network/,
+        'subresource literal IPv6 loopback'
+    );
+    console.log('✅ subresource guard rejects [::1]');
+
+    await assertRejects(
+        () => classifyBrowserSubresourceUrl('http://169.254.169.254/latest/meta-data/'),
+        /private or local network/,
+        'subresource IMDS'
+    );
+    console.log('✅ subresource guard rejects IMDS');
+
+    await assertRejects(
+        () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img.png'),
+        /private or local network/,
+        'subresource DNS-resolved private'
+    );
+    console.log('✅ subresource guard rejects DNS-resolved private (first call)');
+
+    const negativeEntry = __getBrowserSubresourceCacheEntryForTests('127.0.0.1.nip.io');
+    if (!negativeEntry || negativeEntry.allowed !== false) {
+        throw new Error(`expected cached negative entry for 127.0.0.1.nip.io, got ${JSON.stringify(negativeEntry)}`);
+    }
+    console.log('✅ subresource cache stores negative classification');
+
+    await assertRejects(
+        () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img2.png'),
+        /private or local network/,
+        'subresource DNS-resolved private (second call, cached)'
+    );
+    console.log('✅ subresource guard rejects repeated DNS-resolved private (cache hit)');
+
+    await classifyBrowserSubresourceUrl('http://8.8.8.8.nip.io/cdn/asset.css');
+    const positiveEntry = __getBrowserSubresourceCacheEntryForTests('8.8.8.8.nip.io');
+    if (!positiveEntry || positiveEntry.allowed !== true) {
+        throw new Error(`expected cached positive entry for 8.8.8.8.nip.io, got ${JSON.stringify(positiveEntry)}`);
+    }
+    console.log('✅ subresource guard allows public DNS-resolved host and caches positive classification');
+
+    // Second call must succeed and stay cached.
+    await classifyBrowserSubresourceUrl('http://8.8.8.8.nip.io/cdn/other.js');
+    console.log('✅ subresource guard allows repeated public host (cache hit)');
 
     console.log('\nBrowser path guard tests passed.');
 }
