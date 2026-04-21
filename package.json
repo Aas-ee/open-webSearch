@@ -34,6 +34,8 @@
     "test:startpage": "tsc && node build/test/test-startpage.js",
     "test:http-request-options": "tsc && node build/test/test-http-request-options.js",
     "test:url-safety": "tsc && node build/test/test-url-safety.js",
+    "test:redirect-safety": "tsc && node build/test/test-redirect-safety.js",
+    "test:browser-path-guard": "tsc && node build/test/test-browser-path-guard.js",
     "test:web-content": "tsc && node build/test/test-web-content.js",
     "test:web-content:live": "tsc && node build/test/test-web-content-live.js",
     "test:bing:live": "tsc && node build/test/test-bing-live.js",

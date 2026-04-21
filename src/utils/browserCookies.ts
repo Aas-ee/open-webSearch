@@ -1,5 +1,6 @@
 import { config, getProxyUrl } from '../config.js';
 import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
+import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
 
 const COOKIE_CACHE_TTL_MS = 10 * 60 * 1000;
 const COOKIE_WARMUP_DELAY_MS = 1200;
@@ -55,6 +56,46 @@ export function looksLikeBotChallengePage(html: string): boolean {
     return BOT_KEYWORDS.some((keyword) => normalized.includes(keyword));
 }
 
+// Intercepts every navigation the page makes (including cross-origin redirects)
+// and aborts ones whose target is private/loopback. Sub-resource requests are
+// allowed through unless they're private — the validator rejects on either
+// literal-private or DNS-resolved-private.
+async function installNavigationGuard(page: any): Promise<void> {
+    if (typeof page.route !== 'function') {
+        return;
+    }
+    try {
+        await page.route('**/*', async (route: any) => {
+            const request = typeof route.request === 'function' ? route.request() : undefined;
+            const targetUrl = typeof request?.url === 'function' ? request.url() : undefined;
+            if (!targetUrl) {
+                await route.continue().catch(() => undefined);
+                return;
+            }
+            const isNav = typeof request?.isNavigationRequest === 'function'
+                ? request.isNavigationRequest()
+                : false;
+            try {
+                if (isNav) {
+                    await assertPublicHttpUrlResolved(targetUrl, 'Browser navigation URL');
+                } else {
+                    // Subresources: literal-only check. Skipping per-resource DNS
+                    // keeps a page load with dozens of assets fast; literal-private
+                    // targets (image/script/XHR to 127.0.0.1, 169.254.169.254, …)
+                    // are still blocked.
+                    assertPublicHttpUrl(targetUrl, 'Browser subresource URL');
+                }
+                await route.continue();
+            } catch {
+                await route.abort().catch(() => undefined);
+            }
+        });
+    } catch {
+        // Some connected browsers (e.g., certain CDP setups) may not support route
+        // interception. Pre-navigation validation still gates the initial URL.
+    }
+}
+
 async function createCookieCollectionPage(browser: any): Promise<{ page: any; close(): Promise<void> }> {
     if (typeof browser.newContext === 'function') {
         const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
@@ -107,6 +148,7 @@ async function readCookiesFromPage(page: any, url: string): Promise<string> {
 
 export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boolean = false): Promise<string | undefined> {
     const url = new URL(urlInput);
+    await assertPublicHttpUrlResolved(url, 'Browser cookie URL');
     const cacheKey = buildCookieCacheKey(url);
     const cached = cookieCache.get(cacheKey);
 
@@ -125,6 +167,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
         const { page, close } = await createCookieCollectionPage(session.browser);
 
         try {
+            await installNavigationGuard(page);
             await page.goto(url.toString(), {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
@@ -153,6 +196,8 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
 }
 
 export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string }> {
+    await assertPublicHttpUrlResolved(urlInput, 'Browser fetch URL');
+
     const playwright = await loadPlaywrightClient({ silent: true });
     if (!playwright) {
         throw new Error('Playwright client is not available for browser HTML fetch');
@@ -164,6 +209,7 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
         const { page, close } = await createCookieCollectionPage(session.browser);
 
         try {
+            await installNavigationGuard(page);
             await page.goto(urlInput, {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)

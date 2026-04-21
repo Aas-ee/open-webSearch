@@ -1,7 +1,6 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { fetchPageHtmlWithBrowser, getBrowserCookieHeader, looksLikeBotChallengePage } from '../../utils/browserCookies.js';
-import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
+import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 
 function normalizeExtractedText(text: string): string {
     return text
@@ -73,7 +72,7 @@ export async function fetchZhiHuArticle(url: string): Promise<{ content: string 
     let content = '';
 
     try {
-        response = await axios.get(url, buildRequestOptions(url));
+        response = await requestWithSafeRedirects('GET', url, buildRequestOptions(url));
         html = String(response.data || '');
         content = extractArticleContent(html);
     } catch (error: any) {
@@ -85,7 +84,7 @@ export async function fetchZhiHuArticle(url: string): Promise<{ content: string 
         const cookieHeader = await getBrowserCookieHeader(url);
         if (cookieHeader) {
             try {
-                response = await axios.get(url, buildRequestOptions(url, cookieHeader));
+                response = await requestWithSafeRedirects('GET', url, buildRequestOptions(url, cookieHeader));
                 html = String(response.data || '');
                 content = extractArticleContent(html);
             } catch {
@@ -104,7 +103,7 @@ export async function fetchZhiHuArticle(url: string): Promise<{ content: string 
         const cookieHeader = await getBrowserCookieHeader(url);
         if (cookieHeader) {
             try {
-                response = await axios.get(url, buildRequestOptions(url, cookieHeader));
+                response = await requestWithSafeRedirects('GET', url, buildRequestOptions(url, cookieHeader));
                 html = String(response.data || '');
                 content = extractArticleContent(html);
             } catch {
