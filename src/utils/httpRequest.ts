@@ -105,11 +105,11 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         requestOptions.params = params;
     }
 
-    // Refuse redirects to literal private addresses. Sync-only (follow-redirects
-    // constraint), so hostname-to-private-IP on redirects still relies on the
-    // connect-time filter in direct mode.
-    (requestOptions as AxiosRequestConfig & { beforeRedirect?: (opts: { hostname?: string; host?: string }) => void }).beforeRedirect = (opts) => {
-        const target = opts.hostname ?? opts.host;
+    // Sync-only hook (follow-redirects constraint) — catches literal-IP
+    // private targets. Hostname-on-redirect in proxy mode still relies on
+    // the initial-URL DNS check.
+    requestOptions.beforeRedirect = (opts) => {
+        const target = (opts.hostname ?? opts.host) as string | undefined;
         if (target && isPrivateOrLocalHostname(target)) {
             throw new Error('Redirect target points to a private or local network address');
         }

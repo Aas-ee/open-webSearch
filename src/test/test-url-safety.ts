@@ -84,9 +84,8 @@ function runAdvisoryBypassCases(): void {
     }
 }
 
+// nip.io resolves *.nip.io to the embedded IP — exercises the real DNS path.
 async function runDnsResolvedCases(): Promise<void> {
-    // 127.0.0.1.nip.io resolves to 127.0.0.1 via public DNS — proves that a
-    // hostname with a private DNS answer is refused regardless of proxy mode.
     let rejected = false;
     try {
         await assertPublicHttpUrlResolved('https://127.0.0.1.nip.io/');
@@ -96,7 +95,6 @@ async function runDnsResolvedCases(): Promise<void> {
     assertEqual(rejected, true, 'DNS-resolved private target not blocked: 127.0.0.1.nip.io');
     console.log('✅ DNS-resolved private target blocked: 127.0.0.1.nip.io');
 
-    // 8.8.8.8.nip.io resolves to 8.8.8.8 — public DNS answer must pass.
     await assertPublicHttpUrlResolved('https://8.8.8.8.nip.io/');
     console.log('✅ DNS-resolved public target allowed: 8.8.8.8.nip.io');
 }

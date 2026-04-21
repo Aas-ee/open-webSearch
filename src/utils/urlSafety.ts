@@ -2,9 +2,14 @@ import * as dns from 'node:dns/promises';
 import { isIP } from 'node:net';
 import ipaddr from 'ipaddr.js';
 
+// URL.hostname preserves the brackets for IPv6 literals (`[::1]`), which
+// break isIP and dns.lookup. Strip them once here.
+function stripIpv6Brackets(host: string): string {
+    return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+}
+
 export function isPrivateOrLocalHostname(hostname: string): boolean {
-    const raw = hostname.trim().toLowerCase();
-    const host = raw.startsWith('[') && raw.endsWith(']') ? raw.slice(1, -1) : raw;
+    const host = stripIpv6Brackets(hostname.trim().toLowerCase());
     if (!host || host === 'localhost' || host.endsWith('.localhost')) {
         return true;
     }
@@ -46,8 +51,7 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     const parsed = typeof url === 'string' ? new URL(url) : url;
     assertPublicHttpUrl(parsed, label);
 
-    const raw = parsed.hostname.trim();
-    const host = raw.startsWith('[') && raw.endsWith(']') ? raw.slice(1, -1) : raw;
+    const host = stripIpv6Brackets(parsed.hostname);
     if (isIP(host) !== 0) {
         return;
     }
@@ -58,12 +62,7 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     } catch {
         throw new Error(`${label} could not be resolved`);
     }
-    if (resolved.length === 0) {
-        throw new Error(`${label} could not be resolved`);
-    }
-    for (const entry of resolved) {
-        if (isPrivateOrLocalHostname(entry.address)) {
-            throw new Error(`${label} resolves to a private or local network target, which is not allowed`);
-        }
+    if (resolved.some((entry) => isPrivateOrLocalHostname(entry.address))) {
+        throw new Error(`${label} resolves to a private or local network target, which is not allowed`);
     }
 }
