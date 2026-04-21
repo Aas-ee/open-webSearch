@@ -5,6 +5,7 @@ import {
     RequestFilteringHttpsAgent
 } from 'request-filtering-agent';
 import { getProxyUrl } from '../config.js';
+import { isPrivateOrLocalHostname } from './urlSafety.js';
 
 type BuildAxiosRequestOptions = {
     allowInsecureTls?: boolean;
@@ -19,9 +20,6 @@ type BuildAxiosRequestOptions = {
     validateStatus?: AxiosRequestConfig['validateStatus'];
 };
 
-// SSRF boundary: when no outbound proxy is configured, every axios request
-// goes through request-filtering-agent so that DNS-resolved private IPs and
-// literal-IP connects both get rejected at connect time (GHSA-v228-72c7-fx8j).
 let filteringHttpAgent: RequestFilteringHttpAgent | null = null;
 let secureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
 let insecureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
@@ -106,6 +104,16 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
     if (params !== undefined) {
         requestOptions.params = params;
     }
+
+    // Refuse redirects to literal private addresses. Sync-only (follow-redirects
+    // constraint), so hostname-to-private-IP on redirects still relies on the
+    // connect-time filter in direct mode.
+    (requestOptions as AxiosRequestConfig & { beforeRedirect?: (opts: { hostname?: string; host?: string }) => void }).beforeRedirect = (opts) => {
+        const target = opts.hostname ?? opts.host;
+        if (target && isPrivateOrLocalHostname(target)) {
+            throw new Error('Redirect target points to a private or local network address');
+        }
+    };
 
     const effectiveProxyUrl = getProxyUrl();
     if (effectiveProxyUrl) {

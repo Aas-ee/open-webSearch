@@ -3,7 +3,7 @@ import * as cheerio from 'cheerio';
 import { JSDOM } from 'jsdom';
 import { config } from '../../config.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
-import { assertPublicHttpUrl } from '../../utils/urlSafety.js';
+import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
 import {
     fetchPageHtmlWithBrowser,
     getBrowserCookieHeader,
@@ -316,7 +316,7 @@ export async function fetchWebContent(
     options: FetchWebContentOptions = {}
 ): Promise<FetchWebContentResult> {
     const parsedUrl = new URL(url);
-    assertPublicHttpUrl(parsedUrl, 'Request URL');
+    await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
 
     const requestOptions = buildRequestOptions();
 

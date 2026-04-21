@@ -1,4 +1,4 @@
-import { isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
+import { assertPublicHttpUrlResolved, isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
 
 type Case = {
     value: string;
@@ -84,11 +84,32 @@ function runAdvisoryBypassCases(): void {
     }
 }
 
-function main(): void {
+async function runDnsResolvedCases(): Promise<void> {
+    // 127.0.0.1.nip.io resolves to 127.0.0.1 via public DNS — proves that a
+    // hostname with a private DNS answer is refused regardless of proxy mode.
+    let rejected = false;
+    try {
+        await assertPublicHttpUrlResolved('https://127.0.0.1.nip.io/');
+    } catch {
+        rejected = true;
+    }
+    assertEqual(rejected, true, 'DNS-resolved private target not blocked: 127.0.0.1.nip.io');
+    console.log('✅ DNS-resolved private target blocked: 127.0.0.1.nip.io');
+
+    // 8.8.8.8.nip.io resolves to 8.8.8.8 — public DNS answer must pass.
+    await assertPublicHttpUrlResolved('https://8.8.8.8.nip.io/');
+    console.log('✅ DNS-resolved public target allowed: 8.8.8.8.nip.io');
+}
+
+async function main(): Promise<void> {
     runHostCases();
     runUrlCases();
     runAdvisoryBypassCases();
+    await runDnsResolvedCases();
     console.log('\nURL safety tests passed.');
 }
 
-main();
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
