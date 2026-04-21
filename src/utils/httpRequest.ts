@@ -137,8 +137,6 @@ export function __setAxiosRequestForTests(impl?: AxiosRequestFn): void {
     axiosRequestImpl = impl ?? ((config) => axios.request(config));
 }
 
-const DEFAULT_VALIDATE_STATUS = (status: number): boolean => status >= 200 && status < 300;
-
 // Manually chase redirects so we can async-DNS-resolve each hop. follow-redirects'
 // beforeRedirect hook is sync, so in proxy mode (no request-filtering-agent) a
 // redirect to a hostname resolving to 127.0.0.1 would otherwise slip through.
@@ -149,48 +147,45 @@ export async function requestWithSafeRedirects(
     urlLabel: string = 'Request URL'
 ): Promise<AxiosResponse> {
     const maxRedirects = options.maxRedirects ?? 5;
-    const callerValidateStatus = options.validateStatus ?? DEFAULT_VALIDATE_STATUS;
+    const validateStatus = options.validateStatus ?? ((s: number) => s >= 200 && s < 300);
     let currentUrl = initialUrl;
-    let hops = 0;
 
-    while (true) {
+    for (let hops = 0; hops <= maxRedirects; hops++) {
         await assertPublicHttpUrlResolved(currentUrl, hops === 0 ? urlLabel : 'Redirect target');
 
-        const hopConfig: AxiosRequestConfig = {
+        const response = await axiosRequestImpl({
             ...options,
             method,
             url: currentUrl,
             maxRedirects: 0,
-            // Accept 3xx here so we can inspect Location. Caller's validateStatus
+            // Accept 3xx here so we can inspect Location; caller's validateStatus
             // is re-applied to the final non-3xx response below.
-            validateStatus: (status) => status >= 200 && status < 400,
-        };
+            validateStatus: (s) => s >= 200 && s < 400,
+        });
 
-        const response = await axiosRequestImpl(hopConfig);
+        const location = response.status >= 300 && response.status < 400
+            ? response.headers?.location
+            : undefined;
 
-        const isRedirect = response.status >= 300 && response.status < 400;
-        const location = isRedirect ? response.headers?.location : undefined;
-
-        if (!isRedirect || !location) {
-            if (response.request?.res && !response.request.res.responseUrl) {
-                response.request.res.responseUrl = currentUrl;
-            }
-            if (!callerValidateStatus(response.status)) {
-                throw new AxiosError(
-                    `Request failed with status code ${response.status}`,
-                    AxiosError.ERR_BAD_RESPONSE,
-                    response.config,
-                    response.request,
-                    response
-                );
-            }
-            return response;
+        if (location) {
+            currentUrl = new URL(String(location), currentUrl).toString();
+            continue;
         }
 
-        hops++;
-        if (hops > maxRedirects) {
-            throw new Error(`Too many redirects (max ${maxRedirects})`);
+        if (response.request?.res && !response.request.res.responseUrl) {
+            response.request.res.responseUrl = currentUrl;
         }
-        currentUrl = new URL(String(location), currentUrl).toString();
+        if (!validateStatus(response.status)) {
+            throw new AxiosError(
+                `Request failed with status code ${response.status}`,
+                AxiosError.ERR_BAD_RESPONSE,
+                response.config,
+                response.request,
+                response
+            );
+        }
+        return response;
     }
+
+    throw new Error(`Too many redirects (max ${maxRedirects})`);
 }

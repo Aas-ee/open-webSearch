@@ -8,11 +8,10 @@ type CannedResponse = {
     status: number;
     location?: string;
     data?: unknown;
-    headers?: Record<string, string>;
 };
 
 function makeResponse(config: AxiosRequestConfig, canned: CannedResponse): AxiosResponse {
-    const headers: Record<string, string> = { ...(canned.headers || {}) };
+    const headers: Record<string, string> = {};
     if (canned.location) {
         headers.location = canned.location;
     }
@@ -24,6 +23,18 @@ function makeResponse(config: AxiosRequestConfig, canned: CannedResponse): Axios
         config,
         request: { res: {} }
     } as AxiosResponse;
+}
+
+// Stub axios with a fixed URL→response map. Unmatched URLs throw so test
+// oversights don't silently hit the real network.
+function stubAxios(responses: Record<string, CannedResponse>): void {
+    __setAxiosRequestForTests(async (config) => {
+        const canned = config.url ? responses[config.url] : undefined;
+        if (!canned) {
+            throw new Error(`unexpected URL: ${config.url}`);
+        }
+        return makeResponse(config, canned);
+    });
 }
 
 async function assertRejects(
@@ -43,74 +54,27 @@ async function assertRejects(
     throw new Error(`${label}: expected rejection, got success`);
 }
 
+async function assertPrivateRedirectRejected(from: string, to: string, label: string): Promise<void> {
+    stubAxios({ [from]: { status: 302, location: to } });
+    await assertRejects(
+        () => requestWithSafeRedirects('GET', from, {}),
+        /private or local network/,
+        label
+    );
+    console.log(`✅ ${label}`);
+}
+
 async function run(): Promise<void> {
-    // Literal private target on redirect — validator must reject before axios fires.
-    __setAxiosRequestForTests(async (config) => {
-        if (config.url === 'http://8.8.8.8/') {
-            return makeResponse(config, { status: 302, location: 'http://127.0.0.1/admin' });
-        }
-        throw new Error(`unexpected URL: ${config.url}`);
-    });
-    await assertRejects(
-        () => requestWithSafeRedirects('GET', 'http://8.8.8.8/', {}),
-        /private or local network/,
-        'redirect to literal private IP'
-    );
-    console.log('✅ redirect to literal private IPv4 is rejected');
+    await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://127.0.0.1/admin', 'redirect to literal private IPv4 is rejected');
+    await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://[::1]:8080/secret', 'redirect to [::1] (bracketed IPv6 loopback) is rejected');
+    await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://169.254.169.254/latest/meta-data/', 'redirect to 169.254.169.254 (IMDS) is rejected');
+    // DNS-resolved private hop — exercises the async path proxy mode needs.
+    await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://127.0.0.1.nip.io/admin', 'redirect to hostname that DNS-resolves to 127.0.0.1 is rejected');
 
-    // Bracketed IPv6 loopback via redirect.
-    __setAxiosRequestForTests(async (config) => {
-        if (config.url === 'http://8.8.8.8/') {
-            return makeResponse(config, { status: 301, location: 'http://[::1]:8080/secret' });
-        }
-        throw new Error(`unexpected URL: ${config.url}`);
-    });
-    await assertRejects(
-        () => requestWithSafeRedirects('GET', 'http://8.8.8.8/', {}),
-        /private or local network/,
-        'redirect to bracketed IPv6 loopback'
-    );
-    console.log('✅ redirect to [::1] (bracketed IPv6 loopback) is rejected');
-
-    // AWS IMDS via redirect.
-    __setAxiosRequestForTests(async (config) => {
-        if (config.url === 'http://8.8.8.8/') {
-            return makeResponse(config, { status: 307, location: 'http://169.254.169.254/latest/meta-data/' });
-        }
-        throw new Error(`unexpected URL: ${config.url}`);
-    });
-    await assertRejects(
-        () => requestWithSafeRedirects('GET', 'http://8.8.8.8/', {}),
-        /private or local network/,
-        'redirect to IMDS'
-    );
-    console.log('✅ redirect to 169.254.169.254 (IMDS) is rejected');
-
-    // DNS-resolved private target on redirect — exercises the async path that
-    // proxy-mode specifically needs (request-filtering-agent isn't in the chain
-    // when USE_PROXY=true, so the sync beforeRedirect hook alone isn't enough).
-    __setAxiosRequestForTests(async (config) => {
-        if (config.url === 'http://8.8.8.8/') {
-            return makeResponse(config, { status: 302, location: 'http://127.0.0.1.nip.io/admin' });
-        }
-        throw new Error(`unexpected URL: ${config.url}`);
-    });
-    await assertRejects(
-        () => requestWithSafeRedirects('GET', 'http://8.8.8.8/', {}),
-        /private or local network/,
-        'redirect to DNS-resolved private host'
-    );
-    console.log('✅ redirect to hostname that DNS-resolves to 127.0.0.1 is rejected');
-
-    // Public-to-public redirect: helper should follow cleanly.
-    __setAxiosRequestForTests(async (config) => {
-        if (config.url === 'http://8.8.8.8/') {
-            return makeResponse(config, { status: 302, location: 'http://1.1.1.1/' });
-        }
-        if (config.url === 'http://1.1.1.1/') {
-            return makeResponse(config, { status: 200, data: 'ok' });
-        }
-        throw new Error(`unexpected URL: ${config.url}`);
+    // Public-to-public redirect: helper follows cleanly, responseUrl tracks final hop.
+    stubAxios({
+        'http://8.8.8.8/': { status: 302, location: 'http://1.1.1.1/' },
+        'http://1.1.1.1/': { status: 200, data: 'ok' }
     });
     const ok = await requestWithSafeRedirects('GET', 'http://8.8.8.8/', {});
     if (ok.status !== 200 || ok.data !== 'ok') {
@@ -121,7 +85,7 @@ async function run(): Promise<void> {
     }
     console.log('✅ public-to-public redirect is followed and responseUrl tracks final hop');
 
-    // maxRedirects cap.
+    // maxRedirects cap: every hop redirects, never resolves.
     __setAxiosRequestForTests(async (config) => makeResponse(config, { status: 302, location: 'http://1.1.1.1/' }));
     await assertRejects(
         () => requestWithSafeRedirects('GET', 'http://8.8.8.8/', { maxRedirects: 2 }),
@@ -131,14 +95,9 @@ async function run(): Promise<void> {
     console.log('✅ redirect chain exceeding maxRedirects is rejected');
 
     // Relative Location header resolves against current URL.
-    __setAxiosRequestForTests(async (config) => {
-        if (config.url === 'http://8.8.8.8/a') {
-            return makeResponse(config, { status: 302, location: '/b' });
-        }
-        if (config.url === 'http://8.8.8.8/b') {
-            return makeResponse(config, { status: 200, data: 'relative-ok' });
-        }
-        throw new Error(`unexpected URL: ${config.url}`);
+    stubAxios({
+        'http://8.8.8.8/a': { status: 302, location: '/b' },
+        'http://8.8.8.8/b': { status: 200, data: 'relative-ok' }
     });
     const rel = await requestWithSafeRedirects('GET', 'http://8.8.8.8/a', {});
     if (rel.data !== 'relative-ok') {

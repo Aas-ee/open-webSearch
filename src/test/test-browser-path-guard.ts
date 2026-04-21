@@ -1,5 +1,5 @@
 import {
-    __getBrowserSubresourceCacheEntryForTests,
+    __getBrowserSubresourceClassificationForTests,
     __resetBrowserSubresourceCacheForTests,
     classifyBrowserSubresourceUrl,
     fetchPageHtmlWithBrowser,
@@ -107,9 +107,8 @@ async function run(): Promise<void> {
     );
     console.log('✅ subresource guard rejects DNS-resolved private (first call)');
 
-    const negativeEntry = __getBrowserSubresourceCacheEntryForTests('127.0.0.1.nip.io');
-    if (!negativeEntry || negativeEntry.allowed !== false) {
-        throw new Error(`expected cached negative entry for 127.0.0.1.nip.io, got ${JSON.stringify(negativeEntry)}`);
+    if (__getBrowserSubresourceClassificationForTests('127.0.0.1.nip.io') !== false) {
+        throw new Error('expected cached negative classification for 127.0.0.1.nip.io');
     }
     console.log('✅ subresource cache stores negative classification');
 
@@ -121,9 +120,8 @@ async function run(): Promise<void> {
     console.log('✅ subresource guard rejects repeated DNS-resolved private (cache hit)');
 
     await classifyBrowserSubresourceUrl('http://8.8.8.8.nip.io/cdn/asset.css');
-    const positiveEntry = __getBrowserSubresourceCacheEntryForTests('8.8.8.8.nip.io');
-    if (!positiveEntry || positiveEntry.allowed !== true) {
-        throw new Error(`expected cached positive entry for 8.8.8.8.nip.io, got ${JSON.stringify(positiveEntry)}`);
+    if (__getBrowserSubresourceClassificationForTests('8.8.8.8.nip.io') !== true) {
+        throw new Error('expected cached positive classification for 8.8.8.8.nip.io');
     }
     console.log('✅ subresource guard allows public DNS-resolved host and caches positive classification');
 

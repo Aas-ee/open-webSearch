@@ -99,14 +99,13 @@ export async function classifyBrowserSubresourceUrl(targetUrl: string): Promise<
     // Protocol + literal-IP private check first (sync, free).
     assertPublicHttpUrl(parsed, 'Browser subresource URL');
 
-    const bracketless = parsed.hostname.startsWith('[') && parsed.hostname.endsWith(']')
-        ? parsed.hostname.slice(1, -1)
-        : parsed.hostname;
-    if (isIP(bracketless) !== 0) {
+    // URL.hostname brackets IPv6 literals; any IP literal is already cleared above.
+    const { hostname } = parsed;
+    if (isIP(hostname) !== 0 || hostname.startsWith('[')) {
         return;
     }
 
-    const cacheKey = bracketless.toLowerCase();
+    const cacheKey = hostname.toLowerCase();
     const cached = readSubresourceClassification(cacheKey);
     if (cached === true) {
         return;
@@ -128,9 +127,8 @@ export function __resetBrowserSubresourceCacheForTests(): void {
     subresourceClassificationCache.clear();
 }
 
-export function __getBrowserSubresourceCacheEntryForTests(hostname: string): { allowed: boolean } | undefined {
-    const entry = subresourceClassificationCache.get(hostname.toLowerCase());
-    return entry ? { allowed: entry.allowed } : undefined;
+export function __getBrowserSubresourceClassificationForTests(hostname: string): boolean | undefined {
+    return subresourceClassificationCache.get(hostname.toLowerCase())?.allowed;
 }
 
 // Intercepts every request the page makes (navigation + sub-resources) and
@@ -143,17 +141,10 @@ async function installNavigationGuard(page: any): Promise<void> {
     }
     try {
         await page.route('**/*', async (route: any) => {
-            const request = typeof route.request === 'function' ? route.request() : undefined;
-            const targetUrl = typeof request?.url === 'function' ? request.url() : undefined;
-            if (!targetUrl) {
-                await route.continue().catch(() => undefined);
-                return;
-            }
-            const isNav = typeof request?.isNavigationRequest === 'function'
-                ? request.isNavigationRequest()
-                : false;
+            const request = route.request();
+            const targetUrl = request.url();
             try {
-                if (isNav) {
+                if (request.isNavigationRequest()) {
                     await assertPublicHttpUrlResolved(targetUrl, 'Browser navigation URL');
                 } else {
                     await classifyBrowserSubresourceUrl(targetUrl);
