@@ -1,7 +1,12 @@
-import type { AxiosRequestConfig, RawAxiosRequestHeaders, ResponseType } from 'axios';
-import https from 'node:https';
+import axios, { AxiosError } from 'axios';
+import type { AxiosRequestConfig, AxiosResponse, RawAxiosRequestHeaders, ResponseType } from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import {
+    RequestFilteringHttpAgent,
+    RequestFilteringHttpsAgent
+} from 'request-filtering-agent';
 import { getProxyUrl } from '../config.js';
+import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
 
 type BuildAxiosRequestOptions = {
     allowInsecureTls?: boolean;
@@ -16,20 +21,29 @@ type BuildAxiosRequestOptions = {
     validateStatus?: AxiosRequestConfig['validateStatus'];
 };
 
-const directHttpsAgents = new Map<boolean, https.Agent>();
+let filteringHttpAgent: RequestFilteringHttpAgent | null = null;
+let secureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
+let insecureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
 const proxyAgents = new Map<string, HttpsProxyAgent<string>>();
 
-function getDirectHttpsAgent(allowInsecureTls: boolean): https.Agent {
-    const cachedAgent = directHttpsAgents.get(allowInsecureTls);
-    if (cachedAgent) {
-        return cachedAgent;
+function getFilteringHttpAgent(): RequestFilteringHttpAgent {
+    if (!filteringHttpAgent) {
+        filteringHttpAgent = new RequestFilteringHttpAgent();
     }
+    return filteringHttpAgent;
+}
 
-    const agent = new https.Agent({
-        rejectUnauthorized: !allowInsecureTls
-    });
-    directHttpsAgents.set(allowInsecureTls, agent);
-    return agent;
+function getFilteringHttpsAgent(allowInsecureTls: boolean): RequestFilteringHttpsAgent {
+    if (allowInsecureTls) {
+        if (!insecureFilteringHttpsAgent) {
+            insecureFilteringHttpsAgent = new RequestFilteringHttpsAgent({ rejectUnauthorized: false });
+        }
+        return insecureFilteringHttpsAgent;
+    }
+    if (!secureFilteringHttpsAgent) {
+        secureFilteringHttpsAgent = new RequestFilteringHttpsAgent({ rejectUnauthorized: true });
+    }
+    return secureFilteringHttpsAgent;
 }
 
 function getProxyAgent(proxyUrl: string, allowInsecureTls: boolean): HttpsProxyAgent<string> {
@@ -92,14 +106,86 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         requestOptions.params = params;
     }
 
+    // Sync-only hook (follow-redirects constraint) — catches literal-IP
+    // private targets. Hostname-on-redirect in proxy mode still relies on
+    // the initial-URL DNS check.
+    requestOptions.beforeRedirect = (opts) => {
+        const target = (opts.hostname ?? opts.host) as string | undefined;
+        if (target && isPrivateOrLocalHostname(target)) {
+            throw new Error('Redirect target points to a private or local network address');
+        }
+    };
+
     const effectiveProxyUrl = getProxyUrl();
     if (effectiveProxyUrl) {
         const proxyAgent = getProxyAgent(effectiveProxyUrl, allowInsecureTls);
         requestOptions.httpAgent = proxyAgent;
         requestOptions.httpsAgent = proxyAgent;
     } else {
-        requestOptions.httpsAgent = getDirectHttpsAgent(allowInsecureTls);
+        requestOptions.httpAgent = getFilteringHttpAgent();
+        requestOptions.httpsAgent = getFilteringHttpsAgent(allowInsecureTls);
     }
 
     return requestOptions;
+}
+
+type AxiosRequestFn = (config: AxiosRequestConfig) => Promise<AxiosResponse>;
+
+let axiosRequestImpl: AxiosRequestFn = (config) => axios.request(config);
+
+export function __setAxiosRequestForTests(impl?: AxiosRequestFn): void {
+    axiosRequestImpl = impl ?? ((config) => axios.request(config));
+}
+
+// Manually chase redirects so we can async-DNS-resolve each hop. follow-redirects'
+// beforeRedirect hook is sync, so in proxy mode (no request-filtering-agent) a
+// redirect to a hostname resolving to 127.0.0.1 would otherwise slip through.
+export async function requestWithSafeRedirects(
+    method: 'GET' | 'HEAD',
+    initialUrl: string,
+    options: AxiosRequestConfig = {},
+    urlLabel: string = 'Request URL'
+): Promise<AxiosResponse> {
+    const maxRedirects = options.maxRedirects ?? 5;
+    const validateStatus = options.validateStatus ?? ((s: number) => s >= 200 && s < 300);
+    let currentUrl = initialUrl;
+
+    for (let hops = 0; hops <= maxRedirects; hops++) {
+        await assertPublicHttpUrlResolved(currentUrl, hops === 0 ? urlLabel : 'Redirect target');
+
+        const response = await axiosRequestImpl({
+            ...options,
+            method,
+            url: currentUrl,
+            maxRedirects: 0,
+            // Accept 3xx here so we can inspect Location; caller's validateStatus
+            // is re-applied to the final non-3xx response below.
+            validateStatus: (s) => s >= 200 && s < 400,
+        });
+
+        const location = response.status >= 300 && response.status < 400
+            ? response.headers?.location
+            : undefined;
+
+        if (location) {
+            currentUrl = new URL(String(location), currentUrl).toString();
+            continue;
+        }
+
+        if (response.request?.res && !response.request.res.responseUrl) {
+            response.request.res.responseUrl = currentUrl;
+        }
+        if (!validateStatus(response.status)) {
+            throw new AxiosError(
+                `Request failed with status code ${response.status}`,
+                AxiosError.ERR_BAD_RESPONSE,
+                response.config,
+                response.request,
+                response
+            );
+        }
+        return response;
+    }
+
+    throw new Error(`Too many redirects (max ${maxRedirects})`);
 }

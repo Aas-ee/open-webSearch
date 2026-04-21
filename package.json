@@ -34,21 +34,25 @@
     "test:startpage": "tsc && node build/test/test-startpage.js",
     "test:http-request-options": "tsc && node build/test/test-http-request-options.js",
     "test:url-safety": "tsc && node build/test/test-url-safety.js",
+    "test:redirect-safety": "tsc && node build/test/test-redirect-safety.js",
+    "test:browser-path-guard": "tsc && node build/test/test-browser-path-guard.js",
     "test:web-content": "tsc && node build/test/test-web-content.js",
     "test:web-content:live": "tsc && node build/test/test-web-content-live.js",
     "test:bing:live": "tsc && node build/test/test-bing-live.js",
     "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js"
   },
   "dependencies": {
-    "@mozilla/readability": "^0.6.0",
     "@modelcontextprotocol/sdk": "^1.11.2",
+    "@mozilla/readability": "^0.6.0",
     "@types/cheerio": "^0.22.35",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
     "express": "^4.22.1",
     "https-proxy-agent": "^7.0.6",
+    "ipaddr.js": "^2.3.0",
     "jsdom": "^26.1.0",
+    "request-filtering-agent": "^3.2.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
