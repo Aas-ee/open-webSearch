@@ -15,6 +15,10 @@
 
 `open-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/aas-ee-open-websearch).
+
 ## Features
 
 - Web search using multi-engine results
