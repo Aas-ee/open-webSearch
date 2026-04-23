@@ -645,6 +645,12 @@ async function tryDaemonRequest<T>(
         return await requestDaemonEnvelope<T>(transport, path, body);
     } catch (error) {
         if (error instanceof DaemonUnavailableError && transport.spawn) {
+            // 先检查是否已有健康服务运行，避免重复启动
+            const existingHealth = await checkDaemonHealth(transport.daemonUrl);
+            if (existingHealth) {
+                // 服务已存在，直接使用
+                return await requestDaemonEnvelope<T>(transport, path, body);
+            }
             const serveArgs = resolveServeArgsFromDaemonUrl(transport.daemonUrl);
             await (options.spawnDaemon ?? defaultSpawnDaemon)(serveArgs);
             await waitForDaemonReady(transport.daemonUrl, 4000);
@@ -759,6 +765,18 @@ function resolveServeArgsFromDaemonUrl(daemonUrl: string): ParsedServeArgs {
         host: hostname === 'localhost' ? '127.0.0.1' : hostname,
         port
     };
+}
+
+async function checkDaemonHealth(baseUrl: string): Promise<boolean> {
+    try {
+        const payload = await fetchJsonWithTimeout<CliEnvelope<{ daemon: string }>>(
+            new URL('/health', baseUrl).toString(),
+            300
+        );
+        return payload.status === 'ok';
+    } catch {
+        return false;
+    }
 }
 
 async function waitForDaemonReady(baseUrl: string, timeoutMs: number): Promise<void> {
