@@ -1,4 +1,4 @@
-import { isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
+import { assertPublicHttpUrlResolved, isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
 
 type Case = {
     value: string;
@@ -49,10 +49,65 @@ function runUrlCases(): void {
     }
 }
 
-function main(): void {
+// Regression coverage for GHSA-v228-72c7-fx8j.
+function runAdvisoryBypassCases(): void {
+    const bypassUrls = [
+        'http://[::1]/',
+        'http://[::]/',
+        'http://[::ffff:127.0.0.1]/',
+        'http://[::ffff:7f00:1]/',
+        'http://[0:0:0:0:0:ffff:127.0.0.1]/',
+        'http://[0:0:0:0:0:0:0:1]/',
+        'http://[::0:1]/',
+        'http://[0:0::1]/',
+        'http://[::ffff:a00:1]/',
+        'http://[::ffff:c0a8:1]/',
+        'http://[::ffff:a9fe:1]/',
+        'http://[::ffff:169.254.169.254]/latest/meta-data'
+    ];
+
+    for (const url of bypassUrls) {
+        const actual = isPublicHttpUrl(url);
+        assertEqual(actual, false, `advisory bypass vector not blocked: ${url}`);
+        console.log(`✅ advisory bypass blocked: ${url}`);
+    }
+
+    const publicUrls = [
+        'http://[2001:4860:4860::8888]/',
+        'https://[2606:4700:4700::1111]/',
+        'https://example.com/'
+    ];
+    for (const url of publicUrls) {
+        const actual = isPublicHttpUrl(url);
+        assertEqual(actual, true, `public control URL wrongly blocked: ${url}`);
+        console.log(`✅ public control allowed: ${url}`);
+    }
+}
+
+// nip.io resolves *.nip.io to the embedded IP — exercises the real DNS path.
+async function runDnsResolvedCases(): Promise<void> {
+    let rejected = false;
+    try {
+        await assertPublicHttpUrlResolved('https://127.0.0.1.nip.io/');
+    } catch {
+        rejected = true;
+    }
+    assertEqual(rejected, true, 'DNS-resolved private target not blocked: 127.0.0.1.nip.io');
+    console.log('✅ DNS-resolved private target blocked: 127.0.0.1.nip.io');
+
+    await assertPublicHttpUrlResolved('https://8.8.8.8.nip.io/');
+    console.log('✅ DNS-resolved public target allowed: 8.8.8.8.nip.io');
+}
+
+async function main(): Promise<void> {
     runHostCases();
     runUrlCases();
+    runAdvisoryBypassCases();
+    await runDnsResolvedCases();
     console.log('\nURL safety tests passed.');
 }
 
-main();
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});

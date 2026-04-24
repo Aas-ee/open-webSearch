@@ -1,9 +1,8 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { JSDOM } from 'jsdom';
 import { config } from '../../config.js';
-import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
-import { assertPublicHttpUrl } from '../../utils/urlSafety.js';
+import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
+import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
 import {
     fetchPageHtmlWithBrowser,
     getBrowserCookieHeader,
@@ -299,7 +298,7 @@ async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: a
 
     try {
         return {
-            response: await axios.get(url, buildRequestOptions(cookieHeader)),
+            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader), 'Request URL'),
             usedBrowserCookies: true
         };
     } catch {
@@ -316,17 +315,17 @@ export async function fetchWebContent(
     options: FetchWebContentOptions = {}
 ): Promise<FetchWebContentResult> {
     const parsedUrl = new URL(url);
-    assertPublicHttpUrl(parsedUrl, 'Request URL');
+    await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
 
     const requestOptions = buildRequestOptions();
 
     // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
     try {
-        const headResponse = await axios.head(parsedUrl.toString(), {
+        const headResponse = await requestWithSafeRedirects('HEAD', parsedUrl.toString(), {
             ...requestOptions,
             responseType: 'json',
             validateStatus: (status: number) => status >= 200 && status < 400
-        });
+        }, 'Request URL');
         const headLength = Number(headResponse.headers['content-length']);
         if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
             const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
@@ -349,7 +348,7 @@ export async function fetchWebContent(
     let retrievalMethod: FetchWebContentResult['retrievalMethod'] = 'request';
 
     try {
-        response = await axios.get(parsedUrl.toString(), requestOptions);
+        response = await requestWithSafeRedirects('GET', parsedUrl.toString(), requestOptions, 'Request URL');
     } catch (error: any) {
         const status = error?.response?.status;
         if (![401, 403, 429].includes(status)) {

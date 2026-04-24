@@ -1,6 +1,6 @@
 {
   "name": "open-websearch",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "web search the internet",
   "type": "module",
   "bin": {
@@ -34,6 +34,8 @@
     "test:startpage": "tsc && node build/test/test-startpage.js",
     "test:http-request-options": "tsc && node build/test/test-http-request-options.js",
     "test:url-safety": "tsc && node build/test/test-url-safety.js",
+    "test:redirect-safety": "tsc && node build/test/test-redirect-safety.js",
+    "test:browser-path-guard": "tsc && node build/test/test-browser-path-guard.js",
     "test:web-content": "tsc && node build/test/test-web-content.js",
     "test:web-content:live": "tsc && node build/test/test-web-content-live.js",
     "test:bing:live": "tsc && node build/test/test-bing-live.js",
@@ -48,8 +50,10 @@
     "cors": "^2.8.5",
     "express": "^4.22.1",
     "https-proxy-agent": "^7.0.6",
+    "ipaddr.js": "^2.3.0",
     "jsdom": "^26.1.0",
     "koffi": "^2.16.0",
+    "request-filtering-agent": "^3.2.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

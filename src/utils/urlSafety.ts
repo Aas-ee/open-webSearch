@@ -1,121 +1,26 @@
+import * as dns from 'node:dns/promises';
 import { isIP } from 'node:net';
+import ipaddr from 'ipaddr.js';
 
-const MAX_UNSIGNED_INT32 = 0xffffffff;
-
-function parseIpv4(ip: string): number[] | null {
-    const parts = ip.split('.');
-    if (parts.length !== 4) {
-        return null;
-    }
-
-    const values: number[] = [];
-    for (const part of parts) {
-        if (!/^\d+$/.test(part)) {
-            return null;
-        }
-        const value = Number(part);
-        if (!Number.isInteger(value) || value < 0 || value > 255) {
-            return null;
-        }
-        values.push(value);
-    }
-
-    return values;
-}
-
-function parseIntegerIpv4Literal(hostname: string): string | null {
-    if (!/^\d+$/.test(hostname)) {
-        return null;
-    }
-    const value = Number(hostname);
-    if (!Number.isInteger(value) || value < 0 || value > MAX_UNSIGNED_INT32) {
-        return null;
-    }
-
-    const a = (value >>> 24) & 255;
-    const b = (value >>> 16) & 255;
-    const c = (value >>> 8) & 255;
-    const d = value & 255;
-    return `${a}.${b}.${c}.${d}`;
-}
-
-function isPrivateIpv4(ip: string): boolean {
-    const parts = parseIpv4(ip);
-    if (!parts) {
-        return false;
-    }
-
-    const [a, b] = parts;
-    return (
-        a === 10 ||
-        a === 127 ||
-        a === 0 ||
-        (a === 100 && b >= 64 && b <= 127) ||
-        (a === 169 && b === 254) ||
-        (a === 172 && b >= 16 && b <= 31) ||
-        (a === 192 && b === 168) ||
-        (a === 198 && (b === 18 || b === 19))
-    );
-}
-
-function isPrivateIpv6(ip: string): boolean {
-    const normalized = ip.toLowerCase();
-
-    if (normalized === '::1' || normalized === '::') {
-        return true;
-    }
-
-    if (normalized.startsWith('::ffff:')) {
-        const mapped = normalized.slice('::ffff:'.length);
-        return isPrivateIpv4(mapped);
-    }
-
-    if (/^(fc|fd)/.test(normalized)) {
-        return true;
-    }
-
-    if (/^fe[89ab]/.test(normalized)) {
-        return true;
-    }
-
-    return false;
-}
-
-function isPrivateOrLocalIp(ip: string): boolean {
-    const version = isIP(ip);
-    if (version === 4) {
-        return isPrivateIpv4(ip);
-    }
-    if (version === 6) {
-        return isPrivateIpv6(ip);
-    }
-    return false;
+// URL.hostname preserves the brackets for IPv6 literals (`[::1]`), which
+// break isIP and dns.lookup. Strip them once here.
+function stripIpv6Brackets(host: string): string {
+    return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
 }
 
 export function isPrivateOrLocalHostname(hostname: string): boolean {
-    const host = hostname.trim().toLowerCase();
-    if (!host) {
+    const host = stripIpv6Brackets(hostname.trim().toLowerCase());
+    if (!host || host === 'localhost' || host.endsWith('.localhost')) {
         return true;
     }
-
-    if (host === 'localhost' || host.endsWith('.localhost')) {
-        return true;
+    if (isIP(host) === 0) {
+        return false;
     }
-
-    if (host === 'metadata.google.internal' || host === 'metadata.azure.internal') {
-        return true;
+    try {
+        return ipaddr.parse(host).range() !== 'unicast';
+    } catch {
+        return false;
     }
-
-    const integerIp = parseIntegerIpv4Literal(host);
-    if (integerIp && isPrivateIpv4(integerIp)) {
-        return true;
-    }
-
-    if (isPrivateOrLocalIp(host)) {
-        return true;
-    }
-
-    return false;
 }
 
 export function isPublicHttpUrl(url: string): boolean {
@@ -137,5 +42,27 @@ export function assertPublicHttpUrl(url: string | URL, label: string = 'URL'): v
     }
     if (isPrivateOrLocalHostname(parsed.hostname)) {
         throw new Error(`${label} points to a private or local network target, which is not allowed`);
+    }
+}
+
+// DNS-resolves hostnames and rejects private answers. Needed for proxy mode,
+// where request-filtering-agent isn't in the chain.
+export async function assertPublicHttpUrlResolved(url: string | URL, label: string = 'URL'): Promise<void> {
+    const parsed = typeof url === 'string' ? new URL(url) : url;
+    assertPublicHttpUrl(parsed, label);
+
+    const host = stripIpv6Brackets(parsed.hostname);
+    if (isIP(host) !== 0) {
+        return;
+    }
+
+    let resolved: Array<{ address: string }>;
+    try {
+        resolved = await dns.lookup(host, { all: true, verbatim: true });
+    } catch {
+        throw new Error(`${label} could not be resolved`);
+    }
+    if (resolved.some((entry) => isPrivateOrLocalHostname(entry.address))) {
+        throw new Error(`${label} resolves to a private or local network target, which is not allowed`);
     }
 }
