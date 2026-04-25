@@ -30,6 +30,11 @@ export type SearchExecutionInput = {
     searchMode?: AppConfig['searchMode'];
 };
 
+function resolveSearchModeOverride(searchMode: AppConfig['searchMode'] | undefined): AppConfig['searchMode'] | undefined {
+    // Agent 显式传 searchMode=auto 时，应与不传参数一致，优先使用环境变量值。不能优先使用HTTP请求，因为它会导致Bing返回垃圾结果。
+    return searchMode === 'auto' ? undefined : searchMode;
+}
+
 export function createSearchService(engineMap: SearchEngineExecutorMap) {
     return {
         async execute({ query, engines, limit, searchMode }: SearchExecutionInput): Promise<SearchExecutionResult> {
@@ -40,6 +45,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap) {
 
             const limits = distributeLimit(limit, engines.length);
             const partialFailures: SearchExecutionFailure[] = [];
+            const effectiveSearchMode = resolveSearchModeOverride(searchMode);
 
             const tasks = engines.map(async (engine, index) => {
                 const executor = engineMap[engine];
@@ -55,7 +61,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap) {
                 }
 
                 try {
-                    return await executor(cleanQuery, engineLimit, { searchMode });
+                    return await executor(cleanQuery, engineLimit, { searchMode: effectiveSearchMode });
                 } catch (error) {
                     partialFailures.push({
                         engine,

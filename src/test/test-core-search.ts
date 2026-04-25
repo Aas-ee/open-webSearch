@@ -118,6 +118,26 @@ async function testSearchServiceExecution(): Promise<void> {
     console.log('✅ search service executes with partial failures');
 }
 
+async function testSearchServiceAutoModeUsesRuntimeDefault(): Promise<void> {
+    const seenCalls: Array<{ searchMode?: string }> = [];
+    const service = createSearchService({
+        bing: async (query, limit, context) => {
+            seenCalls.push({ searchMode: context?.searchMode });
+            return Array.from({ length: limit }, (_, index) => createResult(`${query}:${context?.searchMode ?? 'none'}`, index + 1));
+        }
+    });
+
+    await service.execute({
+        query: 'open web search',
+        engines: ['bing'],
+        limit: 1,
+        searchMode: 'auto'
+    });
+
+    assertEqual(seenCalls[0].searchMode, undefined, 'request-level auto should be treated like omitted search mode');
+    console.log('✅ search service treats request-level auto as runtime default');
+}
+
 async function testSearchServiceValidation(): Promise<void> {
     const service = createSearchService({});
 
@@ -141,6 +161,7 @@ async function main(): Promise<void> {
     testDistributeLimit();
     testResolveRequestedEngines();
     await testSearchServiceExecution();
+    await testSearchServiceAutoModeUsesRuntimeDefault();
     await testSearchServiceValidation();
     console.log('\nCore search tests passed.');
 }

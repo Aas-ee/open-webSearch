@@ -258,7 +258,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
             await close();
         }
     } finally {
-        await session.close();
+        await session.release();
     }
 }
 
@@ -305,6 +305,6 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
             await close();
         }
     } finally {
-        await session.close();
+        await session.release();
     }
 }

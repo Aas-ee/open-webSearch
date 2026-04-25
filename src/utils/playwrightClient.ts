@@ -1,15 +1,18 @@
 import { execFileSync, spawn } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { createRequire } from 'module';
 import { createServer } from 'net';
 import { tmpdir } from 'os';
 import path from 'path';
 import { config, getProxyUrl } from '../config.js';
-import { withNativeFileLock, launchProcessOnHiddenDesktopWithPipes, readNamedPipeAsync, closeHandle, acquireNativeFileLock, tryNativeFileLock } from './nativeInterop.js';
+import { launchProcessOnHiddenDesktopWithPipes, readNamedPipeAsync, closeHandle, acquireNativeFileLock, tryNativeFileLock } from './nativeInterop.js';
 import type { NativeFileLockHandle } from './nativeInterop.js';
 
 const PLAYWRIGHT_CONNECT_TIMEOUT_MS = Math.max(config.playwrightNavigationTimeoutMs, 30000);
+const PLAYWRIGHT_LOCAL_CDP_READINESS_TIMEOUT_MS = Math.max(config.playwrightNavigationTimeoutMs * 2, 60000);
+const PLAYWRIGHT_LOCAL_CDP_READINESS_PROBE_TIMEOUT_MS = 1000;
+const PLAYWRIGHT_LOCAL_CDP_READINESS_POLL_INTERVAL_MS = 1000;
 const require = createRequire(import.meta.url);
 
 export type PlaywrightChromium = {
@@ -24,13 +27,18 @@ export type PlaywrightModule = {
 
 export type PlaywrightBrowserSession = {
     browser: any;
-    close(): Promise<void>;
+    /**
+     * 释放当前调用方持有的浏览器句柄。WS/CDP 远程连接会断开连接；本地共享浏览器不会在这里关闭进程。
+     * CLI/daemon 生命周期结束时应调用 shutdownLocalPlaywrightBrowserSessions() 统一销毁本地共享浏览器。
+     */
+    release(): Promise<void>;
 };
 
 export type PooledPlaywrightPageSession = {
     context: any | null;
     page: any;
-    closePageContext(): Promise<void>;
+    /** 将页面释放回进程内/跨进程页面池。 */
+    releasePage(): Promise<void>;
 };
 
 type OpenPlaywrightBrowserOptions = {
@@ -53,6 +61,7 @@ type LocalBrowserSessionMode = 'headed' | 'headless' | 'hidden-headed';
 type LocalBrowserSession = {
     browser: any;
     sessionKey: string;
+    domainKey?: string;
     sessionMode: LocalBrowserSessionMode;
     browserPid?: number;
     debugPort?: number;
@@ -62,6 +71,7 @@ type LocalBrowserSession = {
 };
 
 type LocalBrowserSessionMetadata = {
+    domainKey: string;
     ownerPid: number;
     browserPid?: number;
     debugPort?: number;
@@ -109,8 +119,7 @@ let cachedLocalBrowserSessionOptions: {
 } | null = null;
 let cleanupRegistered = false;
 let staleBrowserCleanupPerformed = false;
-const LOCAL_BROWSER_SESSION_METADATA_FILE = 'open-websearch-session.json';
-const LOCAL_BROWSER_SESSION_REGISTRY_FILE = 'open-websearch-local-browser-sessions.json';
+const LOCAL_BROWSER_DOMAIN_METADATA_PREFIX = 'domain-session-';
 const LEGACY_ORPHAN_BROWSER_GRACE_PERIOD_MS = 60 * 1000;
 const CROSS_PROCESS_POOL_LOCK_DIR = path.join(tmpdir(), 'open-websearch-page-pool-locks');
 const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'open-websearch-browser-session-locks');
@@ -143,15 +152,6 @@ function getPageLockFilePath(poolKey: string, pageTargetId: string): string {
     const keyHash = createHash('sha1').update(`${poolKey}:${pageTargetId}`).digest('hex');
     return path.join(CROSS_PROCESS_POOL_LOCK_DIR, `page-${keyHash}.lock`);
 }
-
-type LocalBrowserSessionRegistryEntry = {
-    tempDir: string;
-    updatedAt: string;
-};
-
-type LocalBrowserSessionRegistry = {
-    sessions: Record<string, LocalBrowserSessionRegistryEntry>;
-};
 
 function getLocalBrowserSessionMode(headless: boolean, options?: OpenPlaywrightBrowserOptions): LocalBrowserSessionMode {
     if (options?.hideWindow) {
@@ -360,6 +360,92 @@ function isRecoverableLocalBrowserSessionError(error: unknown): boolean {
         || message.includes('not connected');
 }
 
+async function connectOverCdpOnly(
+    playwright: PlaywrightModule,
+    endpoint: string,
+    timeout: number
+): Promise<any> {
+    return playwright.chromium.connectOverCDP(endpoint, { timeout });
+}
+
+async function waitForTimeout(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        if (typeof timer === 'object' && 'unref' in timer) {
+            timer.unref();
+        }
+    });
+}
+
+async function withOperationTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    let timer: NodeJS.Timeout | null = null;
+    try {
+        return await Promise.race([
+            operation,
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+                if (typeof timer === 'object' && 'unref' in timer) {
+                    timer.unref();
+                }
+            })
+        ]);
+    } finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
+    }
+}
+
+async function probeLocalCdpReadiness(
+    playwright: PlaywrightModule,
+    endpoint: string
+): Promise<any> {
+    const browser = await connectOverCdpOnly(
+        playwright,
+        endpoint,
+        PLAYWRIGHT_LOCAL_CDP_READINESS_PROBE_TIMEOUT_MS
+    );
+
+    try {
+        await withOperationTimeout(
+            browser.version(),
+            PLAYWRIGHT_LOCAL_CDP_READINESS_PROBE_TIMEOUT_MS,
+            `Timed out while probing local browser CDP readiness after ${PLAYWRIGHT_LOCAL_CDP_READINESS_PROBE_TIMEOUT_MS}ms`
+        );
+        return browser;
+    } catch (error) {
+        await browser.close().catch(() => undefined);
+        throw error;
+    }
+}
+
+async function connectOverCdpWhenReady(
+    playwright: PlaywrightModule,
+    endpoint: string
+): Promise<any> {
+    const startedAt = Date.now();
+    let lastError: unknown;
+
+    while (Date.now() - startedAt < PLAYWRIGHT_LOCAL_CDP_READINESS_TIMEOUT_MS) {
+        try {
+            return await probeLocalCdpReadiness(playwright, endpoint);
+        } catch (error) {
+            lastError = error;
+            // 这里只轮询本地 CDP 握手可用性，不参与任何页面导航或 Bing 加载判断，
+            // 因此 1 秒探测超时不会把正常超过 1 秒的网页加载误判为失败。
+            const elapsedMs = Date.now() - startedAt;
+            const remainingMs = PLAYWRIGHT_LOCAL_CDP_READINESS_TIMEOUT_MS - elapsedMs;
+            if (remainingMs <= 0) {
+                break;
+            }
+            await waitForTimeout(Math.min(PLAYWRIGHT_LOCAL_CDP_READINESS_POLL_INTERVAL_MS, remainingMs));
+        }
+    }
+
+    const suffix = lastError instanceof Error ? ` Last error: ${lastError.message}` : '';
+    throw new Error(`Timed out while waiting for local browser CDP readiness after ${PLAYWRIGHT_LOCAL_CDP_READINESS_TIMEOUT_MS}ms.${suffix}`);
+}
+
 async function recoverLocalBrowserSessionBrowser(browser: any): Promise<any | null> {
     if (config.playwrightWsEndpoint || config.playwrightCdpEndpoint) {
         return null;
@@ -443,6 +529,10 @@ async function acquirePooledPlaywrightPageOnce(
             entry.prepared = true;
         } catch (error) {
             if (isPageClosed(entry.page)) {
+                // 修复 preparePage 失败且页面已关闭时只移除池条目、未释放 OS 页面锁的问题。
+                // daemon 长时间运行时该分支若反复触发，会导致 fd/native lock 句柄累积。
+                entry.pageLock?.release();
+                entry.pageLock = null;
                 pool.entries = pool.entries.filter((candidate) => candidate !== entry);
             } else {
                 entry.pageLock?.release();
@@ -453,21 +543,23 @@ async function acquirePooledPlaywrightPageOnce(
         }
     }
 
+    const releasePage = async () => {
+        if (isPageClosed(entry.page)) {
+            entry.pageLock?.release();
+            entry.pageLock = null;
+            pool.entries = pool.entries.filter((candidate) => candidate !== entry);
+            return;
+        }
+
+        entry.pageLock?.release();
+        entry.pageLock = null;
+        entry.busy = false;
+    };
+
     return {
         context: entry.context,
         page: entry.page,
-        closePageContext: async () => {
-            if (isPageClosed(entry.page)) {
-                entry.pageLock?.release();
-                entry.pageLock = null;
-                pool.entries = pool.entries.filter((candidate) => candidate !== entry);
-                return;
-            }
-
-            entry.pageLock?.release();
-            entry.pageLock = null;
-            entry.busy = false;
-        }
+        releasePage
     };
 }
 
@@ -591,12 +683,12 @@ function buildLocalSessionKey(headless: boolean, launchArgs: string[], options?:
 }
 
 /**
- * 浏览器域锁签名：
- * - headed: `headed:<executablePath>`（不同浏览器路径用不同锁）
- * - hidden-headed: `hidden-headed`（所有隐藏头进程共享一个锁）
- * - headless: `headless`（所有无头进程共享一个锁）
+ * 浏览器复用域策略：
+ * - headed: `headed:<executablePath>`（不同浏览器路径用不同域）
+ * - hidden-headed: `hidden-headed`（所有隐藏有头进程共享一个域）
+ * - headless: `headless`（所有无头进程共享一个域）
  */
-function buildBrowserDomainLockKey(mode: LocalBrowserSessionMode): string {
+function buildBrowserDomainKey(mode: LocalBrowserSessionMode): string {
     if (mode === 'headed') {
         const execPath = config.playwrightExecutablePath || getLocalBrowserExecutablePath();
         return `headed:${execPath}`;
@@ -604,39 +696,44 @@ function buildBrowserDomainLockKey(mode: LocalBrowserSessionMode): string {
     return mode;
 }
 
-function getBrowserDomainLockFilePath(mode: LocalBrowserSessionMode): string {
+function getBrowserDomainHash(domainKey: string): string {
+    return createHash('sha1').update(domainKey).digest('hex');
+}
+
+function getBrowserDomainLockFilePathByHash(domainHash: string): string {
     mkdirSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR, { recursive: true });
-    const key = buildBrowserDomainLockKey(mode);
     return path.join(
         CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR,
-        `domain-${createHash('sha1').update(key).digest('hex')}.lock`
+        `domain-${domainHash}.lock`
     );
 }
 
-function isCompatibleLocalBrowserSessionMode(
-    requestedMode: LocalBrowserSessionMode,
-    candidateMode: LocalBrowserSessionMode
-): boolean {
-    if (requestedMode === 'headless') {
-        return candidateMode === 'headless' || candidateMode === 'hidden-headed';
-    }
-
-    return requestedMode === candidateMode;
+function getBrowserDomainLockFilePath(domainKey: string): string {
+    return getBrowserDomainLockFilePathByHash(getBrowserDomainHash(domainKey));
 }
 
-function getLocalBrowserSessionModeReuseScore(
-    requestedMode: LocalBrowserSessionMode,
-    candidateMode: LocalBrowserSessionMode
-): number {
-    if (requestedMode === candidateMode) {
-        return 2;
-    }
+function getBrowserDomainMetadataPath(domainKey: string): string {
+    mkdirSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR, { recursive: true });
+    return path.join(
+        CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR,
+        `${LOCAL_BROWSER_DOMAIN_METADATA_PREFIX}${getBrowserDomainHash(domainKey)}.json`
+    );
+}
 
-    if (requestedMode === 'headless' && candidateMode === 'hidden-headed') {
-        return 1;
+function listBrowserDomainMetadataEntries(): Array<{ domainHash: string; metadataPath: string }> {
+    try {
+        mkdirSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR, { recursive: true });
+        return readdirSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR)
+            .map((fileName) => {
+                const match = fileName.match(new RegExp(`^${LOCAL_BROWSER_DOMAIN_METADATA_PREFIX}([a-f0-9]+)\\.json$`, 'u'));
+                return match
+                    ? { domainHash: match[1], metadataPath: path.join(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR, fileName) }
+                    : null;
+            })
+            .filter((entry): entry is { domainHash: string; metadataPath: string } => entry !== null);
+    } catch {
+        return [];
     }
-
-    return 0;
 }
 
 function buildLocalBrowserProcessArgs(port: number, tempDir: string, launchArgs: string[], headless = false): string[] {
@@ -666,148 +763,73 @@ function buildLocalBrowserProcessArgs(port: number, tempDir: string, launchArgs:
     return args;
 }
 
-function getLocalBrowserSessionMetadataPath(tempDir: string): string {
-    return path.join(tempDir, LOCAL_BROWSER_SESSION_METADATA_FILE);
-}
+function normalizeBrowserDomainMetadata(parsed: Partial<LocalBrowserSessionMetadata>): LocalBrowserSessionMetadata | null {
+    if (typeof parsed.domainKey !== 'string' || parsed.domainKey.length === 0) return null;
+    if (typeof parsed.tempDir !== 'string' || parsed.tempDir.length === 0) return null;
+    if (typeof parsed.sessionKey !== 'string' || parsed.sessionKey.length === 0) return null;
+    if (parsed.sessionMode !== 'headed' && parsed.sessionMode !== 'headless' && parsed.sessionMode !== 'hidden-headed') return null;
 
-function getLocalBrowserSessionRegistryPath(): string {
-    return path.join(tmpdir(), LOCAL_BROWSER_SESSION_REGISTRY_FILE);
-}
-
-function readLocalBrowserSessionRegistry(): LocalBrowserSessionRegistry {
-    try {
-        const parsed = JSON.parse(readFileSync(getLocalBrowserSessionRegistryPath(), 'utf8')) as LocalBrowserSessionRegistry;
-        return parsed && typeof parsed === 'object' && parsed.sessions && typeof parsed.sessions === 'object'
-            ? parsed
-            : { sessions: {} };
-    } catch {
-        return { sessions: {} };
-    }
-}
-
-// registry 的所有 read-modify-write 都在 withMetadataLock（per-tempDir OS 级独占锁）
-// 保护下执行，不存在并发截断 JSON 的可能，无需额外的原子写或文件锁。
-function writeLocalBrowserSessionRegistry(registry: LocalBrowserSessionRegistry): void {
-    try {
-        writeFileSync(getLocalBrowserSessionRegistryPath(), JSON.stringify(registry, null, 2), 'utf8');
-    } catch {
-        // Ignore registry write failures.
-    }
-}
-
-function registerLocalBrowserSession(metadata: LocalBrowserSessionMetadata): void {
-    const registry = readLocalBrowserSessionRegistry();
-    registry.sessions[metadata.sessionKey] = {
-        tempDir: metadata.tempDir,
-        updatedAt: new Date().toISOString()
+    return {
+        domainKey: parsed.domainKey,
+        ownerPid: Number.isInteger(parsed.ownerPid) ? parsed.ownerPid! : 0,
+        browserPid: Number.isInteger(parsed.browserPid) ? parsed.browserPid : undefined,
+        debugPort: Number.isInteger(parsed.debugPort) ? parsed.debugPort : undefined,
+        tempDir: parsed.tempDir,
+        executablePath: typeof parsed.executablePath === 'string' ? parsed.executablePath : '',
+        sessionKey: parsed.sessionKey,
+        sessionMode: parsed.sessionMode,
+        hideWindow: parsed.hideWindow ?? parsed.sessionMode === 'hidden-headed',
+        strictCleanup: parsed.strictCleanup ?? parsed.sessionMode === 'headless',
+        clientPids: Array.isArray(parsed.clientPids)
+            ? parsed.clientPids.filter((pid): pid is number => Number.isInteger(pid) && pid > 0)
+            : [],
+        createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date(0).toISOString()
     };
-    writeLocalBrowserSessionRegistry(registry);
 }
 
-function unregisterLocalBrowserSession(sessionKey: string, tempDir?: string): void {
-    const registry = readLocalBrowserSessionRegistry();
-    const existingEntry = registry.sessions[sessionKey];
-    if (!existingEntry) {
-        return;
-    }
-
-    if (tempDir && existingEntry.tempDir !== tempDir) {
-        return;
-    }
-
-    delete registry.sessions[sessionKey];
-    writeLocalBrowserSessionRegistry(registry);
-}
-
-function unregisterLocalBrowserSessionByTempDir(tempDir?: string): void {
-    if (!tempDir) {
-        return;
-    }
-
-    const registry = readLocalBrowserSessionRegistry();
-    let changed = false;
-
-    for (const [sessionKey, entry] of Object.entries(registry.sessions)) {
-        if (entry.tempDir !== tempDir) {
-            continue;
-        }
-
-        delete registry.sessions[sessionKey];
-        changed = true;
-    }
-
-    if (changed) {
-        writeLocalBrowserSessionRegistry(registry);
-    }
-}
-
-function getRegisteredLocalBrowserSessionTempDir(sessionKey: string): string | null {
-    const registry = readLocalBrowserSessionRegistry();
-    return registry.sessions[sessionKey]?.tempDir ?? null;
-}
-
-function listRegisteredLocalBrowserSessionTempDirs(): string[] {
-    const registeredTempDirs = new Set<string>();
-
-    for (const entry of Object.values(readLocalBrowserSessionRegistry().sessions)) {
-        if (entry?.tempDir) {
-            registeredTempDirs.add(entry.tempDir);
-        }
-    }
-
-    return [...registeredTempDirs];
-}
-
-/**
- * per-tempDir 的同步独占锁，保护 metadata 文件的 read-modify-write 操作。
- * 使用 koffi FFI 调用 OS 级文件锁（Windows: LockFileEx, Unix: flock），
- * 进程崩溃后锁自动释放。
- */
-function withMetadataLock<T>(tempDir: string, operation: () => T): T {
-    return withNativeFileLock(`${tempDir}.lock`, operation);
-}
-
-function writeLocalBrowserSessionMetadata(metadata: LocalBrowserSessionMetadata): void {
+function readBrowserDomainMetadataFromPath(metadataPath: string): LocalBrowserSessionMetadata | null {
     try {
-        writeFileSync(
-            getLocalBrowserSessionMetadataPath(metadata.tempDir),
-            JSON.stringify(metadata, null, 2),
-            'utf8'
-        );
-        registerLocalBrowserSession(metadata);
-    } catch {
-        // Ignore metadata write failures.
-    }
-}
-
-function readLocalBrowserSessionMetadata(tempDir: string): LocalBrowserSessionMetadata | null {
-    try {
-        const parsed = JSON.parse(readFileSync(getLocalBrowserSessionMetadataPath(tempDir), 'utf8')) as Partial<LocalBrowserSessionMetadata>;
-        const sessionMode = parsed.sessionMode
-            ?? (parsed.hideWindow
-                ? 'hidden-headed'
-                : parsed.strictCleanup
-                    ? 'headless'
-                    : 'headed');
-
-        return {
-            ownerPid: parsed.ownerPid ?? 0,
-            browserPid: parsed.browserPid,
-            debugPort: parsed.debugPort,
-            tempDir: parsed.tempDir ?? tempDir,
-            executablePath: parsed.executablePath ?? '',
-            sessionKey: parsed.sessionKey ?? '',
-            sessionMode,
-            hideWindow: parsed.hideWindow ?? sessionMode === 'hidden-headed',
-            strictCleanup: parsed.strictCleanup ?? sessionMode === 'headless',
-            clientPids: Array.isArray(parsed.clientPids)
-                ? parsed.clientPids.filter((pid): pid is number => Number.isInteger(pid) && pid > 0)
-                : [],
-            createdAt: parsed.createdAt ?? new Date(0).toISOString()
-        };
+        return normalizeBrowserDomainMetadata(JSON.parse(readFileSync(metadataPath, 'utf8')) as Partial<LocalBrowserSessionMetadata>);
     } catch {
         return null;
     }
+}
+
+function readBrowserDomainMetadata(domainKey: string): LocalBrowserSessionMetadata | null {
+    return readBrowserDomainMetadataFromPath(getBrowserDomainMetadataPath(domainKey));
+}
+
+function writeBrowserDomainMetadata(metadata: LocalBrowserSessionMetadata): void {
+    try {
+        writeFileSync(
+            getBrowserDomainMetadataPath(metadata.domainKey),
+            JSON.stringify(metadata, null, 2),
+            'utf8'
+        );
+    } catch {
+        // metadata 写入失败只影响跨进程复用，当前进程仍然可以继续使用已连接的浏览器。
+    }
+}
+
+function clearBrowserDomainMetadata(domainKey: string, tempDir?: string): void {
+    const metadataPath = getBrowserDomainMetadataPath(domainKey);
+    if (tempDir) {
+        const metadata = readBrowserDomainMetadataFromPath(metadataPath);
+        if (metadata && metadata.tempDir !== tempDir) {
+            return;
+        }
+    }
+
+    try {
+        rmSync(metadataPath, { force: true });
+    } catch {
+        // Ignore metadata cleanup failures.
+    }
+}
+
+function isTempDirTrackedByDomainMetadata(tempDir: string): boolean {
+    return listBrowserDomainMetadataEntries()
+        .some(({ metadataPath }) => readBrowserDomainMetadataFromPath(metadataPath)?.tempDir === tempDir);
 }
 
 function processExists(pid: number): boolean {
@@ -833,7 +855,7 @@ function registerLocalBrowserSessionClient(metadata: LocalBrowserSessionMetadata
         clientPids: normalizeActiveClientPids([...metadata.clientPids, pid]),
         ownerPid: pid
     };
-    writeLocalBrowserSessionMetadata(normalizedMetadata);
+    writeBrowserDomainMetadata(normalizedMetadata);
     return normalizedMetadata;
 }
 
@@ -842,7 +864,7 @@ function unregisterLocalBrowserSessionClient(metadata: LocalBrowserSessionMetada
         ...metadata,
         clientPids: normalizeActiveClientPids(metadata.clientPids.filter((clientPid) => clientPid !== pid))
     };
-    writeLocalBrowserSessionMetadata(normalizedMetadata);
+    writeBrowserDomainMetadata(normalizedMetadata);
     return normalizedMetadata;
 }
 
@@ -961,12 +983,10 @@ function quoteWindowsCommandLineArg(arg: string): string {
 }
 
 function updateLocalBrowserSessionOwner(metadata: LocalBrowserSessionMetadata, pid = process.pid): LocalBrowserSessionMetadata {
-    return withMetadataLock(metadata.tempDir, () =>
-        registerLocalBrowserSessionClient({
-            ...metadata,
-            ownerPid: pid
-        }, pid)
-    );
+    return registerLocalBrowserSessionClient({
+        ...metadata,
+        ownerPid: pid
+    }, pid);
 }
 
 function extractTempDirFromCommandLine(commandLine: string): string | null {
@@ -1017,7 +1037,7 @@ function cleanupLegacyOrphanLocalBrowserProcesses(): void {
                 continue;
             }
 
-            if (existsSync(getLocalBrowserSessionMetadataPath(tempDir))) {
+            if (isTempDirTrackedByDomainMetadata(tempDir)) {
                 continue;
             }
 
@@ -1051,45 +1071,39 @@ function cleanupStaleLocalBrowserSessions(): void {
 
     staleBrowserCleanupPerformed = true;
 
-    const entries = listRegisteredLocalBrowserSessionTempDirs();
+    const entries = listBrowserDomainMetadataEntries();
 
-    for (const tempDir of entries) {
-        const metadataPath = getLocalBrowserSessionMetadataPath(tempDir);
-        if (!existsSync(metadataPath)) {
-            unregisterLocalBrowserSessionByTempDir(tempDir);
-            continue;
-        }
-
+    for (const { domainHash, metadataPath } of entries) {
+        const domainLock = acquireNativeFileLock(getBrowserDomainLockFilePathByHash(domainHash));
         try {
-            // 使用独占锁保护 metadata 的 read-modify-write，
-            // 解决并发 cleanup/连接进程写文件导致其他进程 JSON.parse 失败误删活跃会话的竞态条件。
-            const shouldRemove = withMetadataLock(tempDir, () => {
-                const metadata = readLocalBrowserSessionMetadata(tempDir);
-                if (!metadata) {
-                    return false;
-                }
+            // 每个域只有一个 metadata 文件，
+            // cleanup 必须持有对应域锁后再读写，避免误删正在冷启动或刚复用的浏览器。
+            const metadata = readBrowserDomainMetadataFromPath(metadataPath);
+            if (!metadata) {
+                rmSync(metadataPath, { force: true });
+                continue;
+            }
 
-                const normalizedMetadata = registerLocalBrowserSessionClient({
-                    ...metadata,
-                    clientPids: metadata.clientPids.filter((pid) => pid !== process.pid)
-                }, metadata.ownerPid);
+            const normalizedMetadata = registerLocalBrowserSessionClient({
+                ...metadata,
+                clientPids: metadata.clientPids.filter((pid) => pid !== process.pid)
+            }, metadata.ownerPid);
 
-                const browserIsAlive = normalizedMetadata.browserPid !== undefined
-                    && processMatchesLocalBrowserSession(normalizedMetadata.browserPid, normalizedMetadata.tempDir);
+            const browserIsAlive = normalizedMetadata.browserPid !== undefined
+                && processMatchesLocalBrowserSession(normalizedMetadata.browserPid, normalizedMetadata.tempDir);
 
-                return !browserIsAlive;
-            });
-
-            if (shouldRemove) {
-                unregisterLocalBrowserSessionByTempDir(tempDir);
-                rmSync(tempDir, { recursive: true, force: true });
+            if (!browserIsAlive) {
+                clearBrowserDomainMetadata(normalizedMetadata.domainKey, normalizedMetadata.tempDir);
+                rmSync(normalizedMetadata.tempDir, { recursive: true, force: true });
             }
         } catch (error) {
             if (isProcessInspectionTimeoutError(error)) {
                 throw error;
             }
 
-            // Metadata lock or read failed; skip this entry.
+            // Metadata read failed; skip this entry.
+        } finally {
+            domainLock.release();
         }
     }
 
@@ -1105,9 +1119,7 @@ async function connectToLocalDebugBrowser(playwright: PlaywrightModule, port: nu
             const response = await fetch(`${endpoint}/json/version`);
             const data = await response.json() as { webSocketDebuggerUrl?: string };
             if (data.webSocketDebuggerUrl) {
-                return await playwright.chromium.connectOverCDP(endpoint, {
-                    timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
-                });
+                return await connectOverCdpWhenReady(playwright, endpoint);
             }
         } catch {
             // Browser is still starting.
@@ -1185,32 +1197,13 @@ async function waitForBrowserReadyViaStdout(
  */
 async function tryReusePersistedLocalBrowserSession(
     playwright: PlaywrightModule,
-    requestedMode: LocalBrowserSessionMode
+    domainKey: string
 ): Promise<LocalBrowserSession | null> {
-    const entries = listRegisteredLocalBrowserSessionTempDirs();
+    const metadata = readBrowserDomainMetadata(domainKey);
+    if (!metadata) return null;
 
-    let bestMatch: { metadata: LocalBrowserSessionMetadata; score: number } | null = null;
-
-    for (const tempDir of entries) {
-        const metadata = readLocalBrowserSessionMetadata(tempDir);
-        if (!metadata) continue;
-
-        if (!isCompatibleLocalBrowserSessionMode(requestedMode, metadata.sessionMode)) continue;
-
-        const score = getLocalBrowserSessionModeReuseScore(requestedMode, metadata.sessionMode);
-        if (!bestMatch || score > bestMatch.score) {
-            bestMatch = { metadata, score };
-        }
-    }
-
-    if (!bestMatch) return null;
-
-    // 此函数按 sessionMode 筛选 + 评分选出最佳候选，不额外校验 sessionKey。
-    // 隔离由上游域锁保证：headed 模式的域锁 key 包含 executablePath（不同浏览器路径用不同锁），
-    // hidden-headed/headless 各自共享一个域锁。连接失败时会自动清理死 session。
-    const metadata = bestMatch.metadata;
     if (!metadata.debugPort || !metadata.browserPid) {
-        unregisterLocalBrowserSession(metadata.sessionKey, metadata.tempDir);
+        clearBrowserDomainMetadata(domainKey, metadata.tempDir);
         return null;
     }
 
@@ -1218,20 +1211,19 @@ async function tryReusePersistedLocalBrowserSession(
     const endpoint = `http://127.0.0.1:${metadata.debugPort}`;
     let browser: any;
     try {
-        browser = await playwright.chromium.connectOverCDP(endpoint, {
-            timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
-        });
+        browser = await connectOverCdpWhenReady(playwright, endpoint);
     } catch {
         console.error(`🧹 Persisted browser session (PID ${metadata.browserPid}, port ${metadata.debugPort}) is no longer reachable, cleaning up`);
-        unregisterLocalBrowserSession(metadata.sessionKey, metadata.tempDir);
+        clearBrowserDomainMetadata(domainKey, metadata.tempDir);
         try { rmSync(metadata.tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
         return null;
     }
     const updatedMetadata = updateLocalBrowserSessionOwner(metadata);
-    const forceKill = createForceKill(metadata.browserPid, metadata.tempDir, browser);
+    const forceKill = createForceKill(metadata.browserPid, metadata.tempDir, browser, domainKey);
     const session: LocalBrowserSession = {
         browser,
         sessionKey: updatedMetadata.sessionKey,
+        domainKey,
         sessionMode: updatedMetadata.sessionMode,
         browserPid: updatedMetadata.browserPid,
         debugPort: updatedMetadata.debugPort,
@@ -1246,37 +1238,36 @@ async function tryReusePersistedLocalBrowserSession(
 }
 
 async function closeLocalBrowserSession(session: LocalBrowserSession): Promise<void> {
-    if (session.browserPid && session.tempDir) {
+    if (session.browserPid && session.tempDir && session.domainKey) {
+        const domainLockPath = getBrowserDomainLockFilePath(session.domainKey);
+        const domainLock = acquireNativeFileLock(domainLockPath);
+
         if (session.sessionMode === 'headed') {
-            // 有头模式：保留浏览器，只断开连接
             try {
-                await session.browser.close().catch(() => undefined);
-            } catch {
-                // Ignore close errors for reusable headed browsers.
-            }
-            // 从 metadata 注销当前进程
-            withMetadataLock(session.tempDir, () => {
-                const metadata = readLocalBrowserSessionMetadata(session.tempDir!);
+                // 有头模式：保留浏览器，只断开连接；metadata 仍在同一域锁下去掉当前 client。
+                try {
+                    await session.browser.close().catch(() => undefined);
+                } catch {
+                    // Ignore close errors for reusable headed browsers.
+                }
+
+                const metadata = readBrowserDomainMetadata(session.domainKey);
                 if (metadata) unregisterLocalBrowserSessionClient(metadata);
-            });
+            } finally {
+                domainLock.release();
+            }
             return;
         }
 
-        // 无头/隐藏头模式：获取域锁，检查是否最后一个使用者
-        const domainLockPath = getBrowserDomainLockFilePath(session.sessionMode);
-        const domainLock = acquireNativeFileLock(domainLockPath);
-
         try {
-            const hasOtherClients = withMetadataLock(session.tempDir, () => {
-                const metadata = readLocalBrowserSessionMetadata(session.tempDir!);
-                const updatedMetadata = metadata
-                    ? unregisterLocalBrowserSessionClient(metadata)
-                    : null;
-                return (updatedMetadata?.clientPids.length ?? 0) > 0;
-            });
+            const metadata = readBrowserDomainMetadata(session.domainKey);
+            const updatedMetadata = metadata
+                ? unregisterLocalBrowserSessionClient(metadata)
+                : null;
+            const hasOtherClients = (updatedMetadata?.clientPids.length ?? 0) > 0;
 
             if (!hasOtherClients) {
-                // 最后一个使用者：关闭浏览器，然后释放域锁
+                // 最后一个使用者：关闭浏览器，并清理当前域的唯一 metadata。
                 try {
                     await Promise.race([
                         session.browser.close(),
@@ -1329,7 +1320,7 @@ async function closeLocalBrowserSession(session: LocalBrowserSession): Promise<v
     }
 }
 
-function createForceKill(browserPid?: number, tempDir?: string, browser?: any): () => void {
+function createForceKill(browserPid?: number, tempDir?: string, browser?: any, domainKey?: string): () => void {
     return () => {
         try {
             browser?.disconnect?.();
@@ -1360,7 +1351,9 @@ function createForceKill(browserPid?: number, tempDir?: string, browser?: any): 
 
         if (tempDir) {
             try {
-                unregisterLocalBrowserSessionByTempDir(tempDir);
+                if (domainKey) {
+                    clearBrowserDomainMetadata(domainKey, tempDir);
+                }
                 rmSync(tempDir, { recursive: true, force: true });
             } catch {
                 // Ignore cleanup errors.
@@ -1403,7 +1396,7 @@ function registerLocalBrowserCleanup(): void {
     }
 }
 
-async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionKey: string, launchArgs: string[]): Promise<LocalBrowserSession> {
+async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, launchArgs: string[]): Promise<LocalBrowserSession> {
     const browserPath = getLocalBrowserExecutablePath();
     const tempDir = mkdtempSync(path.join(tmpdir(), 'mcp-search-'));
     const port = await findFreePort();
@@ -1430,7 +1423,7 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
         try {
             await waitForBrowserReadyViaStdout({ type: 'child', child });
         } catch (error) {
-            createForceKill(browserPid, tempDir)();
+            createForceKill(browserPid, tempDir, undefined, domainKey)();
             throw error;
         }
 
@@ -1439,7 +1432,52 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
         child.stderr?.destroy();
         child.unref();
 
-        writeLocalBrowserSessionMetadata({
+        const endpoint = `http://127.0.0.1:${port}`;
+        try {
+            const browser = await connectOverCdpWhenReady(playwright, endpoint);
+            writeBrowserDomainMetadata({
+                domainKey,
+                ownerPid: process.pid,
+                browserPid,
+                debugPort: port,
+                tempDir,
+                executablePath: browserPath,
+                sessionKey,
+                sessionMode: 'hidden-headed',
+                hideWindow: true,
+                strictCleanup: false,
+                clientPids: [process.pid],
+                createdAt: new Date().toISOString()
+            });
+            const forceKill = createForceKill(browserPid, tempDir, browser, domainKey);
+            const session: LocalBrowserSession = {
+                browser, sessionKey, domainKey, sessionMode: 'hidden-headed',
+                browserPid, debugPort: port, tempDir,
+                closeBrowser: async () => { await closeLocalBrowserSession(session); },
+                forceKill
+            };
+            return session;
+        } catch (error) {
+            createForceKill(browserPid, tempDir, undefined, domainKey)();
+            throw error;
+        }
+    }
+
+    // Windows 路径：通过管道等待 ready
+    try {
+        await waitForBrowserReadyViaStdout({ type: 'pipe', readHandle: pipeHandle });
+    } catch (error) {
+        closeHandle(pipeHandle);
+        createForceKill(browserPid, tempDir, undefined, domainKey)();
+        throw error;
+    }
+    closeHandle(pipeHandle);
+
+    const endpoint = `http://127.0.0.1:${port}`;
+    try {
+        const browser = await connectOverCdpWhenReady(playwright, endpoint);
+        writeBrowserDomainMetadata({
+            domainKey,
             ownerPid: process.pid,
             browserPid,
             debugPort: port,
@@ -1452,61 +1490,21 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
             clientPids: [process.pid],
             createdAt: new Date().toISOString()
         });
-
-        const endpoint = `http://127.0.0.1:${port}`;
-        const browser = await playwright.chromium.connectOverCDP(endpoint, { timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS });
-        const forceKill = createForceKill(browserPid, tempDir, browser);
+        const forceKill = createForceKill(browserPid, tempDir, browser, domainKey);
         const session: LocalBrowserSession = {
-            browser, sessionKey, sessionMode: 'hidden-headed',
-            browserPid, debugPort: port, tempDir,
-            closeBrowser: async () => { await closeLocalBrowserSession(session); },
-            forceKill
-        };
-        return session;
-    }
-
-    // Windows 路径：通过管道等待 ready
-    try {
-        await waitForBrowserReadyViaStdout({ type: 'pipe', readHandle: pipeHandle });
-    } catch (error) {
-        closeHandle(pipeHandle);
-        createForceKill(browserPid, tempDir)();
-        throw error;
-    }
-    closeHandle(pipeHandle);
-
-    writeLocalBrowserSessionMetadata({
-        ownerPid: process.pid,
-        browserPid,
-        debugPort: port,
-        tempDir,
-        executablePath: browserPath,
-        sessionKey,
-        sessionMode: 'hidden-headed',
-        hideWindow: true,
-        strictCleanup: false,
-        clientPids: [process.pid],
-        createdAt: new Date().toISOString()
-    });
-
-    const endpoint = `http://127.0.0.1:${port}`;
-    try {
-        const browser = await playwright.chromium.connectOverCDP(endpoint, { timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS });
-        const forceKill = createForceKill(browserPid, tempDir, browser);
-        const session: LocalBrowserSession = {
-            browser, sessionKey, sessionMode: 'hidden-headed',
+            browser, sessionKey, domainKey, sessionMode: 'hidden-headed',
             browserPid, debugPort: port, tempDir,
             closeBrowser: async () => { await closeLocalBrowserSession(session); },
             forceKill
         };
         return session;
     } catch (error) {
-        createForceKill(browserPid, tempDir)();
+        createForceKill(browserPid, tempDir, undefined, domainKey)();
         throw error;
     }
 }
 
-async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionKey: string, headless: boolean, launchArgs: string[]): Promise<LocalBrowserSession> {
+async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, headless: boolean, launchArgs: string[]): Promise<LocalBrowserSession> {
     if (process.platform === 'win32') {
         const browserPath = getLocalBrowserExecutablePath();
         const tempDir = mkdtempSync(path.join(tmpdir(), 'mcp-search-'));
@@ -1524,7 +1522,7 @@ async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionK
         try {
             await waitForBrowserReadyViaStdout({ type: 'child', child });
         } catch (error) {
-            createForceKill(child.pid, tempDir)();
+            createForceKill(child.pid, tempDir, undefined, domainKey)();
             throw error;
         }
 
@@ -1533,33 +1531,33 @@ async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionK
         child.stderr?.destroy();
         child.unref();
 
-        writeLocalBrowserSessionMetadata({
-            ownerPid: process.pid,
-            browserPid: child.pid,
-            debugPort: port,
-            tempDir,
-            executablePath: browserPath,
-            sessionKey,
-            sessionMode,
-            hideWindow: false,
-            strictCleanup: sessionMode === 'headless',
-            clientPids: [process.pid],
-            createdAt: new Date().toISOString()
-        });
-
         const endpoint = `http://127.0.0.1:${port}`;
         try {
-            const browser = await playwright.chromium.connectOverCDP(endpoint, { timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS });
-            const forceKill = createForceKill(child.pid, tempDir, browser);
+            const browser = await connectOverCdpWhenReady(playwright, endpoint);
+            writeBrowserDomainMetadata({
+                domainKey,
+                ownerPid: process.pid,
+                browserPid: child.pid,
+                debugPort: port,
+                tempDir,
+                executablePath: browserPath,
+                sessionKey,
+                sessionMode,
+                hideWindow: false,
+                strictCleanup: sessionMode === 'headless',
+                clientPids: [process.pid],
+                createdAt: new Date().toISOString()
+            });
+            const forceKill = createForceKill(child.pid, tempDir, browser, domainKey);
             const session: LocalBrowserSession = {
-                browser, sessionKey, sessionMode,
+                browser, sessionKey, domainKey, sessionMode,
                 browserPid: child.pid, debugPort: port, tempDir,
                 closeBrowser: async () => { await closeLocalBrowserSession(session); },
                 forceKill
             };
             return session;
         } catch (error) {
-            createForceKill(child.pid, tempDir)();
+            createForceKill(child.pid, tempDir, undefined, domainKey)();
             throw error;
         }
     }
@@ -1576,6 +1574,7 @@ async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionK
     const session: LocalBrowserSession = {
         browser,
         sessionKey,
+        domainKey,
         sessionMode: headless ? 'headless' : 'headed',
         closeBrowser: async () => {
             await closeLocalBrowserSession(session);
@@ -1652,16 +1651,25 @@ async function getOrCreateLocalBrowserSession(
 
     cachedLocalBrowserSessionKey = sessionKey;
     localBrowserSessionPromise = (async () => {
+        const domainKey = buildBrowserDomainKey(sessionMode);
         // 获取域锁：同域内同一时刻只有一个进程能操作浏览器
-        const domainLockPath = getBrowserDomainLockFilePath(sessionMode);
+        const domainLockPath = getBrowserDomainLockFilePath(domainKey);
         const domainLock = acquireNativeFileLock(domainLockPath);
+        let domainLockReleased = false;
+        const releaseDomainLock = () => {
+            if (domainLockReleased) {
+                return;
+            }
+            domainLockReleased = true;
+            domainLock.release();
+        };
 
         try {
             // 持有域锁时，检查是否已有可复用的浏览器
-            const reusedSession = await tryReusePersistedLocalBrowserSession(playwright, sessionMode);
+            const reusedSession = await tryReusePersistedLocalBrowserSession(playwright, domainKey);
             if (reusedSession) {
                 // 复用成功，立即释放域锁
-                domainLock.release();
+                releaseDomainLock();
                 cachedLocalBrowserSession = reusedSession;
                 registerLocalBrowserCleanup();
                 return reusedSession;
@@ -1672,14 +1680,23 @@ async function getOrCreateLocalBrowserSession(
             // 另一个 hidden-headed 进程可能正在 closeLocalBrowserSession 中判定自己是
             // 最后一个使用者并杀死浏览器，导致我们拿到一个已死的连接。
             if (sessionMode === 'headless') {
-                const hiddenHeadedLockPath = getBrowserDomainLockFilePath('hidden-headed');
+                const hiddenHeadedDomainKey = buildBrowserDomainKey('hidden-headed');
+                const hiddenHeadedLockPath = getBrowserDomainLockFilePath(hiddenHeadedDomainKey);
                 const hiddenHeadedLock = acquireNativeFileLock(hiddenHeadedLockPath);
+                let hiddenHeadedLockReleased = false;
+                const releaseHiddenHeadedLock = () => {
+                    if (hiddenHeadedLockReleased) {
+                        return;
+                    }
+                    hiddenHeadedLockReleased = true;
+                    hiddenHeadedLock.release();
+                };
                 try {
-                    const hiddenHeadedSession = await tryReusePersistedLocalBrowserSession(playwright, 'hidden-headed');
+                    const hiddenHeadedSession = await tryReusePersistedLocalBrowserSession(playwright, hiddenHeadedDomainKey);
                     if (hiddenHeadedSession) {
                         // 复用成功，释放两把域锁
-                        hiddenHeadedLock.release();
-                        domainLock.release();
+                        releaseHiddenHeadedLock();
+                        releaseDomainLock();
                         // 更新 session 信息以反映实际模式
                         hiddenHeadedSession.sessionKey = sessionKey;
                         cachedLocalBrowserSession = hiddenHeadedSession;
@@ -1687,24 +1704,25 @@ async function getOrCreateLocalBrowserSession(
                         return hiddenHeadedSession;
                     }
                 } finally {
-                    hiddenHeadedLock.release();
+                    releaseHiddenHeadedLock();
                 }
             }
 
-            // 没有可复用浏览器，新建。新建过程中持有域锁，确保 ready 后才释放。
+            // 没有可复用浏览器时才新建；launch* 内部会等待 stdout ready 后继续探测 CDP Browser 域可响应。
+            // 整个过程仍持有原有域锁，避免第二个并发请求在 CDP 尚未可用时误判为不可复用并再启动一个浏览器。
             const session = options?.hideWindow
-                ? await launchHiddenDesktopBrowser(playwright, sessionKey, launchArgs)
-                : await launchStandardLocalBrowser(playwright, sessionKey, headless, launchArgs);
+                ? await launchHiddenDesktopBrowser(playwright, sessionKey, domainKey, launchArgs)
+                : await launchStandardLocalBrowser(playwright, sessionKey, domainKey, headless, launchArgs);
             session.sessionKey = sessionKey;
 
-            // 浏览器已就绪（stdout ready 信号已收到），释放域锁
-            domainLock.release();
+            // 浏览器进程与 CDP 连接都已就绪，释放域锁允许后续进程复用。
+            releaseDomainLock();
 
             cachedLocalBrowserSession = session;
             registerLocalBrowserCleanup();
             return session;
         } catch (error) {
-            domainLock.release();
+            releaseDomainLock();
             throw error;
         }
     })().finally(() => {
@@ -1812,11 +1830,12 @@ export async function openPlaywrightBrowser(
             wsEndpoint: config.playwrightWsEndpoint,
             timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
         });
+        const release = async () => {
+            await browser.close().catch(() => undefined);
+        };
         return {
             browser,
-            close: async () => {
-                await browser.close().catch(() => undefined);
-            }
+            release
         };
     }
 
@@ -1824,11 +1843,12 @@ export async function openPlaywrightBrowser(
         const browser = await playwright.chromium.connectOverCDP(config.playwrightCdpEndpoint, {
             timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
         });
+        const release = async () => {
+            await browser.close().catch(() => undefined);
+        };
         return {
             browser,
-            close: async () => {
-                await browser.close().catch(() => undefined);
-            }
+            release
         };
     }
 
@@ -1836,13 +1856,14 @@ export async function openPlaywrightBrowser(
     // 这里改为复用单个后台浏览器会话，只有会话失活或启动参数变化时才重建。
     // 对 Bing 的隐藏有头模式，还会复用同一个隐藏桌面上的浏览器进程，避免窗口闪现到用户桌面。
     const session = await getOrCreateLocalBrowserSession(playwright, headless, launchArgs, options);
+    const release = async () => {
+        // 本地模式返回共享浏览器句柄，release 只释放调用方引用，
+        // 不真正关闭浏览器；真正销毁由 CLI/daemon 在生命周期结束时调用 shutdownLocalPlaywrightBrowserSessions()。
+        return Promise.resolve();
+    };
 
     return {
         browser: session.browser,
-        close: async () => {
-            // openPlaywrightBrowser 在本地模式下返回的是共享浏览器句柄；若在这里真实关闭，会破坏进程内浏览器复用与页池复用。
-            // 共享浏览器的生命周期统一由 shutdownLocalPlaywrightBrowserSessions 管理，这里只释放调用方句柄语义。
-            return Promise.resolve();
-        }
+        release
     };
 }

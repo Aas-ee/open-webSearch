@@ -240,6 +240,60 @@ async function testSearchToolPassesSearchModeOverride(): Promise<void> {
     console.log('✅ MCP search tool passes search-mode override');
 }
 
+async function testSearchToolAutoModeUsesRuntimeDefault(): Promise<void> {
+    const seenCalls: Array<{ searchMode?: string }> = [];
+    const runtime = createOpenWebSearchRuntime({
+        config: createTestConfig({ searchMode: 'playwright' }),
+        dependencies: {
+            searchExecutors: {
+                bing: async (query, limit, context) => {
+                    seenCalls.push({ searchMode: context?.searchMode });
+                    return [{
+                        title: 'Result',
+                        url: 'https://example.com',
+                        description: `${query}:${limit}:${context?.searchMode ?? 'none'}`,
+                        source: 'example.com',
+                        engine: 'bing'
+                    }];
+                }
+            },
+            fetchGithubReadme: async () => '# README',
+            fetchWebContent: async (url, maxChars, options) => ({
+                url,
+                finalUrl: url,
+                contentType: 'text/plain',
+                title: 'Example',
+                retrievalMethod: 'request' as const,
+                truncated: false,
+                content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                readabilityApplied: options?.readability ?? false,
+                links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
+            }),
+            fetchCsdnArticle: async () => ({ content: 'csdn' }),
+            fetchJuejinArticle: async () => ({ content: 'juejin' }),
+            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+        }
+    });
+    const server = new McpServer({ name: 'test', version: '1.0.0' });
+    setupTools(server, runtime);
+
+    const tools = (server as unknown as { _registeredTools: Record<string, { handler: (input: unknown) => Promise<{ content: Array<{ text: string }> }> }> })._registeredTools;
+    const response = await tools.search.handler({
+        query: 'Open WebSearch',
+        limit: 2,
+        searchMode: 'auto',
+        engines: ['bing']
+    });
+    const payload = JSON.parse(response.content[0].text) as {
+        results: Array<{ description: string }>;
+    };
+
+    assertEqual(payload.results[0].description, 'Open WebSearch:2:none', 'MCP search auto should behave like omitted search mode');
+    assertEqual(seenCalls[0].searchMode, undefined, 'MCP search auto should not override runtime search mode');
+
+    console.log('✅ MCP search tool treats auto search-mode as runtime default');
+}
+
 async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
     const seenCalls: Array<{ readability?: boolean; includeLinks?: boolean }> = [];
     const runtime = createOpenWebSearchRuntime({
@@ -435,6 +489,12 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         descriptionPayload.searchDescription.includes('Bing'),
         'search description should reflect allowed engines'
     );
+    assert(
+        descriptionPayload.searchDescription.includes('omit or set auto to use the server configured SEARCH_MODE') &&
+        descriptionPayload.searchDescription.includes('request forces request-based search') &&
+        descriptionPayload.searchDescription.includes('playwright forces browser-based search'),
+        'search description should explain searchMode enum meanings'
+    );
 
     console.log('✅ MCP config-driven engine and mode behavior remains compatible');
 }
@@ -443,6 +503,7 @@ async function main(): Promise<void> {
     await testSearchToolReturnsCompatiblePayload();
     await testSetupToolsUsesRuntimeConfigDefaults();
     await testSearchToolPassesSearchModeOverride();
+    await testSearchToolAutoModeUsesRuntimeDefault();
     await testFetchWebToolPassesReadabilityFlags();
     testCustomToolNamesAndFallbacks();
     testConfigDrivenEngineSelectionAndMode();

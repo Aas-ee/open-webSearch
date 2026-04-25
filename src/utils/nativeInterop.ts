@@ -154,11 +154,39 @@ interface UnixLockBindings {
 }
 let _unixLock: UnixLockBindings | undefined;
 
+function getUnixLibcCandidates(): string[] {
+    if (process.platform === 'darwin') {
+        return ['libSystem.B.dylib'];
+    }
+
+    // 修复 Docker Alpine 兼容性问题：Alpine 默认是 musl，不一定存在 glibc 的 libc.so.6。
+    // 这里保留 glibc 优先级，同时增加 musl libc 名称 fallback，避免 node:20-alpine 下本地文件锁初始化失败。
+    return [
+        'libc.so.6',
+        'libc.musl-x86_64.so.1',
+        'libc.musl-aarch64.so.1',
+        'libc.musl-armhf.so.1',
+        'libc.musl-armv7.so.1',
+        'libc.so'
+    ];
+}
+
 function unixLock(): UnixLockBindings {
     if (_unixLock) return _unixLock;
     const k = koffi();
-    const libcPath = process.platform === 'darwin' ? 'libSystem.B.dylib' : 'libc.so.6';
-    const libc = k.load(libcPath);
+    let libc: ReturnType<typeof k.load> | null = null;
+    const failures: string[] = [];
+    for (const libcPath of getUnixLibcCandidates()) {
+        try {
+            libc = k.load(libcPath);
+            break;
+        } catch (error) {
+            failures.push(`${libcPath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    if (!libc) {
+        throw new Error(`Unable to load libc for native flock. Tried: ${failures.join(' | ')}`);
+    }
     _unixLock = {
         flock: libc.func('int flock(int fd, int operation)')
     };

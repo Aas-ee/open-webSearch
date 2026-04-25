@@ -81,4 +81,15 @@ assert(ckResults.length === 1, '/ck/a redirect should yield one result');
 assert(ckResults[0].url === 'https://real-target.example.com/page', '/ck/a redirect target should be decoded from base64url u param');
 assert(ckResults[0].title === 'CK Redirect Result', '/ck/a result title should parse');
 
+// 固定相对 /ck/a 的当前行为：这类链接没有可信 origin，上游解析器会按 Bing 内部跳转丢弃，避免返回不可点击的相对 URL。
+const relativeCkRedirectHtml = `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a href="/ck/a?!&&p=abc&u=a1${Buffer.from('https://relative-target.example.com/page').toString('base64url')}&ntb=1">Relative CK Redirect Result</a></h2>
+    <div class="b_caption"><p>Relative /ck/a redirect should be ignored.</p></div>
+  </li>
+</ol>`;
+const relativeCkResults = parseBingSearchResults(relativeCkRedirectHtml, 5);
+assert(relativeCkResults.length === 0, 'relative /ck/a redirect should be discarded as an internal Bing jump link');
+
 console.log('Bing parser tests passed.');

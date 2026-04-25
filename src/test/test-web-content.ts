@@ -1,60 +1,81 @@
-import axios from 'axios';
+import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config } from '../config.js';
 import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
 import { __setReadabilityParserForTests } from '../engines/web/fetchWebContent.js';
+import { __setAxiosRequestForTests } from '../utils/httpRequest.js';
 
 type TestCase = {
     name: string;
     run: () => Promise<void>;
 };
 
-const originalAxiosGet = axios.get.bind(axios);
-const originalAxiosHead = axios.head.bind(axios);
 const requestAttempts = new Map<string, number>();
 const requestConfigs = new Map<string, any[]>();
+
+function makeResponse(
+    config: AxiosRequestConfig,
+    response: {
+        status?: number;
+        headers?: Record<string, string>;
+        data?: unknown;
+        finalUrl?: string;
+    }
+): AxiosResponse {
+    return {
+        status: response.status ?? 200,
+        statusText: '',
+        headers: response.headers ?? {},
+        data: response.data ?? '',
+        config,
+        request: { res: { responseUrl: response.finalUrl ?? config.url } }
+    } as AxiosResponse;
+}
 
 function installAxiosMock(): void {
     requestAttempts.clear();
     requestConfigs.clear();
 
-    (axios as any).head = async (url: string, options?: any) => {
+    // 修复测试桩覆盖不到 requestWithSafeRedirects 的问题：生产代码现在统一走 axios.request，
+    // 因此测试也必须替换同一层入口，避免误打到真实网络造成 404 和不稳定失败。
+    __setAxiosRequestForTests(async (config) => {
+        const url = String(config.url || '');
+        const method = String(config.method || 'GET').toUpperCase();
         const configs = requestConfigs.get(url) || [];
-        configs.push({ method: 'HEAD', options });
+        configs.push({ method, options: config });
         requestConfigs.set(url, configs);
-        if (url.endsWith('/too-large.md')) {
-            return {
-                headers: { 'content-length': String(5 * 1024 * 1024) },
-                request: { res: { responseUrl: url } }
-            };
-        }
-        if (url.endsWith('/long.md')) {
-            return {
-                headers: { 'content-length': String(1024) },
-                request: { res: { responseUrl: url } }
-            };
-        }
-        return {
-            headers: {},
-            request: { res: { responseUrl: url } }
-        };
-    };
 
-    (axios as any).get = async (url: string, options?: any) => {
+        if (method === 'HEAD') {
+            if (url.endsWith('/too-large.md')) {
+                return makeResponse(config, {
+                    headers: { 'content-length': String(5 * 1024 * 1024) },
+                    finalUrl: url
+                });
+            }
+            if (url.endsWith('/long.md')) {
+                return makeResponse(config, {
+                    headers: { 'content-length': String(1024) },
+                    finalUrl: url
+                });
+            }
+            return makeResponse(config, { headers: {}, finalUrl: url });
+        }
+
+        if (method !== 'GET') {
+            throw new Error(`Unexpected mocked method: ${method}`);
+        }
+
         requestAttempts.set(url, (requestAttempts.get(url) || 0) + 1);
-        const configs = requestConfigs.get(url) || [];
-        configs.push({ method: 'GET', options });
-        requestConfigs.set(url, configs);
 
         if (url.endsWith('/skill.md')) {
-            return {
+            return makeResponse(config, {
                 headers: { 'content-type': 'text/plain; charset=utf-8' },
                 data: '# Skill Title\n\nThis is a markdown test document.',
-                request: { res: { responseUrl: url } }
-            };
+                finalUrl: url
+            });
         }
 
         if (url.endsWith('/page')) {
-            return {
+            return makeResponse(config, {
                 headers: { 'content-type': 'text/html; charset=utf-8' },
                 data: `
                 <html>
@@ -67,16 +88,16 @@ function installAxiosMock(): void {
                   </body>
                 </html>
                 `,
-                request: { res: { responseUrl: `${url}?from=test` } }
-            };
+                finalUrl: `${url}?from=test`
+            });
         }
 
         if (url.endsWith('/long.md')) {
-            return {
+            return makeResponse(config, {
                 headers: { 'content-type': 'text/markdown; charset=utf-8' },
                 data: `# Long\n\n${'x'.repeat(6000)}`,
-                request: { res: { responseUrl: url } }
-            };
+                finalUrl: url
+            });
         }
 
         if (url.endsWith('/too-large.md')) {
@@ -84,7 +105,7 @@ function installAxiosMock(): void {
         }
 
         if (url.endsWith('/spa')) {
-            return {
+            return makeResponse(config, {
                 headers: { 'content-type': 'text/html; charset=utf-8' },
                 data: `
                 <html>
@@ -97,12 +118,12 @@ function installAxiosMock(): void {
                   </body>
                 </html>
                 `,
-                request: { res: { responseUrl: url } }
-            };
+                finalUrl: url
+            });
         }
 
         if (url.endsWith('/browser-spa')) {
-            return {
+            return makeResponse(config, {
                 headers: { 'content-type': 'text/html; charset=utf-8' },
                 data: `
                 <html>
@@ -115,23 +136,25 @@ function installAxiosMock(): void {
                   </body>
                 </html>
                 `,
-                request: { res: { responseUrl: url } }
-            };
+                finalUrl: url
+            });
         }
 
         if (url.endsWith('/blocked-browser-spa')) {
-            const error = new Error('Request failed with status code 403') as Error & { response?: { status: number } };
-            error.response = { status: 403 };
-            throw error;
+            return makeResponse(config, {
+                status: 403,
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+                data: '',
+                finalUrl: url
+            });
         }
 
         throw new Error(`Unexpected mocked URL: ${url}`);
-    };
+    });
 }
 
 function restoreAxiosMock(): void {
-    (axios as any).get = originalAxiosGet;
-    (axios as any).head = originalAxiosHead;
+    __setAxiosRequestForTests();
     __setBrowserHtmlFetcherForTests();
 }
 

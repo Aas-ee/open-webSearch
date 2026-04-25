@@ -8,7 +8,7 @@
 // 另外，测试会在内部为不同子进程分别设置 PLAYWRIGHT_HEADLESS=false / true，
 // 用于验证 headed 与 hidden-headed 两种模式，因此外部不需要额外设置 PLAYWRIGHT_HEADLESS。
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
@@ -70,12 +70,6 @@ type BrowserTabSnapshot = {
 type BrowserDebugTarget = {
     pid: number;
     port: number;
-};
-
-type LocalBrowserSessionRegistry = {
-    sessions?: Record<string, {
-        tempDir?: string;
-    }>;
 };
 
 type LocalBrowserSessionSnapshot = {
@@ -216,8 +210,8 @@ const queryExpectations = new Map<string, QueryExpectation>([
     }]
 ]);
 
-const LOCAL_BROWSER_SESSION_METADATA_FILE = 'open-websearch-session.json';
-const LOCAL_BROWSER_SESSION_REGISTRY_FILE = 'open-websearch-local-browser-sessions.json';
+const LOCAL_BROWSER_DOMAIN_METADATA_PREFIX = 'domain-session-';
+const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'open-websearch-browser-session-locks');
 
 function assertCondition(condition: unknown, message: string): void {
     if (!condition) {
@@ -266,20 +260,23 @@ function normalizeClientPids(value: unknown): number[] {
 }
 
 function listRegisteredLocalBrowserSessions(): LocalBrowserSessionSnapshot[] {
-    const registryPath = path.join(tmpdir(), LOCAL_BROWSER_SESSION_REGISTRY_FILE);
-    const registry = readJsonFile<LocalBrowserSessionRegistry>(registryPath);
-    const entries = registry?.sessions && typeof registry.sessions === 'object'
-        ? Object.values(registry.sessions)
+    // 生产代码已从“全局 registry + 每个临时目录 metadata”迁移为“每个浏览器复用域一个 metadata 文件”。
+    // 测试必须读取同一个域 metadata 模型，否则会误判已经正确复用的浏览器为不可观察会话。
+    const metadataPaths = existsSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR)
+        ? readdirSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR)
+            .filter((fileName) => fileName.startsWith(LOCAL_BROWSER_DOMAIN_METADATA_PREFIX) && fileName.endsWith('.json'))
+            .map((fileName) => path.join(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR, fileName))
         : [];
-    const tempDirs = [...new Set(entries
-        .map((entry) => typeof entry?.tempDir === 'string' ? entry.tempDir : '')
-        .filter((tempDir) => tempDir.length > 0))];
 
-    return tempDirs
-        .map((tempDir) => {
-            const metadataPath = path.join(tempDir, LOCAL_BROWSER_SESSION_METADATA_FILE);
+    return metadataPaths
+        .map((metadataPath) => {
             const metadata = readJsonFile<Record<string, unknown>>(metadataPath);
             if (!metadata) {
+                return null;
+            }
+
+            const rawTempDir = metadata.tempDir;
+            if (typeof rawTempDir !== 'string' || rawTempDir.length === 0) {
                 return null;
             }
 
@@ -305,7 +302,7 @@ function listRegisteredLocalBrowserSessions(): LocalBrowserSessionSnapshot[] {
                         : 'headed';
 
             return {
-                tempDir,
+                tempDir: rawTempDir,
                 browserPid,
                 debugPort,
                 sessionMode,

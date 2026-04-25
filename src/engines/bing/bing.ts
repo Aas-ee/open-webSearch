@@ -127,14 +127,6 @@ let playwrightAvailabilityPromise: Promise<boolean> | null = null;
 let hasVerifiedPlaywrightAvailability = false;
 let hasLoggedHiddenHeadedMode = false;
 
-function randomDelay(minMs: number, maxMs: number): number {
-    return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-}
-
-async function waitRandom(page: any, minMs: number, maxMs: number): Promise<void> {
-    await page.waitForTimeout(randomDelay(minMs, maxMs));
-}
-
 function shouldUseHiddenHeadedBingBrowser(): boolean {
     return process.platform === 'win32'
         && config.playwrightHeadless
@@ -355,11 +347,77 @@ async function preparePlaywrightPage(page: any): Promise<void> {
     });
 }
 
-async function waitForBingResultsReady(page: any): Promise<void> {
-    const timeoutMs = Math.min(config.playwrightNavigationTimeoutMs, 15000);
+function getBingUiTimeoutMs(): number {
+    return Math.min(config.playwrightNavigationTimeoutMs, 15000);
+}
 
+async function waitForBingResultsReady(page: any): Promise<void> {
     await page.waitForSelector('#b_results, .b_algo, #b_content', {
-        timeout: timeoutMs
+        timeout: getBingUiTimeoutMs()
+    });
+}
+
+async function getBingResultsSignature(page: any): Promise<string> {
+    return page.evaluate(() => {
+        const container = document.querySelector('#b_results') || document.querySelector('#b_content');
+        return (container?.textContent || '').replace(/\s+/g, ' ').trim();
+    }).catch(() => '');
+}
+
+async function waitForBingResultsChanged(page: any, previousSignature: string): Promise<void> {
+    await page.waitForFunction((previous: string) => {
+        const container = document.querySelector('#b_results') || document.querySelector('#b_content');
+        const current = (container?.textContent || '').replace(/\s+/g, ' ').trim();
+        return current.length > 0 && current !== previous;
+    }, previousSignature, { timeout: getBingUiTimeoutMs() });
+}
+
+async function waitForBingSearchInputValue(page: any, expectedValue: string): Promise<void> {
+    await page.waitForFunction(({ selectors, value }: { selectors: string[]; value: string }) => {
+        const isVisible = (element: Element) => {
+            const style = window.getComputedStyle(element);
+            return style.visibility !== 'hidden'
+                && style.display !== 'none'
+                && element.getClientRects().length > 0;
+        };
+
+        return selectors.some((selector) => {
+            const input = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
+            return input !== null && isVisible(input) && input.value === value;
+        });
+    }, { selectors: SEARCH_INPUT_SELECTORS, value: expectedValue }, { timeout: getBingUiTimeoutMs() });
+}
+
+async function waitForAnyDeterministicSignal(signals: Array<Promise<unknown>>, timeoutMs: number): Promise<boolean> {
+    if (signals.length === 0) {
+        return false;
+    }
+
+    return new Promise((resolve) => {
+        let settled = false;
+        let rejected = 0;
+        let timer: NodeJS.Timeout | null = null;
+        const finish = (value: boolean) => {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            if (timer) {
+                clearTimeout(timer);
+            }
+            resolve(value);
+        };
+
+        timer = setTimeout(() => finish(false), timeoutMs);
+        for (const signal of signals) {
+            signal.then(() => finish(true)).catch(() => {
+                rejected += 1;
+                if (rejected >= signals.length) {
+                    finish(false);
+                }
+            });
+        }
     });
 }
 
@@ -390,11 +448,28 @@ async function waitForBingQueryNavigation(page: any, previousUrl: string, query:
         const nextUrl = url.toString();
         return nextUrl !== previousUrl && doesBingUrlMatchQuery(nextUrl, query);
     }, {
-        timeout: Math.min(config.playwrightNavigationTimeoutMs, 15000)
+        timeout: getBingUiTimeoutMs(),
+        waitUntil: 'domcontentloaded'
     }).then(() => true).catch(() => false);
 }
 
+async function waitForBingNextPageNavigation(page: any, previousUrl: string): Promise<void> {
+    await page.waitForURL((url: URL) => {
+        const nextUrl = url.toString();
+        return nextUrl !== previousUrl
+            && isBingUrl(nextUrl)
+            && url.pathname.toLowerCase().startsWith('/search');
+    }, {
+        timeout: getBingUiTimeoutMs(),
+        waitUntil: 'domcontentloaded'
+    });
+}
+
 async function submitBingSearchFromCurrentPage(page: any, searchInput: any, previousUrl: string, query: string): Promise<void> {
+    if (doesBingUrlMatchQuery(page.url(), query)) {
+        return;
+    }
+
     const enterNavigation = waitForBingQueryNavigation(page, previousUrl, query);
     await searchInput.press('Enter').catch(() => page.keyboard.press('Enter').catch(() => undefined));
     if (await enterNavigation) {
@@ -413,6 +488,12 @@ async function submitBingSearchFromCurrentPage(page: any, searchInput: any, prev
             return;
         }
     }
+
+    if (doesBingUrlMatchQuery(page.url(), query)) {
+        return;
+    }
+
+    throw new Error(`Bing search submission did not navigate to the expected query URL: ${query}`);
 }
 
 async function findBingSearchInput(page: any): Promise<any | null> {
@@ -425,6 +506,15 @@ async function findBingSearchInput(page: any): Promise<any | null> {
     }
 
     return null;
+}
+
+async function waitForBingSearchInput(page: any): Promise<any | null> {
+    await page.waitForSelector(SEARCH_INPUT_SELECTORS.join(', '), {
+        state: 'visible',
+        timeout: getBingUiTimeoutMs()
+    }).catch(() => undefined);
+
+    return findBingSearchInput(page);
 }
 
 function isBingUrl(url: string): boolean {
@@ -444,52 +534,67 @@ async function openBingAndSearch(page: any, query: string): Promise<void> {
     // 只有当前页本身就是 Bing 时才复用它的搜索框；否则先回到 Bing 首页，避免把查询输进站内弹窗或第三方页面控件。
     // 对已经停留在 Bing 结果页的情况，仍然优先复用当前页搜索框，避免每次都重新打开首页。
     if (!searchInput) {
+        // 修复 hidden-headed 冷启动并发搜索时，Bing 首页少量子资源迟迟不触发 load，导致可用搜索框已经出现但 page.goto 仍超时的问题。
+        // 搜索流程只依赖 DOM 和搜索框，改为 domcontentloaded 后再显式等待搜索框，避免把资源加载慢误判为搜索失败。
         await page.goto(BING_HOME_URL, {
-            waitUntil: 'load',
+            waitUntil: 'domcontentloaded',
             timeout: Math.max(config.playwrightNavigationTimeoutMs, 30000)
         });
-        await waitRandom(page, 700, 1600);
-        searchInput = await findBingSearchInput(page);
+        searchInput = await waitForBingSearchInput(page);
     }
 
     if (!searchInput) {
         throw new Error('Could not find Bing search input box');
     }
 
-    await searchInput.click();
-    await waitRandom(page, 180, 420);
+
+    await searchInput.click({ timeout: getBingUiTimeoutMs() });
     if (typeof searchInput.fill === 'function') {
-        await searchInput.fill('');
+        await searchInput.fill(query, { timeout: getBingUiTimeoutMs() });
     } else {
-        await page.keyboard.press('Control+A').catch(() => undefined);
+        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => undefined);
         await page.keyboard.press('Backspace').catch(() => undefined);
+        await page.keyboard.type(query);
     }
-    await waitRandom(page, 120, 260);
-    await searchInput.type(query, { delay: randomDelay(45, 120) });
-    await waitRandom(page, 260, 700);
+    await waitForBingSearchInputValue(page, query);
 
     // 解决复用 Bing 结果页搜索框时，旧结果页上的提交动作没有稳定触发新查询的问题。
     // 这里坚持留在当前 Bing 结果页，用同一个搜索框发起下一次查询；只有当 q 参数真正切到新查询后，
     // 才允许进入结果解析。
     await submitBingSearchFromCurrentPage(page, searchInput, previousUrl, query);
     await waitForBingResultsReady(page);
-    await waitRandom(page, 900, 1600);
 }
 
 async function goToNextResultsPage(page: any): Promise<boolean> {
     for (const selector of NEXT_PAGE_SELECTORS) {
-        const nextButton = await page.$(selector).catch(() => null);
-        if (!nextButton) {
+        const nextButton = page.locator(selector).first();
+        if (!await nextButton.isVisible().catch(() => false)) {
             continue;
         }
 
-        await waitRandom(page, 400, 900);
-        await Promise.all([
-            page.waitForLoadState('domcontentloaded', { timeout: config.playwrightNavigationTimeoutMs }).catch(() => undefined),
-            nextButton.click()
-        ]);
-        await waitForBingResultsReady(page).catch(() => undefined);
-        await waitRandom(page, 800, 1400);
+        const previousUrl = page.url();
+        const previousSignature = await getBingResultsSignature(page);
+        const navigationSignal = waitForBingNextPageNavigation(page, previousUrl);
+        const resultsChangedSignal = waitForBingResultsChanged(page, previousSignature);
+        void navigationSignal.catch(() => undefined);
+        void resultsChangedSignal.catch(() => undefined);
+
+        const clicked = await nextButton.click({ timeout: getBingUiTimeoutMs() })
+            .then(() => true)
+            .catch(() => false);
+        if (!clicked) {
+            continue;
+        }
+
+        const moved = await waitForAnyDeterministicSignal([
+            navigationSignal,
+            resultsChangedSignal
+        ], getBingUiTimeoutMs());
+        if (!moved) {
+            continue;
+        }
+
+        await waitForBingResultsReady(page);
         return true;
     }
 
@@ -515,7 +620,7 @@ async function isPlaywrightAvailable(): Promise<boolean> {
                     buildBrowserLaunchArgs(shouldUseHiddenHeadedBingBrowser()),
                     { hideWindow: shouldUseHiddenHeadedBingBrowser() }
                 );
-                await session.close();
+                await session.release();
                 hasVerifiedPlaywrightAvailability = true;
                 return true;
             } catch (error) {
@@ -577,7 +682,7 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
     );
 
     try {
-        const { page, closePageContext } = await acquirePooledPlaywrightPage(session.browser, {
+        const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
             poolKey: 'bing-search',
             contextOptions: BROWSER_CONTEXT_OPTIONS,
             preparePage: preparePlaywrightPage,
@@ -640,10 +745,10 @@ async function searchBingWithPlaywright(query: string, limit: number): Promise<S
             }
             throw error;
         } finally {
-            await closePageContext();
+            await releasePage();
         }
     } finally {
-        await session.close();
+        await session.release();
     }
 }
 
