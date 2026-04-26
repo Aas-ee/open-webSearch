@@ -8,6 +8,7 @@ import express from 'express';
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { randomUUID } from "node:crypto";
 import cors from 'cors';
+import type { CorsOptions } from 'cors';
 import { runCli } from './cli/runCli.js';
 import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
@@ -88,13 +89,17 @@ async function main() {
     const app = express();
     app.use(express.json());
 
+    const mcpCorsOptions: CorsOptions = {
+      origin: config.corsOrigin || '*',
+      methods: ['GET', 'POST', 'DELETE'],
+      allowedHeaders: ['Content-Type', 'Mcp-Session-Id'],
+      exposedHeaders: ['Mcp-Session-Id'],
+    };
+
     // 是否启用跨域
     if (config.enableCors) {
-      app.use(cors({
-        origin: config.corsOrigin || '*',
-        methods: ['GET', 'POST', 'DELETE'],
-      }));
-      app.options('*', cors());
+      app.use(cors(mcpCorsOptions));
+      app.options('*', cors(mcpCorsOptions));
     }
 
     // Store transports for each session type
