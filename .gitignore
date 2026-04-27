@@ -4,3 +4,4 @@ build/
 .env*
 .vscode
 .github/copilot-instructions.md
+.github/prompts

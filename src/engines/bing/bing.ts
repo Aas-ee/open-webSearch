@@ -146,7 +146,7 @@ function getEffectiveBingPlaywrightHeadless(): boolean {
     return config.playwrightHeadless;
 }
 
-function buildBrowserLaunchArgs(hideWindow: boolean): string[] {
+function buildDefaultBrowserLaunchArgs(hideWindow: boolean): string[] {
     const args = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -174,6 +174,31 @@ function buildBrowserLaunchArgs(hideWindow: boolean): string[] {
     }
 
     return args;
+}
+
+function buildWindowsBrowserLaunchArgs(hideWindow: boolean): string[] {
+    // 修复 Windows/Edge 有头浏览器连续提示“不受支持的命令行标志”的问题：Windows 路径使用 allowlist，避免把 Linux/root 或跨站安全绕过类参数带到用户可见浏览器窗口里。
+    const args = [
+        '--no-first-run'
+    ];
+
+    if (hideWindow) {
+        args.push('--no-default-browser-check');
+        args.push('--window-position=-32000,-32000');
+        args.push('--window-size=1,1');
+    }
+
+    return args;
+}
+
+function buildBrowserLaunchArgs(hideWindow: boolean, platform: NodeJS.Platform = process.platform): string[] {
+    return platform === 'win32'
+        ? buildWindowsBrowserLaunchArgs(hideWindow)
+        : buildDefaultBrowserLaunchArgs(hideWindow);
+}
+
+export function __buildBingBrowserLaunchArgsForTests(hideWindow: boolean, platform?: NodeJS.Platform): string[] {
+    return buildBrowserLaunchArgs(hideWindow, platform);
 }
 
 async function setupAntiDetection(page: any): Promise<void> {

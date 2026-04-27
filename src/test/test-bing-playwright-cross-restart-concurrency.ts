@@ -72,11 +72,13 @@ type BrowserDebugTarget = {
     port: number;
 };
 
+type LocalBrowserSessionMode = 'headed' | 'headless' | 'hidden-headed';
+
 type LocalBrowserSessionSnapshot = {
     tempDir: string;
     browserPid: number;
     debugPort: number;
-    sessionMode: string;
+    sessionMode: LocalBrowserSessionMode;
     clientPids: number[];
 };
 
@@ -212,6 +214,10 @@ const queryExpectations = new Map<string, QueryExpectation>([
 
 const LOCAL_BROWSER_DOMAIN_METADATA_PREFIX = 'domain-session-';
 const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'open-websearch-browser-session-locks');
+const LOCAL_BROWSER_DOMAIN_METADATA_FILE_PATTERN = new RegExp(
+    `^${LOCAL_BROWSER_DOMAIN_METADATA_PREFIX}(headed|headless|hidden-headed)-[a-f0-9]+\\.json$`,
+    'u'
+);
 
 function assertCondition(condition: unknown, message: string): void {
     if (!condition) {
@@ -262,14 +268,22 @@ function normalizeClientPids(value: unknown): number[] {
 function listRegisteredLocalBrowserSessions(): LocalBrowserSessionSnapshot[] {
     // 生产代码已从“全局 registry + 每个临时目录 metadata”迁移为“每个浏览器复用域一个 metadata 文件”。
     // 测试必须读取同一个域 metadata 模型，否则会误判已经正确复用的浏览器为不可观察会话。
-    const metadataPaths = existsSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR)
+    const metadataEntries = existsSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR)
         ? readdirSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR)
-            .filter((fileName) => fileName.startsWith(LOCAL_BROWSER_DOMAIN_METADATA_PREFIX) && fileName.endsWith('.json'))
-            .map((fileName) => path.join(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR, fileName))
+            .map((fileName) => {
+                const match = fileName.match(LOCAL_BROWSER_DOMAIN_METADATA_FILE_PATTERN);
+                return match
+                    ? {
+                        sessionMode: match[1] as LocalBrowserSessionMode,
+                        metadataPath: path.join(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR, fileName)
+                    }
+                    : null;
+            })
+            .filter((entry): entry is { sessionMode: LocalBrowserSessionMode; metadataPath: string } => entry !== null)
         : [];
 
-    return metadataPaths
-        .map((metadataPath) => {
+    return metadataEntries
+        .map(({ metadataPath, sessionMode }) => {
             const metadata = readJsonFile<Record<string, unknown>>(metadataPath);
             if (!metadata) {
                 return null;
@@ -292,14 +306,6 @@ function listRegisteredLocalBrowserSessions(): LocalBrowserSessionSnapshot[] {
 
             const browserPid = rawBrowserPid;
             const debugPort = rawDebugPort;
-
-            const sessionMode = typeof metadata.sessionMode === 'string'
-                ? metadata.sessionMode
-                : metadata.hideWindow === true
-                    ? 'hidden-headed'
-                    : metadata.strictCleanup === true
-                        ? 'headless'
-                        : 'headed';
 
             return {
                 tempDir: rawTempDir,

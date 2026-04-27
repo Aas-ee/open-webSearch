@@ -1,4 +1,4 @@
-import { hasSiteOperator, shouldSuggestRemovingSiteOperator } from '../engines/bing/bing.js';
+import { __buildBingBrowserLaunchArgsForTests, hasSiteOperator, shouldSuggestRemovingSiteOperator } from '../engines/bing/bing.js';
 import { parseBingSearchResults } from '../engines/bing/parser.js';
 
 function assert(condition: unknown, message: string): void {
@@ -67,6 +67,27 @@ assert(
     ) === false,
     'plain timeout should not suggest removing site operator'
 );
+
+function assertWindowsLaunchArgsDoNotUseUnsupportedFlags(args: string[], label: string): void {
+  for (const arg of args) {
+    assert(!arg.startsWith('--disable-'), `${label} should not include unsupported disable flag: ${arg}`);
+    assert(arg !== '--no-sandbox', `${label} should not disable browser sandbox`);
+    assert(arg !== '--no-zygote', `${label} should not include Linux zygote flag`);
+  }
+}
+
+const windowsLaunchArgs = __buildBingBrowserLaunchArgsForTests(false, 'win32');
+assertWindowsLaunchArgsDoNotUseUnsupportedFlags(windowsLaunchArgs, 'Windows headed launch args');
+
+const windowsHiddenLaunchArgs = __buildBingBrowserLaunchArgsForTests(true, 'win32');
+assertWindowsLaunchArgsDoNotUseUnsupportedFlags(windowsHiddenLaunchArgs, 'Windows hidden-headed launch args');
+assert(windowsHiddenLaunchArgs.includes('--window-position=-32000,-32000'), 'Windows hidden-headed launch args should keep off-screen position');
+assert(windowsHiddenLaunchArgs.includes('--window-size=1,1'), 'Windows hidden-headed launch args should keep hidden window size');
+
+const linuxLaunchArgs = __buildBingBrowserLaunchArgsForTests(false, 'linux');
+assert(linuxLaunchArgs.includes('--no-sandbox'), 'Linux launch args should keep root-compatible sandbox bypass');
+assert(linuxLaunchArgs.includes('--disable-setuid-sandbox'), 'Linux launch args should keep setuid sandbox bypass');
+assert(linuxLaunchArgs.includes('--disable-web-security'), 'Linux launch args should keep existing anti-detection compatibility flags');
 
 // /ck/a 跳转链接解析测试
 const ckRedirectHtml = `
