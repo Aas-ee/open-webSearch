@@ -28,4 +28,11 @@ async function testExaSearch() {
 }
 
 // Run the test
-testExaSearch().catch(console.error);
+testExaSearch()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

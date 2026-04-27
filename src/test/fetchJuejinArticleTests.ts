@@ -26,4 +26,11 @@ async function testJuejinArticleFetch() {
 }
 
 // 运行测试
-testJuejinArticleFetch().catch(console.error);
+testJuejinArticleFetch()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

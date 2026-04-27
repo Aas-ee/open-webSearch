@@ -27,4 +27,11 @@ async function testStartpageSearch() {
   }
 }
 
-testStartpageSearch().catch(console.error);
+testStartpageSearch()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

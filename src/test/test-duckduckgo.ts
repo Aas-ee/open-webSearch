@@ -29,4 +29,11 @@ async function testDuckDuckGoSearch() {
 }
 
 // Run the test
-testDuckDuckGoSearch().catch(console.error);
+testDuckDuckGoSearch()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

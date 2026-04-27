@@ -21,6 +21,8 @@
     "test:stdio": "node -e \"process.env.MODE='stdio'; import('./build/index.js')\"",
     "test:http": "node -e \"process.env.MODE='http'; import('./build/index.js')\"",
     "test:both": "node -e \"process.env.MODE='both'; import('./build/index.js')\"",
+    "test": "tsc && node build/tools/runCurrentTests.js",
+    "test:list": "tsc && node build/tools/runCurrentTests.js --list",
     "test:bing-parser": "tsc && node build/test/test-bing-parser.js",
     "test:cli": "tsc && node build/test/test-cli-search.js",
     "test:cli-search": "tsc && node build/test/test-cli-search.js",
@@ -52,6 +54,7 @@
     "https-proxy-agent": "^7.0.6",
     "ipaddr.js": "^2.3.0",
     "jsdom": "^26.1.0",
+    "koffi": "^2.16.0",
     "request-filtering-agent": "^3.2.0",
     "zod": "^3.25.76"
   },

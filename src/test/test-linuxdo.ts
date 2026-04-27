@@ -28,4 +28,11 @@ async function testLinuxDoSearch() {
 }
 
 // Run the test
-testLinuxDoSearch().catch(console.error);
+testLinuxDoSearch()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

@@ -29,4 +29,11 @@ async function testJuejin() {
 }
 
 // 运行测试
-testJuejin().catch(console.error);
+testJuejin()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
