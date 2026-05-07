@@ -15,6 +15,7 @@ function createTestConfig(): AppConfig {
         searchMode: 'request',
         proxyUrl: 'http://127.0.0.1:7890',
         useProxy: false,
+        trustProxyDns: false,
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',
         playwrightHeadless: true,

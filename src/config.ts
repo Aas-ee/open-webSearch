@@ -10,6 +10,7 @@ export interface AppConfig {
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
+    trustProxyDns: boolean;
     fetchWebAllowInsecureTls: boolean;
     // Playwright configuration
     playwrightPackage: 'auto' | 'playwright' | 'playwright-core';
@@ -43,6 +44,7 @@ export const config: AppConfig = {
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',
+    trustProxyDns: process.env.TRUST_PROXY_DNS === 'true',
     fetchWebAllowInsecureTls: process.env.FETCH_WEB_INSECURE_TLS === 'true',
     playwrightPackage: (process.env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
     playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),
@@ -130,6 +132,9 @@ if (!quietStartupLogs) {
         console.error(`🌐 Using proxy: ${config.proxyUrl}`);
     } else {
         console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
+    }
+    if (config.trustProxyDns) {
+        console.error('🌐 DNS safety check disabled (TRUST_PROXY_DNS=true)');
     }
     if (config.fetchWebAllowInsecureTls) {
         console.error('⚠️ fetchWebContent TLS verification is disabled (FETCH_WEB_INSECURE_TLS=true)');

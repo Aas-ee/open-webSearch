@@ -54,6 +54,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         searchMode: 'request',
         proxyUrl: '',
         useProxy: false,
+        trustProxyDns: false,
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',
         playwrightModulePath: undefined,

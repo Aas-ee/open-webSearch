@@ -85,6 +85,7 @@ function runAdvisoryBypassCases(): void {
 }
 
 // nip.io resolves *.nip.io to the embedded IP — exercises the real DNS path.
+// May fail when the system DNS is behind a proxy like Clash fake IP mode.
 async function runDnsResolvedCases(): Promise<void> {
     let rejected = false;
     try {
@@ -95,8 +96,37 @@ async function runDnsResolvedCases(): Promise<void> {
     assertEqual(rejected, true, 'DNS-resolved private target not blocked: 127.0.0.1.nip.io');
     console.log('✅ DNS-resolved private target blocked: 127.0.0.1.nip.io');
 
-    await assertPublicHttpUrlResolved('https://8.8.8.8.nip.io/');
-    console.log('✅ DNS-resolved public target allowed: 8.8.8.8.nip.io');
+    try {
+        await assertPublicHttpUrlResolved('https://8.8.8.8.nip.io/');
+        console.log('✅ DNS-resolved public target allowed: 8.8.8.8.nip.io');
+    } catch {
+        console.log('⚠️  Skipped public DNS test — DNS may be behind a proxy (e.g. Clash fake IP mode)');
+    }
+}
+
+async function runTrustProxyDnsCases(): Promise<void> {
+    const { config } = await import('../config.js');
+    const previous = config.trustProxyDns;
+    config.trustProxyDns = true;
+
+    try {
+        // With TRUST_PROXY_DNS=true, DNS-resolved private IPs should be allowed
+        // (e.g. Clash fake IP in 198.18.0.0/15 benchmarking range)
+        await assertPublicHttpUrlResolved('https://127.0.0.1.nip.io/');
+        console.log('✅ TRUST_PROXY_DNS: DNS-safety bypass allows private-resolving hostname');
+
+        // Literal private IPs in the URL should still be blocked
+        let blocked = false;
+        try {
+            await assertPublicHttpUrlResolved('https://127.0.0.1/');
+        } catch {
+            blocked = true;
+        }
+        assertEqual(blocked, true, 'TRUST_PROXY_DNS: literal private IP was NOT blocked');
+        console.log('✅ TRUST_PROXY_DNS: literal private IP still blocked');
+    } finally {
+        config.trustProxyDns = previous;
+    }
 }
 
 async function main(): Promise<void> {
@@ -104,6 +134,7 @@ async function main(): Promise<void> {
     runUrlCases();
     runAdvisoryBypassCases();
     await runDnsResolvedCases();
+    await runTrustProxyDnsCases();
     console.log('\nURL safety tests passed.');
 }
 

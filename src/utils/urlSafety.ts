@@ -1,6 +1,7 @@
 import * as dns from 'node:dns/promises';
 import { isIP } from 'node:net';
 import ipaddr from 'ipaddr.js';
+import { config } from '../config.js';
 
 // URL.hostname preserves the brackets for IPv6 literals (`[::1]`), which
 // break isIP and dns.lookup. Strip them once here.
@@ -50,6 +51,10 @@ export function assertPublicHttpUrl(url: string | URL, label: string = 'URL'): v
 export async function assertPublicHttpUrlResolved(url: string | URL, label: string = 'URL'): Promise<void> {
     const parsed = typeof url === 'string' ? new URL(url) : url;
     assertPublicHttpUrl(parsed, label);
+
+    if (config.trustProxyDns) {
+        return;
+    }
 
     const host = stripIpv6Brackets(parsed.hostname);
     if (isIP(host) !== 0) {

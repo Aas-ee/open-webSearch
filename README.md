@@ -164,6 +164,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
+| `TRUST_PROXY_DNS` | `false` | `true`, `false` | Disable DNS safety check for proxy setups where local DNS differs from proxy routing (e.g. Clash fake IP mode) |
 | `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
@@ -419,6 +420,7 @@ Environment variable configuration:
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
+| `TRUST_PROXY_DNS` | `false` | `true`, `false` | Disable DNS safety check for proxy setups where local DNS differs from proxy routing (e.g. Clash fake IP mode) |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 
 Then configure in your MCP client:
