@@ -43,7 +43,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 生成搜索工具的动态描述
     const getSearchDescription = () => {
         // 明确 auto/省略会使用服务端 SEARCH_MODE，只有 request/playwright 才是强制覆盖。
-        const searchModeDescription = ' searchMode meanings: omit or set auto to use the server configured SEARCH_MODE; request forces request-based search; playwright forces browser-based search.';
+        const searchModeDescription = ' searchMode meanings: omit or set auto to use the server configured SEARCH_MODE; request forces request-based search; playwright forces browser-based search. Prefer searchMode=playwright when available because request mode is more likely to trigger anti-bot defenses and return low-relevance results; use request only when Playwright is unavailable.';
         if (runtime.config.allowedSearchEngines.length === 0) {
             return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage) with no API key required.${searchModeDescription}`;
         } else {
@@ -85,7 +85,9 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         {
             query: z.string().min(1, "Search query must not be empty"),
             limit: z.number().min(1).max(50).default(10),
-            searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
+            searchMode: z.enum(['request', 'auto', 'playwright'])
+                .describe('Optional search mode override. Prefer playwright when available because request mode is more likely to trigger anti-bot defenses and return low-relevance results. Use request only when Playwright is unavailable; omit or use auto to follow the server configured SEARCH_MODE.')
+                .optional(),
             engines: z.array(getEngineInputSchema()).min(1).default([runtime.config.defaultSearchEngine])
                 .transform(requestedEngines => resolveRequestedEngines(
                     requestedEngines,
