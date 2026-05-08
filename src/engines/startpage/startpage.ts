@@ -80,6 +80,7 @@ async function getScCode(): Promise<string> {
     const response = await axios.get(
         `${STARTPAGE_BASE_URL}/`,
         buildAxiosRequestOptions({
+            trustedStaticHost: true,
             headers: {
                 ...COMMON_HEADERS,
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
@@ -163,6 +164,7 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
         STARTPAGE_SEARCH_URL,
         formData.toString(),
         buildAxiosRequestOptions({
+            trustedStaticHost: true,
             headers: {
                 ...COMMON_HEADERS,
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -181,6 +183,7 @@ async function searchStartpagePage(query: string, page: number): Promise<SearchR
             STARTPAGE_SEARCH_URL,
             new URLSearchParams(interstitialPayload).toString(),
             buildAxiosRequestOptions({
+                trustedStaticHost: true,
                 headers: {
                     ...COMMON_HEADERS,
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
