@@ -1,4 +1,4 @@
-import { assertPublicHttpUrlResolved, isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
+import { __setDnsLookupForTests, assertPublicHttpUrlResolved, isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
 
 type Case = {
     value: string;
@@ -104,28 +104,64 @@ async function runDnsResolvedCases(): Promise<void> {
     }
 }
 
-async function runTrustProxyDnsCases(): Promise<void> {
+async function runFakeIpCidrsCases(): Promise<void> {
     const { config } = await import('../config.js');
-    const previous = config.trustProxyDns;
-    config.trustProxyDns = true;
+    const previousFakeIpCidrs = [...config.fakeIpCidrs];
 
     try {
-        // With TRUST_PROXY_DNS=true, DNS-resolved private IPs should be allowed
-        // (e.g. Clash fake IP in 198.18.0.0/15 benchmarking range)
-        await assertPublicHttpUrlResolved('https://127.0.0.1.nip.io/');
-        console.log('✅ TRUST_PROXY_DNS: DNS-safety bypass allows private-resolving hostname');
+        config.fakeIpCidrs = ['198.18.0.0/15'];
 
-        // Literal private IPs in the URL should still be blocked
+        __setDnsLookupForTests(async (hostname) => {
+            if (hostname === 'fake-ip.example') {
+                return [{ address: '198.18.1.2' }];
+            }
+            if (hostname === 'private-ip.example') {
+                return [{ address: '127.0.0.1' }];
+            }
+            if (hostname === 'lan-ip.example') {
+                return [{ address: '192.168.1.10' }];
+            }
+            if (hostname === 'public-ip.example') {
+                return [{ address: '8.8.8.8' }];
+            }
+            throw new Error(`unexpected hostname: ${hostname}`);
+        });
+
+        await assertPublicHttpUrlResolved('https://fake-ip.example/');
+        console.log('✅ FAKE_IP_CIDRS: synthetic fake-ip DNS answer allowed');
+
         let blocked = false;
+        try {
+            await assertPublicHttpUrlResolved('https://private-ip.example/');
+        } catch {
+            blocked = true;
+        }
+        assertEqual(blocked, true, 'FAKE_IP_CIDRS: loopback DNS answer was NOT blocked');
+        console.log('✅ FAKE_IP_CIDRS: loopback DNS answer still blocked');
+
+        blocked = false;
+        try {
+            await assertPublicHttpUrlResolved('https://lan-ip.example/');
+        } catch {
+            blocked = true;
+        }
+        assertEqual(blocked, true, 'FAKE_IP_CIDRS: LAN DNS answer was NOT blocked');
+        console.log('✅ FAKE_IP_CIDRS: LAN DNS answer still blocked');
+
+        await assertPublicHttpUrlResolved('https://public-ip.example/');
+        console.log('✅ FAKE_IP_CIDRS: public DNS answer still allowed');
+
+        blocked = false;
         try {
             await assertPublicHttpUrlResolved('https://127.0.0.1/');
         } catch {
             blocked = true;
         }
-        assertEqual(blocked, true, 'TRUST_PROXY_DNS: literal private IP was NOT blocked');
-        console.log('✅ TRUST_PROXY_DNS: literal private IP still blocked');
+        assertEqual(blocked, true, 'FAKE_IP_CIDRS: literal private IP was NOT blocked');
+        console.log('✅ FAKE_IP_CIDRS: literal private IP still blocked');
     } finally {
-        config.trustProxyDns = previous;
+        config.fakeIpCidrs = previousFakeIpCidrs;
+        __setDnsLookupForTests();
     }
 }
 
@@ -134,7 +170,7 @@ async function main(): Promise<void> {
     runUrlCases();
     runAdvisoryBypassCases();
     await runDnsResolvedCases();
-    await runTrustProxyDnsCases();
+    await runFakeIpCidrsCases();
     console.log('\nURL safety tests passed.');
 }
 

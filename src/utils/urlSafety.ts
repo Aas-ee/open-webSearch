@@ -9,6 +9,29 @@ function stripIpv6Brackets(host: string): string {
     return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
 }
 
+type LookupResult = Array<{ address: string }>;
+type DnsLookupFn = (hostname: string) => Promise<LookupResult>;
+
+let dnsLookupForSafety: DnsLookupFn = async (hostname) => {
+    return dns.lookup(hostname, { all: true, verbatim: true });
+};
+
+function isAllowedFakeIp(address: string): boolean {
+    if (isIP(address) === 0 || config.fakeIpCidrs.length === 0) {
+        return false;
+    }
+    try {
+        const parsed = ipaddr.parse(address);
+        return config.fakeIpCidrs.some((cidr) => parsed.match(ipaddr.parseCIDR(cidr)));
+    } catch {
+        return false;
+    }
+}
+
+export function __setDnsLookupForTests(lookup?: DnsLookupFn): void {
+    dnsLookupForSafety = lookup ?? (async (hostname) => dns.lookup(hostname, { all: true, verbatim: true }));
+}
+
 export function isPrivateOrLocalHostname(hostname: string): boolean {
     const host = stripIpv6Brackets(hostname.trim().toLowerCase());
     if (!host || host === 'localhost' || host.endsWith('.localhost')) {
@@ -52,22 +75,18 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     const parsed = typeof url === 'string' ? new URL(url) : url;
     assertPublicHttpUrl(parsed, label);
 
-    if (config.trustProxyDns) {
-        return;
-    }
-
     const host = stripIpv6Brackets(parsed.hostname);
     if (isIP(host) !== 0) {
         return;
     }
 
-    let resolved: Array<{ address: string }>;
+    let resolved: LookupResult;
     try {
-        resolved = await dns.lookup(host, { all: true, verbatim: true });
+        resolved = await dnsLookupForSafety(host);
     } catch {
         throw new Error(`${label} could not be resolved`);
     }
-    if (resolved.some((entry) => isPrivateOrLocalHostname(entry.address))) {
+    if (resolved.some((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address))) {
         throw new Error(`${label} resolves to a private or local network target, which is not allowed`);
     }
 }

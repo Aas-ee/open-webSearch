@@ -11,17 +11,21 @@ function assert(condition: unknown, message: string): void {
 function main(): void {
     const originalUseProxy = config.useProxy;
     const originalProxyUrl = config.proxyUrl;
+    const originalFakeIpCidrs = [...config.fakeIpCidrs];
     const originalFetchWebAllowInsecureTls = config.fetchWebAllowInsecureTls;
 
     try {
         config.useProxy = false;
         config.proxyUrl = 'http://127.0.0.1:7890';
+        config.fakeIpCidrs = ['198.18.0.0/15'];
         config.fetchWebAllowInsecureTls = false;
 
         const defaultOptions = buildAxiosRequestOptions();
         assert(defaultOptions.proxy === false, 'proxy should always be disabled in axios config');
         assert(defaultOptions.httpsAgent instanceof https.Agent, 'direct https requests should use an https.Agent');
         assert((defaultOptions.httpsAgent as any).options.rejectUnauthorized === true, 'direct https agent should enforce TLS verification by default');
+        assert(((defaultOptions.httpAgent as any).requestFilterOptions?.allowIPAddressList ?? []).includes('198.18.0.0/15'), 'direct http agent should allow configured fake-ip CIDRs');
+        assert(((defaultOptions.httpsAgent as any).requestFilterOptions?.allowIPAddressList ?? []).includes('198.18.0.0/15'), 'direct https agent should allow configured fake-ip CIDRs');
         console.log('✅ default request options disable axios env proxy resolution');
 
         const insecureOptions = buildAxiosRequestOptions({ allowInsecureTls: true });
@@ -44,6 +48,7 @@ function main(): void {
     } finally {
         config.useProxy = originalUseProxy;
         config.proxyUrl = originalProxyUrl;
+        config.fakeIpCidrs = originalFakeIpCidrs;
         config.fetchWebAllowInsecureTls = originalFetchWebAllowInsecureTls;
     }
 }

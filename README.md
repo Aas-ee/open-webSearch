@@ -164,7 +164,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
-| `TRUST_PROXY_DNS` | `false` | `true`, `false` | Disable DNS safety check for proxy setups where local DNS differs from proxy routing (e.g. Clash fake IP mode) |
+| `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
 | `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
@@ -420,7 +420,7 @@ Environment variable configuration:
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
-| `TRUST_PROXY_DNS` | `false` | `true`, `false` | Disable DNS safety check for proxy setups where local DNS differs from proxy routing (e.g. Clash fake IP mode) |
+| `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 
 Then configure in your MCP client:
@@ -684,6 +684,7 @@ Since this tool works by scraping multi-engine search results, please note the f
    - HTTP proxy can be configured when certain search engines are unavailable in specific regions
    - Enable proxy with environment variable `USE_PROXY=true`
    - Configure proxy server address with `PROXY_URL`
+   - For Clash fake-ip / TUN setups, configure synthetic DNS ranges with `FAKE_IP_CIDRS` (for example `198.18.0.0/15`)
 
 ## Contributing
 

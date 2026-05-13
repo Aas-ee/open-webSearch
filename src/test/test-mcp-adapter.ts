@@ -54,7 +54,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         searchMode: 'request',
         proxyUrl: '',
         useProxy: false,
-        trustProxyDns: false,
+        fakeIpCidrs: [],
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',
         playwrightModulePath: undefined,
@@ -409,6 +409,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
                 proxyUrl: config.proxyUrl,
                 getProxyUrl: getProxyUrl(),
                 fetchWebAllowInsecureTls: config.fetchWebAllowInsecureTls,
+                fakeIpCidrs: config.fakeIpCidrs,
                 enableHttpServer: config.enableHttpServer
             }, null, 2));
         `,
@@ -419,7 +420,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
             SEARCH_MODE: 'auto',
             USE_PROXY: 'true',
             PROXY_URL: 'http://127.0.0.1:7890',
-            FETCH_WEB_INSECURE_TLS: 'true'
+            FETCH_WEB_INSECURE_TLS: 'true',
+            FAKE_IP_CIDRS: '198.18.0.0/15'
         }
     );
     const configPayload = parseJsonBlock(configOutput) as {
@@ -430,6 +432,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         proxyUrl: string;
         getProxyUrl: string;
         fetchWebAllowInsecureTls: boolean;
+        fakeIpCidrs: string[];
         enableHttpServer: boolean;
     };
 
@@ -440,6 +443,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
     assertEqual(configPayload.proxyUrl, 'http://127.0.0.1:7890', 'configured proxyUrl');
     assertEqual(configPayload.getProxyUrl, 'http://127.0.0.1:7890', 'configured getProxyUrl');
     assertEqual(configPayload.fetchWebAllowInsecureTls, true, 'configured fetchWebAllowInsecureTls');
+    assertEqual(configPayload.fakeIpCidrs.join(','), '198.18.0.0/15', 'configured fakeIpCidrs');
     assertEqual(configPayload.enableHttpServer, false, 'MODE=stdio should disable HTTP server');
 
     const fallbackOutput = runModuleWithEnv(
