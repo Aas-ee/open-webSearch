@@ -122,6 +122,15 @@ function testParseSearchArgs(): void {
     );
     assertEqual(parsedWithSearchMode.searchMode, 'playwright', 'parsed search mode');
 
+    const parsedSogouAlias = parseSearchArgs(
+        ['Open', 'WebSearch', '--engine', 'sou-gou'],
+        createStubRuntime({
+            defaultSearchEngine: 'sogou',
+            allowedSearchEngines: ['sogou']
+        })
+    );
+    assertEqual(parsedSogouAlias.engines.join(','), 'sogou', 'parsed Sogou alias');
+
     console.log('✅ CLI parseSearchArgs');
 }
 
