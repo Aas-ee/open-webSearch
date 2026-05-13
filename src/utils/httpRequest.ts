@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import type { AxiosRequestConfig, AxiosResponse, RawAxiosRequestHeaders, ResponseType } from 'axios';
+import https from 'node:https';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import {
     RequestFilteringHttpAgent,
@@ -18,12 +19,14 @@ type BuildAxiosRequestOptions = {
     params?: unknown;
     responseType?: ResponseType;
     timeout?: number;
+    trustedStaticHost?: boolean;
     validateStatus?: AxiosRequestConfig['validateStatus'];
 };
 
 let filteringHttpAgent: RequestFilteringHttpAgent | null = null;
 let secureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
 let insecureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
+let insecureTrustedStaticHttpsAgent: https.Agent | null = null;
 const proxyAgents = new Map<string, HttpsProxyAgent<string>>();
 
 function getFilteringHttpAgent(): RequestFilteringHttpAgent {
@@ -60,6 +63,13 @@ function getProxyAgent(proxyUrl: string, allowInsecureTls: boolean): HttpsProxyA
     return agent;
 }
 
+function getInsecureTrustedStaticHttpsAgent(): https.Agent {
+    if (!insecureTrustedStaticHttpsAgent) {
+        insecureTrustedStaticHttpsAgent = new https.Agent({ rejectUnauthorized: false });
+    }
+    return insecureTrustedStaticHttpsAgent;
+}
+
 export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {}): AxiosRequestConfig {
     const {
         allowInsecureTls = false,
@@ -71,6 +81,7 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         params,
         responseType,
         timeout,
+        trustedStaticHost = false,
         validateStatus
     } = options;
 
@@ -84,8 +95,9 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
     if (timeout !== undefined) {
         requestOptions.timeout = timeout;
     }
-    if (maxRedirects !== undefined) {
-        requestOptions.maxRedirects = maxRedirects;
+    const effectiveMaxRedirects = trustedStaticHost ? 0 : maxRedirects;
+    if (effectiveMaxRedirects !== undefined) {
+        requestOptions.maxRedirects = effectiveMaxRedirects;
     }
     if (responseType !== undefined) {
         requestOptions.responseType = responseType;
@@ -121,6 +133,13 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         const proxyAgent = getProxyAgent(effectiveProxyUrl, allowInsecureTls);
         requestOptions.httpAgent = proxyAgent;
         requestOptions.httpsAgent = proxyAgent;
+    } else if (trustedStaticHost) {
+        // 修复固定域名 axios 请求在部分网络中失败的问题：搜索/API 域名可能解析到
+        // 100.64.0.0/10 这类运营商/代理地址而被 request-filtering-agent 拦截。
+        // 该开关只允许用于调用方生成的固定可信 host，并强制禁用重定向，避免扩大 SSRF 面。
+        if (allowInsecureTls) {
+            requestOptions.httpsAgent = getInsecureTrustedStaticHttpsAgent();
+        }
     } else {
         requestOptions.httpAgent = getFilteringHttpAgent();
         requestOptions.httpsAgent = getFilteringHttpsAgent(allowInsecureTls);

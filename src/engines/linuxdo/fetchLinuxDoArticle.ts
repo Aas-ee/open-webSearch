@@ -12,6 +12,7 @@ export async function fetchLinuxDoArticle(url: string): Promise<{ content: strin
     const apiUrl = `https://linux.do/t/${topicId}.json`;
 
     const response = await axios.get(apiUrl, buildAxiosRequestOptions({
+        trustedStaticHost: true,
         headers: {
             'accept': 'application/json, text/javascript, */*; q=0.01',
             'accept-language': 'zh-CN,zh;q=0.9',

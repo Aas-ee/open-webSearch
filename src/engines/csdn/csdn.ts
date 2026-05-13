@@ -9,6 +9,7 @@ export async function searchCsdn(query: string, limit: number): Promise<SearchRe
 
     while (allResults.length < limit) {
         const response = await axios.get('https://so.csdn.net/api/v3/search', buildAxiosRequestOptions({
+            trustedStaticHost: true,
             params: {
                 q: query,
                 p: pn
