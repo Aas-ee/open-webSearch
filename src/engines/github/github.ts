@@ -81,6 +81,9 @@ async function fetchReadme(owner: string, repo: string): Promise<string | null> 
                     headers: {
                         'User-Agent': 'GitHub-README-Fetcher/1.0'
                     },
+                    // raw.githubusercontent.com 是代码固定生成的可信 host；禁用重定向并绕过通用 DNS 私网过滤，
+                    // 避免部分网络把 GitHub raw 域名解析到 100.64.0.0/10 代理地址时误判为 SSRF。
+                    trustedStaticHost: true,
                     timeout: 10000,
                     responseType: 'text',
                     validateStatus: (status) => status === 200 || status === 404

@@ -9,6 +9,7 @@ export async function searchBaidu(query: string, limit: number): Promise<SearchR
 
     while (allResults.length < limit) {
         const response = await axios.get('https://www.baidu.com/s', buildAxiosRequestOptions({
+            trustedStaticHost: true,
             params: {
                 wd: query,
                 pn: pn.toString(),
