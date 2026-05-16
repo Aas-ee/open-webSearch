@@ -33,6 +33,7 @@
     "test:local-daemon": "tsc && node build/test/test-local-daemon.js",
     "test:mcp-adapter": "tsc && node build/test/test-mcp-adapter.js",
     "test:runtime": "tsc && node build/test/test-runtime.js",
+    "test:sogou": "tsc && node build/test/test-sogou.js",
     "test:startpage": "tsc && node build/test/test-startpage.js",
     "test:http-request-options": "tsc && node build/test/test-http-request-options.js",
     "test:url-safety": "tsc && node build/test/test-url-safety.js",

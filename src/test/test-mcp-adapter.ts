@@ -126,7 +126,7 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
     const runtime = createOpenWebSearchRuntime({
         config: createTestConfig({
             defaultSearchEngine: 'startpage',
-            allowedSearchEngines: ['startpage', 'bing']
+            allowedSearchEngines: ['startpage', 'bing', 'sogou']
         }),
         dependencies: {
             searchExecutors: {
@@ -143,6 +143,13 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
                     description: `${query}:${limit}`,
                     source: 'example.com',
                     engine: 'bing'
+                }],
+                sogou: async (query, limit) => [{
+                    title: 'Sogou Result',
+                    url: 'https://sogou.example.com',
+                    description: `${query}:${limit}`,
+                    source: 'sogou.example.com',
+                    engine: 'sogou'
                 }]
             },
             fetchGithubReadme: async () => '# README',
@@ -183,6 +190,7 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
     assertEqual(payload.engines[0], 'startpage', 'search handler should use runtime default engine');
     assertEqual(payload.results[0].engine, 'startpage', 'search execution should respect runtime default engine');
     assert(tools.search.description.includes('Startpage'), 'search description should use runtime-config allowed engines');
+    assert(tools.search.description.includes('Sogou'), 'search description should include Sogou when allowed');
 
     console.log('✅ setupTools uses runtime.config defaults');
 }

@@ -138,7 +138,7 @@ Request body:
 {
   "query": "open web search",
   "limit": 3,
-  "engines": ["startpage", "bing"],
+  "engines": ["startpage", "bing", "sogou"],
   "searchMode": "playwright"
 }
 ```
@@ -156,7 +156,7 @@ Example:
 ```bash
 curl --noproxy '*' -X POST http://127.0.0.1:3210/search \
   -H "Content-Type: application/json" \
-  -d '{"query":"open web search","limit":3,"engines":["bing"],"searchMode":"playwright"}'
+  -d '{"query":"open web search","limit":3,"engines":["sogou"]}'
 ```
 
 ### `POST /fetch-web`
