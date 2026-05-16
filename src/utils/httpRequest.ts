@@ -6,7 +6,7 @@ import {
     RequestFilteringHttpAgent,
     RequestFilteringHttpsAgent
 } from 'request-filtering-agent';
-import { getProxyUrl } from '../config.js';
+import { config, getProxyUrl } from '../config.js';
 import { assertPublicHttpUrlResolved, isPrivateOrLocalHostname } from './urlSafety.js';
 
 type BuildAxiosRequestOptions = {
@@ -23,30 +23,46 @@ type BuildAxiosRequestOptions = {
     validateStatus?: AxiosRequestConfig['validateStatus'];
 };
 
-let filteringHttpAgent: RequestFilteringHttpAgent | null = null;
-let secureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
-let insecureFilteringHttpsAgent: RequestFilteringHttpsAgent | null = null;
+const filteringHttpAgents = new Map<string, RequestFilteringHttpAgent>();
+const secureFilteringHttpsAgents = new Map<string, RequestFilteringHttpsAgent>();
+const insecureFilteringHttpsAgents = new Map<string, RequestFilteringHttpsAgent>();
 let insecureTrustedStaticHttpsAgent: https.Agent | null = null;
 const proxyAgents = new Map<string, HttpsProxyAgent<string>>();
 
+function buildFakeIpAgentCacheKey(): string {
+    return config.fakeIpCidrs.join(',');
+}
+
+// Allow configured synthetic fake-ip CIDRs through request-filtering-agent
+// so TUN/no-proxy paths do not re-block addresses already declared as fake DNS results.
+function buildFakeIpAllowlistOptions() {
+    return config.fakeIpCidrs.length > 0 ? { allowIPAddressList: config.fakeIpCidrs } : {};
+}
+
 function getFilteringHttpAgent(): RequestFilteringHttpAgent {
-    if (!filteringHttpAgent) {
-        filteringHttpAgent = new RequestFilteringHttpAgent();
+    const cacheKey = buildFakeIpAgentCacheKey();
+    const cached = filteringHttpAgents.get(cacheKey);
+    if (cached) {
+        return cached;
     }
-    return filteringHttpAgent;
+    const agent = new RequestFilteringHttpAgent(buildFakeIpAllowlistOptions());
+    filteringHttpAgents.set(cacheKey, agent);
+    return agent;
 }
 
 function getFilteringHttpsAgent(allowInsecureTls: boolean): RequestFilteringHttpsAgent {
-    if (allowInsecureTls) {
-        if (!insecureFilteringHttpsAgent) {
-            insecureFilteringHttpsAgent = new RequestFilteringHttpsAgent({ rejectUnauthorized: false });
-        }
-        return insecureFilteringHttpsAgent;
+    const cacheKey = `${allowInsecureTls ? 'insecure' : 'secure'}::${buildFakeIpAgentCacheKey()}`;
+    const cache = allowInsecureTls ? insecureFilteringHttpsAgents : secureFilteringHttpsAgents;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+        return cached;
     }
-    if (!secureFilteringHttpsAgent) {
-        secureFilteringHttpsAgent = new RequestFilteringHttpsAgent({ rejectUnauthorized: true });
-    }
-    return secureFilteringHttpsAgent;
+    const agent = new RequestFilteringHttpsAgent({
+        ...buildFakeIpAllowlistOptions(),
+        rejectUnauthorized: !allowInsecureTls
+    });
+    cache.set(cacheKey, agent);
+    return agent;
 }
 
 function getProxyAgent(proxyUrl: string, allowInsecureTls: boolean): HttpsProxyAgent<string> {

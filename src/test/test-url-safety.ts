@@ -1,4 +1,4 @@
-import { assertPublicHttpUrlResolved, isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
+import { __setDnsLookupForTests, assertPublicHttpUrlResolved, isPublicHttpUrl, isPrivateOrLocalHostname } from '../utils/urlSafety.js';
 
 type Case = {
     value: string;
@@ -85,6 +85,7 @@ function runAdvisoryBypassCases(): void {
 }
 
 // nip.io resolves *.nip.io to the embedded IP — exercises the real DNS path.
+// May fail when the system DNS is behind a proxy like Clash fake IP mode.
 async function runDnsResolvedCases(): Promise<void> {
     let rejected = false;
     try {
@@ -95,8 +96,73 @@ async function runDnsResolvedCases(): Promise<void> {
     assertEqual(rejected, true, 'DNS-resolved private target not blocked: 127.0.0.1.nip.io');
     console.log('✅ DNS-resolved private target blocked: 127.0.0.1.nip.io');
 
-    await assertPublicHttpUrlResolved('https://8.8.8.8.nip.io/');
-    console.log('✅ DNS-resolved public target allowed: 8.8.8.8.nip.io');
+    try {
+        await assertPublicHttpUrlResolved('https://8.8.8.8.nip.io/');
+        console.log('✅ DNS-resolved public target allowed: 8.8.8.8.nip.io');
+    } catch {
+        console.log('⚠️  Skipped public DNS test — DNS may be behind a proxy (e.g. Clash fake IP mode)');
+    }
+}
+
+async function runFakeIpCidrsCases(): Promise<void> {
+    const { config } = await import('../config.js');
+    const previousFakeIpCidrs = [...config.fakeIpCidrs];
+
+    try {
+        config.fakeIpCidrs = ['198.18.0.0/15'];
+
+        __setDnsLookupForTests(async (hostname) => {
+            if (hostname === 'fake-ip.example') {
+                return [{ address: '198.18.1.2' }];
+            }
+            if (hostname === 'private-ip.example') {
+                return [{ address: '127.0.0.1' }];
+            }
+            if (hostname === 'lan-ip.example') {
+                return [{ address: '192.168.1.10' }];
+            }
+            if (hostname === 'public-ip.example') {
+                return [{ address: '8.8.8.8' }];
+            }
+            throw new Error(`unexpected hostname: ${hostname}`);
+        });
+
+        await assertPublicHttpUrlResolved('https://fake-ip.example/');
+        console.log('✅ FAKE_IP_CIDRS: synthetic fake-ip DNS answer allowed');
+
+        let blocked = false;
+        try {
+            await assertPublicHttpUrlResolved('https://private-ip.example/');
+        } catch {
+            blocked = true;
+        }
+        assertEqual(blocked, true, 'FAKE_IP_CIDRS: loopback DNS answer was NOT blocked');
+        console.log('✅ FAKE_IP_CIDRS: loopback DNS answer still blocked');
+
+        blocked = false;
+        try {
+            await assertPublicHttpUrlResolved('https://lan-ip.example/');
+        } catch {
+            blocked = true;
+        }
+        assertEqual(blocked, true, 'FAKE_IP_CIDRS: LAN DNS answer was NOT blocked');
+        console.log('✅ FAKE_IP_CIDRS: LAN DNS answer still blocked');
+
+        await assertPublicHttpUrlResolved('https://public-ip.example/');
+        console.log('✅ FAKE_IP_CIDRS: public DNS answer still allowed');
+
+        blocked = false;
+        try {
+            await assertPublicHttpUrlResolved('https://127.0.0.1/');
+        } catch {
+            blocked = true;
+        }
+        assertEqual(blocked, true, 'FAKE_IP_CIDRS: literal private IP was NOT blocked');
+        console.log('✅ FAKE_IP_CIDRS: literal private IP still blocked');
+    } finally {
+        config.fakeIpCidrs = previousFakeIpCidrs;
+        __setDnsLookupForTests();
+    }
 }
 
 async function main(): Promise<void> {
@@ -104,6 +170,7 @@ async function main(): Promise<void> {
     runUrlCases();
     runAdvisoryBypassCases();
     await runDnsResolvedCases();
+    await runFakeIpCidrsCases();
     console.log('\nURL safety tests passed.');
 }
 
