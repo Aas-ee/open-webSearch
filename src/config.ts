@@ -1,4 +1,6 @@
 // src/config.ts
+import ipaddr from 'ipaddr.js';
+
 export interface AppConfig {
     // Search engine configuration
     defaultSearchEngine: 'bing' | 'duckduckgo' | 'exa' | 'brave' | 'baidu' | 'csdn' | 'linuxdo'  | 'juejin' | 'startpage';
@@ -10,6 +12,7 @@ export interface AppConfig {
     // Proxy configuration
     proxyUrl?: string;
     useProxy: boolean;
+    fakeIpCidrs: string[];
     fetchWebAllowInsecureTls: boolean;
     // Playwright configuration
     playwrightPackage: 'auto' | 'playwright' | 'playwright-core';
@@ -43,6 +46,9 @@ export const config: AppConfig = {
     // Proxy configuration
     proxyUrl: process.env.PROXY_URL || 'http://127.0.0.1:7890',
     useProxy: process.env.USE_PROXY === 'true',
+    fakeIpCidrs: process.env.FAKE_IP_CIDRS ?
+        process.env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
+        [],
     fetchWebAllowInsecureTls: process.env.FETCH_WEB_INSECURE_TLS === 'true',
     playwrightPackage: (process.env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
     playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),
@@ -79,6 +85,28 @@ if (!validSearchModes.includes(config.searchMode)) {
 if (!validPlaywrightPackages.includes(config.playwrightPackage)) {
     console.warn(`Invalid PLAYWRIGHT_PACKAGE: "${config.playwrightPackage}", falling back to "auto"`);
     config.playwrightPackage = 'auto';
+}
+
+if (config.fakeIpCidrs.length > 0) {
+    const invalidFakeIpCidrs = config.fakeIpCidrs.filter((cidr) => {
+        try {
+            ipaddr.parseCIDR(cidr);
+            return false;
+        } catch {
+            return true;
+        }
+    });
+    if (invalidFakeIpCidrs.length > 0) {
+        console.warn(`Invalid FAKE_IP_CIDRS entries will be ignored: ${invalidFakeIpCidrs.join(', ')}`);
+    }
+    config.fakeIpCidrs = config.fakeIpCidrs.filter((cidr) => {
+        try {
+            ipaddr.parseCIDR(cidr);
+            return true;
+        } catch {
+            return false;
+        }
+    });
 }
 
 if (!Number.isFinite(config.playwrightNavigationTimeoutMs) || config.playwrightNavigationTimeoutMs <= 0) {
@@ -130,6 +158,9 @@ if (!quietStartupLogs) {
         console.error(`🌐 Using proxy: ${config.proxyUrl}`);
     } else {
         console.error(`🌐 No proxy configured (set USE_PROXY=true to enable)`);
+    }
+    if (config.fakeIpCidrs.length > 0) {
+        console.error(`🌐 Fake IP CIDRs: ${config.fakeIpCidrs.join(', ')}`);
     }
     if (config.fetchWebAllowInsecureTls) {
         console.error('⚠️ fetchWebContent TLS verification is disabled (FETCH_WEB_INSECURE_TLS=true)');
