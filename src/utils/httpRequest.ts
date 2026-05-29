@@ -27,6 +27,7 @@ const filteringHttpAgents = new Map<string, RequestFilteringHttpAgent>();
 const secureFilteringHttpsAgents = new Map<string, RequestFilteringHttpsAgent>();
 const insecureFilteringHttpsAgents = new Map<string, RequestFilteringHttpsAgent>();
 let insecureTrustedStaticHttpsAgent: https.Agent | null = null;
+let trustedStaticHttpsAgent: https.Agent | null = null;
 const proxyAgents = new Map<string, HttpsProxyAgent<string>>();
 
 function buildFakeIpAgentCacheKey(): string {
@@ -84,6 +85,13 @@ function getInsecureTrustedStaticHttpsAgent(): https.Agent {
         insecureTrustedStaticHttpsAgent = new https.Agent({ rejectUnauthorized: false });
     }
     return insecureTrustedStaticHttpsAgent;
+}
+
+function getTrustedStaticHttpsAgent(): https.Agent {
+    if (!trustedStaticHttpsAgent) {
+        trustedStaticHttpsAgent = new https.Agent({ maxVersion: 'TLSv1.2' });
+    }
+    return trustedStaticHttpsAgent;
 }
 
 export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {}): AxiosRequestConfig {
@@ -155,6 +163,9 @@ export function buildAxiosRequestOptions(options: BuildAxiosRequestOptions = {})
         // 该开关只允许用于调用方生成的固定可信 host，并强制禁用重定向，避免扩大 SSRF 面。
         if (allowInsecureTls) {
             requestOptions.httpsAgent = getInsecureTrustedStaticHttpsAgent();
+        } else {
+            // 限制 TLS 1.2 上限，修复部分 CDN（如百度）不支持 TLS 1.3 导致握手失败的问题。
+            requestOptions.httpsAgent = getTrustedStaticHttpsAgent();
         }
     } else {
         requestOptions.httpAgent = getFilteringHttpAgent();
