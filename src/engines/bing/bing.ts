@@ -118,7 +118,7 @@ function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boole
 
 function buildBingAxiosRequestOptions(): any {
     return buildSharedAxiosRequestOptions({
-        trustedStaticHost: true,
+        trustedStaticHost: false,
         headers: FALLBACK_HEADERS,
         timeout: config.playwrightNavigationTimeoutMs
     });
