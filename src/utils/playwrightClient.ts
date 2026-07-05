@@ -1,4 +1,4 @@
-﻿import { execFileSync, spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { createRequire } from 'module';
@@ -2266,7 +2266,7 @@ export async function openPlaywrightBrowser(
         });
         return {
             browser,
-            release: async () => { /* 远程浏览器由用户管理，不断开 */ }
+            release: async () => { await browser.close().catch(() => undefined); }
         };
     }
 
@@ -2276,15 +2276,24 @@ export async function openPlaywrightBrowser(
         });
         return {
             browser,
-            release: async () => { /* 远程浏览器由用户管理，不断开 */ }
+            release: async () => { await browser.close().catch(() => undefined); }
         };
     }
 
     let headless = config.playwrightHeadless;
+    let hideWindow = false;
 
-    // Windows 本地无头模式：在隐藏桌面上运行，避免 --headless=new 仍可能闪现窗口。
-    const hideWindow = headless && process.platform === 'win32'
-        && !config.playwrightWsEndpoint && !config.playwrightCdpEndpoint;
+    // Windows 本地且非远程连接时：
+    // - antiBot（仅 bing）：将无头改为隐藏有头（headless=false），反爬
+    // - 普通无头（fetchWebContent 等）：隐藏桌面 + --headless=new 双重保障
+    if (process.platform === 'win32' && !config.playwrightWsEndpoint && !config.playwrightCdpEndpoint) {
+        if (options?.antiBot && headless) {
+            headless = false;
+            hideWindow = true;
+        } else if (headless) {
+            hideWindow = true;
+        }
+    }
     const session = await getOrCreateLocalBrowserSession(playwright, headless, hideWindow ? { hideWindow: true } : undefined);
     return {
         browser: session.browser,

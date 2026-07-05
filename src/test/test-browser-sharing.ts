@@ -4,6 +4,15 @@ import { fetchWebContent } from '../engines/web/index.js';
 import { searchBing } from '../engines/bing/bing.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../utils/playwrightClient.js';
 
+if (process.platform !== 'win32') {
+    console.log('SKIP: test-browser-sharing requires Windows (uses PowerShell for process enumeration).');
+    process.exit(0);
+}
+if (!process.env.OPEN_WEBSEARCH_INTEGRATION_TESTS) {
+    console.log('SKIP: Set OPEN_WEBSEARCH_INTEGRATION_TESTS=1 to run (will taskkill msedge.exe).');
+    process.exit(0);
+}
+
 function countEdgePids(): string[] {
     try {
         const raw = execFileSync(
@@ -30,6 +39,7 @@ async function main(): Promise<void> {
     // ── 测试 1：search → fetchWebContent → search，全程共享同一浏览器 ──
     console.log('── 测试 1：search → fetch → search（全流程共享）──');
     await killAllEdge();
+    await shutdownLocalPlaywrightBrowserSessions();
     console.log(`  初始主进程: ${countEdgePids().length} 个`);
 
     // 第一次搜索 — 触发 antiBot 隐藏有头浏览器

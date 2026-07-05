@@ -1,4 +1,4 @@
-﻿import axios from 'axios';
+import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { AppConfig, config } from '../../config.js';
 import { SearchResult } from '../../types.js';

@@ -273,6 +273,9 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
     const session = await openPlaywrightBrowser();
 
     try {
+        // Copilot review r3524589121: 复用页面池换取无新窗口，但可能在不同 fetch 间泄漏
+        // cookies/storage。当前 fetch 场景以抓取匿名 HTML 为主，不需要完全隔离；
+        // 若需要干净 Cookie 隔离的 fetch 场景，应使用 getBrowserCookieHeader 的独立 context 路径。
         const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
             poolKey: 'fetch-html',
             preparePage: async (p) => { await installNavigationGuard(p); }

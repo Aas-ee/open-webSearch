@@ -3,6 +3,15 @@ import { execFileSync } from 'child_process';
 import { fetchWebContent } from '../engines/web/index.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../utils/playwrightClient.js';
 
+if (process.platform !== 'win32') {
+    console.log('SKIP: test-no-window requires Windows (uses user32.dll via koffi).');
+    process.exit(0);
+}
+if (!process.env.OPEN_WEBSEARCH_INTEGRATION_TESTS) {
+    console.log('SKIP: Set OPEN_WEBSEARCH_INTEGRATION_TESTS=1 to run (will taskkill msedge.exe).');
+    process.exit(0);
+}
+
 const esmRequire = createRequire(import.meta.url);
 const koffiLib = esmRequire('koffi') as typeof import('koffi');
 const koffiAny = koffiLib as any;
@@ -62,9 +71,11 @@ async function main(): Promise<void> {
     console.log('=== 无窗口回归测试 ===\n');
 
     try { execFileSync('taskkill', ['/F', '/IM', 'msedge.exe'], { windowsHide: true, timeout: 3000 }); } catch {}
+    await shutdownLocalPlaywrightBrowserSessions();
     await new Promise(r => setTimeout(r, 2000));
     console.log('1. 初始 msedge: ' + getEdgePids().length + ' 个');
 
+    // 后台轮询窗口
     let visible = false;
     let details: string[] = [];
     const pollPromise = (async () => {
@@ -92,11 +103,11 @@ async function main(): Promise<void> {
 
     await shutdownLocalPlaywrightBrowserSessions();
 
-    if (!visible) {
-        console.log('\n✅ 通过：无可见窗口');
-    } else {
+    if (visible) {
         console.error('\n❌ 失败：检测到可见窗口');
         process.exit(1);
+    } else {
+        console.log('\n✅ 通过：无可见窗口');
     }
     console.log('=== 测试完成 ===');
 }
