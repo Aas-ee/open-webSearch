@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'child_process';
+﻿import { execFileSync, spawn } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { createRequire } from 'module';
@@ -40,10 +40,6 @@ export type PooledPlaywrightPageSession = {
     page: any;
     /** 将页面释放回进程内/跨进程页面池。 */
     releasePage(): Promise<void>;
-};
-
-type OpenPlaywrightBrowserOptions = {
-    hideWindow?: boolean;
 };
 
 type AcquirePlaywrightPageOptions = {
@@ -128,14 +124,34 @@ let localBrowserSessionPromise: Promise<LocalBrowserSession> | null = null;
 let cachedLocalBrowserSessionKey: string | null = null;
 let cachedLocalBrowserSessionOptions: {
     headless: boolean;
-    launchArgs: string[];
-    options?: OpenPlaywrightBrowserOptions;
+    options?: { hideWindow?: boolean };
 } | null = null;
 let cleanupRegistered = false;
 let staleBrowserCleanupPerformed = false;
 const LOCAL_BROWSER_DOMAIN_METADATA_PREFIX = 'domain-session-';
 const CROSS_PROCESS_POOL_LOCK_DIR = path.join(tmpdir(), 'open-websearch-page-pool-locks');
 const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'open-websearch-browser-session-locks');
+function getPersistentBrowserProfileDir(sessionMode: string): string {
+    const baseDir = process.env.OPEN_WEBSEARCH_PROFILE_DIR
+        || path.join(tmpdir(), 'open-websearch-browser-profiles');
+    return path.join(baseDir, sessionMode);
+}
+
+/**
+ * 清理浏览器 profile 目录中残留的锁文件，
+ * 防止浏览器崩溃后重启时因旧锁文件而无法使用同一 profile。
+ */
+function cleanupStaleProfileLocks(profileDir: string): void {
+    const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'Lockfile'];
+    for (const lockFile of lockFiles) {
+        try {
+            rmSync(path.join(profileDir, lockFile), { force: true });
+        } catch {
+            // Ignore cleanup errors.
+        }
+    }
+}
+
 const browserPlaywrightPagePools = new WeakMap<any, Map<string, BrowserPlaywrightPagePool>>();
 
 // 用 CDP targetId（浏览器内全局唯一且跨连接稳定）作为锁文件标识，
@@ -166,7 +182,7 @@ function getPageLockFilePath(poolKey: string, pageTargetId: string): string {
     return path.join(CROSS_PROCESS_POOL_LOCK_DIR, `page-${keyHash}.lock`);
 }
 
-function getLocalBrowserSessionMode(headless: boolean, options?: OpenPlaywrightBrowserOptions): LocalBrowserSessionMode {
+function getLocalBrowserSessionMode(headless: boolean, options?: { hideWindow?: boolean }): LocalBrowserSessionMode {
     if (options?.hideWindow) {
         return 'hidden-headed';
     }
@@ -360,7 +376,7 @@ async function createPooledPlaywrightPageEntry(browser: any, pool: BrowserPlaywr
     throw new Error('Connected Playwright browser does not support creating a pooled page');
 }
 
-function isRecoverableLocalBrowserSessionError(error: unknown): boolean {
+export function isRecoverableLocalBrowserSessionError(error: unknown): boolean {
     if (!(error instanceof Error)) {
         return false;
     }
@@ -371,6 +387,32 @@ function isRecoverableLocalBrowserSessionError(error: unknown): boolean {
         || message.includes('connection closed')
         || message.includes('browser closed')
         || message.includes('not connected');
+}
+
+/**
+ * 执行操作，遇到浏览器崩溃等可恢复错误时自动重建浏览器并重试。
+ * `factory` 应完整执行"获取浏览器 → 获取页面 → 操作"全流程，每次重试都会重新调用。
+ */
+export async function retryOnBrowserCrash<T>(
+    factory: () => Promise<T>,
+    maxRetries: number = 2
+): Promise<T> {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await factory();
+        } catch (error) {
+            lastError = error;
+            if (attempt < maxRetries && isRecoverableLocalBrowserSessionError(error)) {
+                console.warn(`Browser session lost, retrying (attempt ${attempt + 1}/${maxRetries})...`);
+                continue;
+            }
+            throw error;
+        }
+    }
+
+    throw lastError;
 }
 
 async function connectOverCdpOnly(
@@ -523,7 +565,6 @@ async function recoverLocalBrowserSessionBrowser(browser: any): Promise<any | nu
     const recoveredSession = await getOrCreateLocalBrowserSession(
         playwright,
         cachedLocalBrowserSessionOptions.headless,
-        cachedLocalBrowserSessionOptions.launchArgs,
         cachedLocalBrowserSessionOptions.options
     );
     return recoveredSession.browser;
@@ -730,12 +771,11 @@ function findFreePort(): Promise<number> {
     });
 }
 
-function buildLocalSessionKey(headless: boolean, launchArgs: string[], options?: OpenPlaywrightBrowserOptions): string {
+function buildLocalSessionKey(headless: boolean, hideWindow?: boolean): string {
     return JSON.stringify({
         headless,
-        hideWindow: options?.hideWindow === true,
+        hideWindow: hideWindow === true,
         executablePath: config.playwrightExecutablePath || '',
-        launchArgs
     });
 }
 
@@ -818,12 +858,36 @@ function listBrowserDomainMetadataEntries(): BrowserDomainMetadataEntry[] {
     }
 }
 
-function buildLocalBrowserProcessArgs(port: number, tempDir: string, launchArgs: string[], headless = false): string[] {
+function buildLocalBrowserProcessArgs(port: number, tempDir: string, headless = false): string[] {
     const args = [
         `--remote-debugging-port=${port}`,
         `--user-data-dir=${tempDir}`,
-        ...launchArgs
     ];
+
+    // 反检测与稳定性参数（所有引擎统一）
+    if (process.platform === 'win32') {
+        // Windows: 极简参数，避免 Edge 弹出"不受支持的命令行标志"警告
+        args.push('--no-first-run');
+    } else {
+        args.push(
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-site-isolation-trials',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection'
+        );
+    }
 
     if (headless) {
         args.push('--headless=new');
@@ -1455,7 +1519,7 @@ async function tryReusePersistedLocalBrowserSession(
     const reusableBrowserCandidate = resolveLocalBrowserCandidate(metadata.browserPid, metadata.tempDir, metadata.debugPort);
     if (!reusableBrowserCandidate) {
         clearBrowserDomainMetadata(domainKey, metadata.tempDir);
-        try { rmSync(metadata.tempDir, { recursive: true, force: true }); } catch { /* metadata 指向的会话目录已经不可复用，清理失败不影响新建。 */ }
+        cleanupStaleProfileLocks(metadata.tempDir);
         return null;
     }
 
@@ -1573,7 +1637,8 @@ async function closeLocalBrowserSession(session: LocalBrowserSession): Promise<v
 
     if (session.tempDir) {
         try {
-            rmSync(session.tempDir, { recursive: true, force: true });
+            // 清理锁文件但不删除 profile 目录
+            cleanupStaleProfileLocks(session.tempDir);
         } catch {
             // Ignore cleanup errors.
         }
@@ -1614,7 +1679,8 @@ function createForceKill(browserPid?: number, tempDir?: string, browser?: any, d
                 if (domainKey) {
                     clearBrowserDomainMetadata(domainKey, tempDir);
                 }
-                rmSync(tempDir, { recursive: true, force: true });
+                // 清理 profile 中的锁文件，但保留 profile 目录本身以复用用户配置
+                cleanupStaleProfileLocks(tempDir);
             } catch {
                 // Ignore cleanup errors.
             }
@@ -1733,11 +1799,14 @@ async function connectLaunchedLocalBrowserSession(
     }
 }
 
-async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, launchArgs: string[]): Promise<LocalBrowserSession> {
+async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, headless: boolean): Promise<LocalBrowserSession> {
     const browserPath = getLocalBrowserExecutablePath();
-    const tempDir = mkdtempSync(path.join(tmpdir(), 'mcp-search-'));
+    const profileDir = getPersistentBrowserProfileDir('hidden-headed');
+    mkdirSync(profileDir, { recursive: true });
+    cleanupStaleProfileLocks(profileDir);
+    const tempDir = profileDir;
     const port = await findFreePort();
-    const args = buildLocalBrowserProcessArgs(port, tempDir, launchArgs);
+    const args = buildLocalBrowserProcessArgs(port, tempDir, headless);
     const cmdLine = [quoteWindowsCommandLineArg(browserPath), ...args.map((arg) => quoteWindowsCommandLineArg(arg))].join(' ');
 
     let browserPid: number | undefined;
@@ -1844,13 +1913,16 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
     }
 }
 
-async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, headless: boolean, launchArgs: string[]): Promise<LocalBrowserSession> {
+async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, headless: boolean): Promise<LocalBrowserSession> {
     if (process.platform === 'win32') {
         const browserPath = getLocalBrowserExecutablePath();
-        const tempDir = mkdtempSync(path.join(tmpdir(), 'mcp-search-'));
-        const port = await findFreePort();
-        const args = buildLocalBrowserProcessArgs(port, tempDir, launchArgs, headless);
         const sessionMode: LocalBrowserSessionMode = headless ? 'headless' : 'headed';
+        const profileDir = getPersistentBrowserProfileDir(sessionMode);
+        mkdirSync(profileDir, { recursive: true });
+        cleanupStaleProfileLocks(profileDir);
+        const tempDir = profileDir;
+        const port = await findFreePort();
+        const args = buildLocalBrowserProcessArgs(port, tempDir, headless);
 
         // 使用 pipe 模式启动，监听 stdout ready 信号
         const child = spawn(browserPath, args, {
@@ -1908,7 +1980,23 @@ async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionK
     const browser = await playwright.chromium.launch({
         headless,
         proxy: buildPlaywrightProxy(),
-        args: launchArgs,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-site-isolation-trials',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection'
+        ],
         executablePath: config.playwrightExecutablePath
     });
 
@@ -1960,14 +2048,12 @@ export async function shutdownLocalPlaywrightBrowserSessions(): Promise<void> {
 async function getOrCreateLocalBrowserSession(
     playwright: PlaywrightModule,
     headless: boolean,
-    launchArgs: string[],
-    options?: OpenPlaywrightBrowserOptions
+    options?: { hideWindow?: boolean }
 ): Promise<LocalBrowserSession> {
-    const sessionKey = buildLocalSessionKey(headless, launchArgs, options);
+    const sessionKey = buildLocalSessionKey(headless, options?.hideWindow);
     const sessionMode = getLocalBrowserSessionMode(headless, options);
     cachedLocalBrowserSessionOptions = {
         headless,
-        launchArgs: [...launchArgs],
         options: options ? { ...options } : undefined
     };
 
@@ -1988,7 +2074,15 @@ async function getOrCreateLocalBrowserSession(
     }
 
     if (cachedLocalBrowserSession || localBrowserSessionPromise) {
-        await destroyCachedLocalBrowserSession();
+        // 不同 session 可能是相同域（如 headless 复用 hidden-headed），
+        // 不能直接销毁缓存浏览器——应先通过域锁检查复用。
+        if (localBrowserSessionPromise) {
+            // 有正在进行的创建，等待完成后再让域锁逻辑判断。
+            try { await localBrowserSessionPromise; } catch {}
+            localBrowserSessionPromise = null;
+        }
+        // 清除本地缓存引用但不关浏览器，域锁+metadata 会处理复用或新建。
+        cachedLocalBrowserSession = null;
     }
 
     cachedLocalBrowserSessionKey = sessionKey;
@@ -2053,8 +2147,8 @@ async function getOrCreateLocalBrowserSession(
             // 没有可复用浏览器时才新建；launch* 内部会等待 stdout ready 后继续探测 CDP Browser 域可响应。
             // 整个过程仍持有原有域锁，避免第二个并发请求在 CDP 尚未可用时误判为不可复用并再启动一个浏览器。
             const session = options?.hideWindow
-                ? await launchHiddenDesktopBrowser(playwright, sessionKey, domainKey, launchArgs)
-                : await launchStandardLocalBrowser(playwright, sessionKey, domainKey, headless, launchArgs);
+                ? await launchHiddenDesktopBrowser(playwright, sessionKey, domainKey, headless)
+                : await launchStandardLocalBrowser(playwright, sessionKey, domainKey, headless);
             session.sessionKey = sessionKey;
 
             // 浏览器进程与 CDP 连接都已就绪，释放域锁允许后续进程复用。
@@ -2158,9 +2252,7 @@ export async function loadPlaywrightClient(options?: LoadPlaywrightClientOptions
 }
 
 export async function openPlaywrightBrowser(
-    headless: boolean,
-    launchArgs: string[] = [],
-    options?: OpenPlaywrightBrowserOptions
+    options?: { antiBot?: boolean }
 ): Promise<PlaywrightBrowserSession> {
     const playwright = await loadPlaywrightClient();
     if (!playwright) {
@@ -2172,12 +2264,9 @@ export async function openPlaywrightBrowser(
             wsEndpoint: config.playwrightWsEndpoint,
             timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
         });
-        const release = async () => {
-            await browser.close().catch(() => undefined);
-        };
         return {
             browser,
-            release
+            release: async () => { /* 远程浏览器由用户管理，不断开 */ }
         };
     }
 
@@ -2185,27 +2274,20 @@ export async function openPlaywrightBrowser(
         const browser = await playwright.chromium.connectOverCDP(config.playwrightCdpEndpoint, {
             timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
         });
-        const release = async () => {
-            await browser.close().catch(() => undefined);
-        };
         return {
             browser,
-            release
+            release: async () => { /* 远程浏览器由用户管理，不断开 */ }
         };
     }
 
-    // 修复 Playwright 本地搜索每次都重新拉起浏览器的问题：
-    // 这里改为复用单个后台浏览器会话，只有会话失活或启动参数变化时才重建。
-    // 对 Bing 的隐藏有头模式，还会复用同一个隐藏桌面上的浏览器进程，避免窗口闪现到用户桌面。
-    const session = await getOrCreateLocalBrowserSession(playwright, headless, launchArgs, options);
-    const release = async () => {
-        // 本地模式返回共享浏览器句柄，release 只释放调用方引用，
-        // 不真正关闭浏览器；真正销毁由 CLI/daemon 在生命周期结束时调用 shutdownLocalPlaywrightBrowserSessions()。
-        return Promise.resolve();
-    };
+    let headless = config.playwrightHeadless;
 
+    // Windows 本地无头模式：在隐藏桌面上运行，避免 --headless=new 仍可能闪现窗口。
+    const hideWindow = headless && process.platform === 'win32'
+        && !config.playwrightWsEndpoint && !config.playwrightCdpEndpoint;
+    const session = await getOrCreateLocalBrowserSession(playwright, headless, hideWindow ? { hideWindow: true } : undefined);
     return {
         browser: session.browser,
-        release
+        release: async () => { /* local shared browser, no-op */ }
     };
 }

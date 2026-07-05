@@ -1,6 +1,6 @@
 import { isIP } from 'node:net';
 import { config, getProxyUrl } from '../config.js';
-import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
+import { openPlaywrightBrowser, loadPlaywrightClient, acquirePooledPlaywrightPage } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
 
 const COOKIE_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -228,7 +228,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
         return undefined;
     }
 
-    const session = await openPlaywrightBrowser(true);
+    const session = await openPlaywrightBrowser();
 
     try {
         const { page, close } = await createCookieCollectionPage(session.browser);
@@ -270,13 +270,15 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
         throw new Error('Playwright client is not available for browser HTML fetch');
     }
 
-    const session = await openPlaywrightBrowser(true);
+    const session = await openPlaywrightBrowser();
 
     try {
-        const { page, close } = await createCookieCollectionPage(session.browser);
+        const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
+            poolKey: 'fetch-html',
+            preparePage: async (p) => { await installNavigationGuard(p); }
+        });
 
         try {
-            await installNavigationGuard(page);
             await page.goto(urlInput, {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
@@ -302,7 +304,7 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
                 title: String(title || '')
             };
         } finally {
-            await close();
+            await releasePage();
         }
     } finally {
         await session.release();
