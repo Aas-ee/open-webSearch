@@ -262,7 +262,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
     }
 }
 
-export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string }> {
+export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string; dialogTexts?: string[] }> {
     await assertPublicHttpUrlResolved(urlInput, 'Browser fetch URL');
 
     const playwright = await loadPlaywrightClient({ silent: true });
@@ -277,6 +277,61 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
 
         try {
             await installNavigationGuard(page);
+
+            // Capture <dialog> overlay text before the dialogs may be
+            // auto-dismissed by page JS.  <dialog> is the semantic HTML
+            // element for overlays — it signals "floating above" content.
+            // We inject a MutationObserver via addInitScript so it runs
+            // before any page script, then retrieve captured texts after
+            // the page settles.
+            if (typeof page.addInitScript === 'function') {
+                await page.addInitScript(() => {
+                    (window as any).__mcpCapturedDialogs = [];
+
+                    function startDialogObserver() {
+                        const root = document.documentElement;
+                        // On pages that use document.open(), documentElement
+                        // may be null temporarily.  Wait for DOMContentLoaded
+                        // or the next microtask before retrying.
+                        if (!root) {
+                            if (document.readyState === 'loading') {
+                                document.addEventListener('DOMContentLoaded', startDialogObserver, { once: true });
+                            } else {
+                                setTimeout(startDialogObserver, 0);
+                            }
+                            return;
+                        }
+
+                        const observer = new MutationObserver((mutations: MutationRecord[]) => {
+                            for (const m of mutations) {
+                                for (const node of m.addedNodes) {
+                                    if (node instanceof Element) {
+                                        if (node.tagName === 'DIALOG' && (node as HTMLDialogElement).open) {
+                                            const text = node.textContent?.trim();
+                                            if (text) {
+                                                (window as any).__mcpCapturedDialogs.push(text);
+                                            }
+                                        }
+                                        const nested = node.querySelectorAll?.('dialog[open]');
+                                        if (nested) {
+                                            for (const d of nested) {
+                                                const text = d.textContent?.trim();
+                                                if (text) {
+                                                    (window as any).__mcpCapturedDialogs.push(text);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        observer.observe(root, { childList: true, subtree: true });
+                    }
+
+                    startDialogObserver();
+                }).catch(() => undefined);
+            }
+
             await page.goto(urlInput, {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
@@ -296,10 +351,28 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
             const finalUrl = typeof page.url === 'function' ? page.url() : urlInput;
             const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';
 
+            // Retrieve captured dialog texts; also check for any dialogs
+            // still open at this point (in case they appeared after our
+            // MutationObserver stopped or were missed).
+            let dialogTexts: string[] | undefined;
+            if (typeof page.evaluate === 'function') {
+                dialogTexts = await page.evaluate(() => {
+                    const captured: string[] = (window as any).__mcpCapturedDialogs || [];
+                    for (const d of document.querySelectorAll('dialog[open]')) {
+                        const text = d.textContent?.trim();
+                        if (text && !captured.includes(text)) {
+                            captured.push(text);
+                        }
+                    }
+                    return captured.length > 0 ? captured : undefined;
+                }).catch(() => undefined);
+            }
+
             return {
                 html: String(html || ''),
                 finalUrl: String(finalUrl || urlInput),
-                title: String(title || '')
+                title: String(title || ''),
+                ...(dialogTexts ? { dialogTexts } : {})
             };
         } finally {
             await close();

@@ -248,7 +248,7 @@ function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extracti
     return false;
 }
 
-async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string } | undefined> {
+async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string; dialogTexts?: string[] } | undefined> {
     try {
         const browserPage = await browserHtmlFetcher(url);
         assertPublicHttpUrl(browserPage.finalUrl, 'Final URL');
@@ -257,7 +257,8 @@ async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; 
             contentType: 'text/html; charset=utf-8',
             finalUrl: browserPage.finalUrl,
             raw: browserPage.html,
-            title: browserPage.title
+            title: browserPage.title,
+            dialogTexts: browserPage.dialogTexts
         };
     } catch {
         return undefined;
@@ -431,6 +432,14 @@ export async function fetchWebContent(
             htmlExtraction = extractMainTextFromHtml(raw);
             title = htmlExtraction.title || browserResult.title;
             extractedContent = htmlExtraction.text;
+
+            // Prepend text from any <dialog> overlays that were captured
+            // before they could be auto-dismissed by page JS.  <dialog> is
+            // the semantic HTML element for floating overlays; its presence
+            // signals "this content appeared above the main page".
+            if (browserResult.dialogTexts && browserResult.dialogTexts.length > 0) {
+                extractedContent = browserResult.dialogTexts.join('\n\n') + '\n\n' + extractedContent;
+            }
         }
     }
 
