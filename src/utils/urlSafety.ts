@@ -65,7 +65,11 @@ export function assertPublicHttpUrl(url: string | URL, label: string = 'URL'): v
         throw new Error(`${label} must use HTTP or HTTPS`);
     }
     if (isPrivateOrLocalHostname(parsed.hostname)) {
-        throw new Error(`${label} points to a private or local network target, which is not allowed`);
+        const host = stripIpv6Brackets(parsed.hostname);
+        const example = isIP(host) !== 0
+            ? (() => { const [addr] = ipaddr.parseCIDR(`${host}/10`); return ` Set FAKE_IP_CIDRS env var to allow this IP range (e.g. FAKE_IP_CIDRS=${addr.toString()}/10)`; })()
+            : '';
+        throw new Error(`${label} points to a private or local network target (${parsed.hostname}), which is not allowed.${example}`);
     }
 }
 
@@ -86,7 +90,12 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     } catch {
         throw new Error(`${label} could not be resolved`);
     }
-    if (resolved.some((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address))) {
-        throw new Error(`${label} resolves to a private or local network target, which is not allowed`);
+    const blockedIps = resolved
+        .filter((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address))
+        .map((entry) => entry.address);
+    if (blockedIps.length > 0) {
+        const ipList = blockedIps.join(', ');
+        const [networkAddr] = ipaddr.parseCIDR(`${blockedIps[0]}/10`);
+        throw new Error(`${label} resolves to private IP(s) (${ipList}), which is not allowed. Set FAKE_IP_CIDRS env var to allow this IP range (e.g. FAKE_IP_CIDRS=${networkAddr.toString()}/10)`);
     }
 }
