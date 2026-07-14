@@ -1,6 +1,6 @@
 import { isIP } from 'node:net';
 import { config, getProxyUrl } from '../config.js';
-import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
+import { openPlaywrightBrowser, loadPlaywrightClient, acquirePooledPlaywrightPage } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
 
 const COOKIE_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -228,7 +228,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
         return undefined;
     }
 
-    const session = await openPlaywrightBrowser(true);
+    const session = await openPlaywrightBrowser();
 
     try {
         const { page, close } = await createCookieCollectionPage(session.browser);
@@ -270,14 +270,18 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
         throw new Error('Playwright client is not available for browser HTML fetch');
     }
 
-    const session = await openPlaywrightBrowser(true);
+    const session = await openPlaywrightBrowser();
 
     try {
-        const { page, close } = await createCookieCollectionPage(session.browser);
+        // Copilot review r3524589121: 复用页面池换取无新窗口，但可能在不同 fetch 间泄漏
+        // cookies/storage。当前 fetch 场景以抓取匿名 HTML 为主，不需要完全隔离；
+        // 若需要干净 Cookie 隔离的 fetch 场景，应使用 getBrowserCookieHeader 的独立 context 路径。
+        const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
+            poolKey: 'fetch-html',
+            preparePage: async (p) => { await installNavigationGuard(p); }
+        });
 
         try {
-            await installNavigationGuard(page);
-
             // Capture <dialog> overlay text before the dialogs may be
             // auto-dismissed by page JS.  <dialog> is the semantic HTML
             // element for overlays — it signals "floating above" content.
@@ -375,7 +379,7 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
                 ...(dialogTexts ? { dialogTexts } : {})
             };
         } finally {
-            await close();
+            await releasePage();
         }
     } finally {
         await session.release();
