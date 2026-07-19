@@ -6,8 +6,14 @@ import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/ur
 import {
     fetchPageHtmlWithBrowser,
     getBrowserCookieHeader,
-    looksLikeBotChallengePage
+    looksLikeBotChallengePage,
+    readCookiesFromPage
 } from '../../utils/browserCookies.js';
+import {
+    loadPlaywrightClient,
+    openPlaywrightBrowser,
+    acquirePooledPlaywrightPage
+} from '../../utils/playwrightClient.js';
 
 export interface FetchWebContentResult {
     url: string;
@@ -310,6 +316,170 @@ async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: a
     }
 }
 
+// ── 合并第2层（Cookie+HTTP）和第3层（浏览器渲染）──
+// 浏览器导航一次，页面 domcontentloaded 后立即取 Cookie 发起 HTTP 请求，
+// 同时浏览器继续渲染。两者竞速，先返回有效内容的路径胜出。
+// 避免旧设计中 Cookie 采集和正文渲染分别导航两次、且 Cookie 采集开新 context
+// 导致多余窗口的问题。
+async function fetchWithCookiesRace(
+    url: string
+): Promise<{
+    contentType: string;
+    finalUrl: string;
+    raw: string;
+    title: string;
+    retrievalMethod: 'request-with-browser-cookies' | 'browser-html';
+    dialogTexts?: string[];
+}> {
+    const playwright = await loadPlaywrightClient({ silent: true });
+    if (!playwright) {
+        throw new Error('Playwright client is not available for browser fetch');
+    }
+
+    await assertPublicHttpUrlResolved(url, 'Browser fetch URL');
+
+    const session = await openPlaywrightBrowser();
+
+    try {
+        const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
+            poolKey: 'fetch-race',
+            preparePage: async (p: any) => {
+                // 安装导航守卫，拦截私有 IP 导航
+                if (typeof p.route === 'function') {
+                    try {
+                        if ((p as any).__navGuardInstalled) {
+                            await p.unroute('**/*').catch(() => undefined);
+                        }
+                        await p.route('**/*', async (route: any) => {
+                            const request = route.request();
+                            const targetUrl = request.url();
+                            try {
+                                if (request.isNavigationRequest()) {
+                                    await assertPublicHttpUrlResolved(targetUrl, 'Browser navigation URL');
+                                } else {
+                                    const parsed = new URL(targetUrl);
+                                    assertPublicHttpUrl(parsed, 'Browser subresource URL');
+                                }
+                                await route.continue();
+                            } catch {
+                                await route.abort().catch(() => undefined);
+                            }
+                        });
+                        (p as any).__navGuardInstalled = true;
+                    } catch { /* CDP 可能不支持 route */ }
+                }
+            }
+        });
+
+        try {
+            // ── 导航（只此一次）──
+            await page.goto(url, {
+                waitUntil: 'domcontentloaded',
+                timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
+            });
+
+            // ── 立即取 Cookie，发起 HTTP 请求 ──
+            const cookieHeader = await readCookiesFromPage(page, url);
+            const httpPromise = cookieHeader
+                ? requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader), 'Request URL')
+                    .then(resp => ({
+                        success: true as const,
+                        contentType: String(resp.headers['content-type'] || '').toLowerCase(),
+                        raw: typeof resp.data === 'string' ? resp.data : ''
+                    }))
+                    .catch(() => ({ success: false as const }))
+                : Promise.resolve({ success: false as const });
+
+            // ── 浏览器继续渲染 ──
+            const browserPromise = (async () => {
+                if (typeof page.waitForLoadState === 'function') {
+                    await page.waitForLoadState('networkidle', {
+                        timeout: Math.min(Math.max(config.playwrightNavigationTimeoutMs, 5000), 15000)
+                    }).catch(() => undefined);
+                }
+                if (typeof page.waitForTimeout === 'function') {
+                    await page.waitForTimeout(1200).catch(() => undefined);
+                }
+                const html = typeof page.content === 'function' ? await page.content() : '';
+                const finalUrl = typeof page.url === 'function' ? page.url() : url;
+                const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';
+
+                let dialogTexts: string[] | undefined;
+                if (typeof page.evaluate === 'function') {
+                    dialogTexts = await page.evaluate(() => {
+                        function isVisuallyFloating(el: Element): boolean {
+                            const style = window.getComputedStyle(el);
+                            const pos = style.position;
+                            if (pos !== 'fixed' && pos !== 'absolute') return false;
+                            if (style.display === 'none' || style.visibility === 'hidden') return false;
+                            const z = parseInt(style.zIndex || '0', 10);
+                            return !isNaN(z) && z > 0;
+                        }
+                        function findFloatingInTree(el: Element): string | undefined {
+                            if (isVisuallyFloating(el)) return el.textContent?.trim();
+                            if (el.shadowRoot) {
+                                const all = el.shadowRoot.querySelectorAll('*');
+                                for (const desc of all) {
+                                    if (isVisuallyFloating(desc)) return desc.textContent?.trim();
+                                }
+                            }
+                            return undefined;
+                        }
+                        const cx = window.innerWidth / 2;
+                        const cy = window.innerHeight / 2;
+                        const topEl = document.elementFromPoint(cx, cy);
+                        if (topEl) {
+                            const text = findFloatingInTree(topEl);
+                            if (text) return [text];
+                        }
+                        return undefined;
+                    }).catch(() => undefined);
+                }
+
+                return {
+                    contentType: 'text/html; charset=utf-8',
+                    finalUrl: String(finalUrl || url),
+                    raw: String(html || ''),
+                    title: String(title || ''),
+                    dialogTexts
+                };
+            })();
+
+            // ── 竞速：HTTP 通常更快，先检查 ──
+            const httpResult = await httpPromise;
+            if (httpResult.success) {
+                const httpContentType = httpResult.contentType;
+                const httpRaw = httpResult.raw;
+                // HTTP 内容足够（非空且非 bot challenge）
+                if (httpRaw.length > 200 && !looksLikeBotChallengePage(httpRaw)) {
+                    return {
+                        contentType: httpContentType,
+                        finalUrl: url,
+                        raw: httpRaw,
+                        title: '',
+                        retrievalMethod: 'request-with-browser-cookies'
+                    };
+                }
+            }
+
+            // HTTP 不够，等浏览器
+            const browserResult = await browserPromise;
+            return {
+                contentType: browserResult.contentType,
+                finalUrl: browserResult.finalUrl,
+                raw: browserResult.raw,
+                title: browserResult.title,
+                retrievalMethod: 'browser-html',
+                dialogTexts: browserResult.dialogTexts
+            };
+        } finally {
+            await releasePage();
+        }
+    } finally {
+        await session.release();
+    }
+}
+
 export async function fetchWebContent(
     url: string,
     maxChars: number = DEFAULT_MAX_CHARS,
@@ -356,18 +526,12 @@ export async function fetchWebContent(
             throw error;
         }
 
-        const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
-        if (cookieRetry.response) {
-            response = cookieRetry.response;
-            usedBrowserCookies = cookieRetry.usedBrowserCookies;
-            retrievalMethod = 'request-with-browser-cookies';
-        } else {
-            response = {
-                headers: { 'content-type': 'text/html; charset=utf-8' },
-                data: '',
-                request: { res: { responseUrl: parsedUrl.toString() } }
-            };
-        }
+        // HTTP 被拦截：设空响应，后续统一走 fetchWithCookiesRace 竞速
+        response = {
+            headers: { 'content-type': 'text/html; charset=utf-8' },
+            data: '',
+            request: { res: { responseUrl: parsedUrl.toString() } }
+        };
     }
 
     let contentType = String(response.headers['content-type'] || '').toLowerCase();
@@ -376,21 +540,6 @@ export async function fetchWebContent(
     let raw = typeof response.data === 'string'
         ? response.data
         : JSON.stringify(response.data, null, 2);
-
-    if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
-        const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
-        if (cookieRetry.response) {
-            response = cookieRetry.response;
-            usedBrowserCookies = true;
-            retrievalMethod = 'request-with-browser-cookies';
-            contentType = String(response.headers['content-type'] || '').toLowerCase();
-            finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
-            assertPublicHttpUrl(finalUrl, 'Final URL');
-            raw = typeof response.data === 'string'
-                ? response.data
-                : JSON.stringify(response.data, null, 2);
-        }
-    }
 
     const contentLength = Number(response.headers['content-length']);
     if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
@@ -423,25 +572,21 @@ export async function fetchWebContent(
     }
 
     if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
-        const browserResult = await fetchHtmlViaBrowser(parsedUrl.toString());
-        if (browserResult) {
-            contentType = browserResult.contentType;
-            finalUrl = browserResult.finalUrl;
-            raw = browserResult.raw;
-            retrievalMethod = 'browser-html';
-            htmlExtraction = extractMainTextFromHtml(raw);
-            title = htmlExtraction.title || browserResult.title;
-            extractedContent = htmlExtraction.text;
+        // 合并第2+3层：浏览器导航一次，Cookie+HTTP 和渲染竞速
+        const raceResult = await fetchWithCookiesRace(parsedUrl.toString());
+        contentType = raceResult.contentType;
+        finalUrl = raceResult.finalUrl;
+        raw = raceResult.raw;
+        retrievalMethod = raceResult.retrievalMethod;
+        htmlExtraction = extractMainTextFromHtml(raw);
+        title = htmlExtraction.title || raceResult.title;
+        extractedContent = htmlExtraction.text;
 
-            // 将浏览器捕获的悬浮层文本前置拼接到正文前。
-            // 浏览器路径用 CSS 定位检测（position + z-index），
-            // 且能触达 cheerio 无法处理的 Shadow DOM。
-            // 与 cheerio 已捕获的内容去重。
-            if (browserResult.dialogTexts && browserResult.dialogTexts.length > 0) {
-                const newTexts = browserResult.dialogTexts.filter(t => !extractedContent.includes(t));
-                if (newTexts.length > 0) {
-                    extractedContent = newTexts.join('\n\n') + '\n\n' + extractedContent;
-                }
+        // dialogTexts 合并
+        if (raceResult.dialogTexts && raceResult.dialogTexts.length > 0) {
+            const newTexts = raceResult.dialogTexts.filter(t => !extractedContent.includes(t));
+            if (newTexts.length > 0) {
+                extractedContent = newTexts.join('\n\n') + '\n\n' + extractedContent;
             }
         }
     }

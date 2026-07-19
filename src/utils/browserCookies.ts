@@ -169,26 +169,9 @@ async function installNavigationGuard(page: any): Promise<void> {
 }
 
 async function createCookieCollectionPage(browser: any): Promise<{ page: any; close(): Promise<void> }> {
-    // 解决 Cookie 采集复用页导致上下文状态串用的问题。
-    // 这里显式为每次采集创建独立 context，确保 cookies/storage/open pages 不会跨调用污染。
-    // 但 connectOverCDP 返回的浏览器通常只有一个默认持久化 context，不支持 newContext()，
-    // 所以当 newContext 不可用时回退到默认 context + 手动清理。
-    if (typeof browser.newContext === 'function') {
-        try {
-            const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
-            const page = await context.newPage();
-            return {
-                page,
-                close: async () => {
-                    await context.close().catch(() => undefined);
-                }
-            };
-        } catch {
-            // newContext 可能在 CDP 连接上抛异常，回退到默认 context
-        }
-    }
-
-    // CDP 回退：复用默认 context 并在清理时手动重置状态
+    // 直接使用默认 context 创建临时页面采集 Cookie。
+    // 不调用 newContext()，避免 headed 模式下 Chromium 开新窗口。
+    // 采集完成后关闭页面并清理 cookies，确保不污染后续请求。
     if (typeof browser.contexts === 'function') {
         const contexts = browser.contexts();
         if (Array.isArray(contexts) && contexts.length > 0 && typeof contexts[0].newPage === 'function') {
@@ -209,7 +192,7 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     throw new Error('Browser does not support creating a page for cookie collection');
 }
 
-async function readCookiesFromPage(page: any, url: string): Promise<string> {
+export async function readCookiesFromPage(page: any, url: string): Promise<string> {
     if (typeof page.context === 'function') {
         const context = page.context();
         if (context && typeof context.cookies === 'function') {
