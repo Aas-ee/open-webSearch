@@ -433,12 +433,15 @@ export async function fetchWebContent(
             title = htmlExtraction.title || browserResult.title;
             extractedContent = htmlExtraction.text;
 
-            // Prepend text from any <dialog> overlays that were captured
-            // before they could be auto-dismissed by page JS.  <dialog> is
-            // the semantic HTML element for floating overlays; its presence
-            // signals "this content appeared above the main page".
+            // 将浏览器捕获的悬浮层文本前置拼接到正文前。
+            // 浏览器路径用 CSS 定位检测（position + z-index），
+            // 且能触达 cheerio 无法处理的 Shadow DOM。
+            // 与 cheerio 已捕获的内容去重。
             if (browserResult.dialogTexts && browserResult.dialogTexts.length > 0) {
-                extractedContent = browserResult.dialogTexts.join('\n\n') + '\n\n' + extractedContent;
+                const newTexts = browserResult.dialogTexts.filter(t => !extractedContent.includes(t));
+                if (newTexts.length > 0) {
+                    extractedContent = newTexts.join('\n\n') + '\n\n' + extractedContent;
+                }
             }
         }
     }

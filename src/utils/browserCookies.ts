@@ -135,11 +135,18 @@ export function __getBrowserSubresourceClassificationForTests(hostname: string):
 // aborts ones whose target is private/loopback at either the literal or
 // DNS-resolved level. Navigation hits DNS fresh every time to keep the
 // rebinding window tight; sub-resources go through a hostname TTL cache.
+// 本函数用页面级标记避免页面池复用时叠加多个 route 拦截器。
+// 每次调用会替换已安装的拦截器，而不是再添加一个。
 async function installNavigationGuard(page: any): Promise<void> {
     if (typeof page.route !== 'function') {
         return;
     }
     try {
+        // 移除已安装的拦截器，防止叠加
+        if (page.__navGuardInstalled) {
+            await page.unroute('**/*').catch(() => undefined);
+        }
+
         await page.route('**/*', async (route: any) => {
             const request = route.request();
             const targetUrl = request.url();
@@ -154,6 +161,7 @@ async function installNavigationGuard(page: any): Promise<void> {
                 await route.abort().catch(() => undefined);
             }
         });
+        page.__navGuardInstalled = true;
     } catch {
         // Some connected browsers (e.g., certain CDP setups) may not support route
         // interception. Pre-navigation validation still gates the initial URL.
@@ -306,23 +314,50 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
                             return;
                         }
 
+                        // 内联：用 CSS 定位特征检测视觉悬浮层。
+                        // position=fixed/absolute + 可见 + z-index > 0
+                        // 是"浮在页面内容上层"的结构化信号。
+                        function isVisuallyFloating(el: Element): boolean {
+                            const style = window.getComputedStyle(el);
+                            const pos = style.position;
+                            if (pos !== 'fixed' && pos !== 'absolute') return false;
+                            if (style.display === 'none' || style.visibility === 'hidden') return false;
+                            const z = parseInt(style.zIndex || '0', 10);
+                            return !isNaN(z) && z > 0;
+                        }
+
+                        // 递归检查元素及其 shadow root 中的悬浮层。
+                        function findFloatingInTree(el: Element): string | undefined {
+                            if (isVisuallyFloating(el)) {
+                                return el.textContent?.trim();
+                            }
+                            if (el.shadowRoot) {
+                                const walker = document.createTreeWalker(el.shadowRoot, NodeFilter.SHOW_ELEMENT);
+                                while (walker.nextNode()) {
+                                    const desc = walker.currentNode as Element;
+                                    if (isVisuallyFloating(desc)) {
+                                        return desc.textContent?.trim();
+                                    }
+                                }
+                            }
+                            return undefined;
+                        }
+
                         const observer = new MutationObserver((mutations: MutationRecord[]) => {
                             for (const m of mutations) {
                                 for (const node of m.addedNodes) {
                                     if (node instanceof Element) {
-                                        if (node.tagName === 'DIALOG' && (node as HTMLDialogElement).open) {
-                                            const text = node.textContent?.trim();
-                                            if (text) {
-                                                (window as any).__mcpCapturedDialogs.push(text);
-                                            }
+                                        const text = findFloatingInTree(node);
+                                        if (text) {
+                                            (window as any).__mcpCapturedDialogs.push(text);
                                         }
-                                        const nested = node.querySelectorAll?.('dialog[open]');
-                                        if (nested) {
-                                            for (const d of nested) {
-                                                const text = d.textContent?.trim();
-                                                if (text) {
-                                                    (window as any).__mcpCapturedDialogs.push(text);
-                                                }
+                                        // 同时检查可见的后代元素
+                                        const walker = document.createTreeWalker(node, NodeFilter.SHOW_ELEMENT);
+                                        while (walker.nextNode()) {
+                                            const desc = walker.currentNode as Element;
+                                            const t = findFloatingInTree(desc);
+                                            if (t) {
+                                                (window as any).__mcpCapturedDialogs.push(t);
                                             }
                                         }
                                     }
@@ -355,20 +390,52 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
             const finalUrl = typeof page.url === 'function' ? page.url() : urlInput;
             const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';
 
-            // Retrieve captured dialog texts; also check for any dialogs
-            // still open at this point (in case they appeared after our
-            // MutationObserver stopped or were missed).
+            // 获取捕获的悬浮层文本。MutationObserver 监听的是 Light DOM，
+            // 无法捕获 Shadow DOM 内的插入。页面稳定后，直接扫描所有
+            // shadow root，只取视口中心最顶层的那个悬浮层。
             let dialogTexts: string[] | undefined;
             if (typeof page.evaluate === 'function') {
                 dialogTexts = await page.evaluate(() => {
-                    const captured: string[] = (window as any).__mcpCapturedDialogs || [];
-                    for (const d of document.querySelectorAll('dialog[open]')) {
-                        const text = d.textContent?.trim();
-                        if (text && !captured.includes(text)) {
-                            captured.push(text);
-                        }
+                    // 内联：用 CSS 定位特征检测视觉悬浮层。
+                    function isVisuallyFloating(el: Element): boolean {
+                        const style = window.getComputedStyle(el);
+                        const pos = style.position;
+                        if (pos !== 'fixed' && pos !== 'absolute') return false;
+                        if (style.display === 'none' || style.visibility === 'hidden') return false;
+                        const z = parseInt(style.zIndex || '0', 10);
+                        return !isNaN(z) && z > 0;
                     }
-                    return captured.length > 0 ? captured : undefined;
+
+                    // 用 elementFromPoint 找视口中心最顶层的元素，
+                    // 向上追溯是否浮空。Shadow DOM 会阻断父链，
+                    // 所以也检查 shadow root 内的悬浮层。
+                    // 注意：document.createTreeWalker 无法遍历 shadow root，
+                    // 必须用 querySelectorAll 代替。
+                    function findFloatingInTree(el: Element): string | undefined {
+                        if (isVisuallyFloating(el)) {
+                            return el.textContent?.trim();
+                        }
+                        if (el.shadowRoot) {
+                            const all = el.shadowRoot.querySelectorAll('*');
+                            for (const desc of all) {
+                                if (isVisuallyFloating(desc)) {
+                                    return desc.textContent?.trim();
+                                }
+                            }
+                        }
+                        return undefined;
+                    }
+
+                    // 视口中心最顶层的元素
+                    const cx = window.innerWidth / 2;
+                    const cy = window.innerHeight / 2;
+                    const topEl = document.elementFromPoint(cx, cy);
+                    if (topEl) {
+                        const text = findFloatingInTree(topEl);
+                        if (text) return [text];
+                    }
+
+                    return undefined;
                 }).catch(() => undefined);
             }
 
