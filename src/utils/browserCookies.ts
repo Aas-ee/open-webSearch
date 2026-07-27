@@ -201,7 +201,7 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     throw new Error('Browser does not support creating a page for cookie collection');
 }
 
-async function readCookiesFromPage(page: any, url: string): Promise<string> {
+export async function readCookiesFromPage(page: any, url: string): Promise<string> {
     if (typeof page.context === 'function') {
         const context = page.context();
         if (context && typeof context.cookies === 'function') {

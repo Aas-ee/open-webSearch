@@ -4,7 +4,6 @@ import { config } from '../../config.js';
 import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
 import {
-    fetchPageHtmlWithBrowser,
     getBrowserCookieHeader,
     looksLikeBotChallengePage,
     readCookiesFromPage
@@ -110,7 +109,6 @@ function isMarkdownContentType(contentType: string): boolean {
     return ct.includes('text/markdown') || ct.includes('application/markdown') || ct.includes('text/x-markdown');
 }
 
-let browserHtmlFetcher: typeof fetchPageHtmlWithBrowser = fetchPageHtmlWithBrowser;
 let readabilityParser: (html: string, finalUrl: string) => Promise<ReadabilityArticle | null> = async (html, finalUrl) => {
     try {
         const moduleName = '@mozilla/readability';
@@ -242,6 +240,56 @@ function buildRequestOptions(cookieHeader?: string): any {
     return requestOptions;
 }
 
+// 传输层失败（TLS 握手被打断、连接超时、连接重置等）不会带 error.response，
+// 因此不能按 HTTP 状态码判断。部分站点（如 www.nature.com）会对非浏览器的
+// TLS 指纹直接断开连接，表现为 ECONNRESET / ETIMEDOUT / EPROTO 而非 403，
+// 这类目标只能靠真实浏览器栈获取，需要委托给 Playwright 层。
+const TRANSPORT_FAILURE_CODES = new Set([
+    'ECONNABORTED',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'EPIPE',
+    'EPROTO',
+    'ETIMEDOUT',
+    'ERR_SSL_PROTOCOL_ERROR',
+    'ERR_TLS_CERT_ALTNAME_INVALID',
+    'ECONNTIMEDOUT',
+    'UND_ERR_SOCKET'
+]);
+
+const TRANSPORT_FAILURE_MESSAGE_PATTERN =
+    /socket disconnected before secure tls connection|client network socket disconnected|tls|ssl|handshake|socket hang up|read econnreset|timeout of \d+ms exceeded|network socket/i;
+
+function isTransportLevelFailure(error: any): boolean {
+    // 有 HTTP 响应说明连接已建立，属于应用层拒绝，由状态码分支处理。
+    if (error?.response) {
+        return false;
+    }
+
+    // 安全与资源上限错误必须保持致命，不能退化成浏览器抓取绕过限制。
+    if (error?.code === 'ERR_RESPONSE_TOO_LARGE') {
+        return false;
+    }
+
+    const message = String(error?.message || '');
+    if (/private or local network|resolves to private|must use HTTP or HTTPS|could not be resolved|Too many redirects|body too large|maxContentLength/i.test(message)) {
+        return false;
+    }
+
+    const code = String(error?.code || '');
+    if (TRANSPORT_FAILURE_CODES.has(code)) {
+        return true;
+    }
+
+    if (code === 'ECONNABORTED' || error?.name === 'AggregateError') {
+        return true;
+    }
+
+    return TRANSPORT_FAILURE_MESSAGE_PATTERN.test(message);
+}
+
 function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extraction?: HtmlExtractionResult): boolean {
     if (looksLikeBotChallengePage(raw)) {
         return true;
@@ -252,27 +300,6 @@ function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extracti
     }
 
     return false;
-}
-
-async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string; dialogTexts?: string[] } | undefined> {
-    try {
-        const browserPage = await browserHtmlFetcher(url);
-        assertPublicHttpUrl(browserPage.finalUrl, 'Final URL');
-
-        return {
-            contentType: 'text/html; charset=utf-8',
-            finalUrl: browserPage.finalUrl,
-            raw: browserPage.html,
-            title: browserPage.title,
-            dialogTexts: browserPage.dialogTexts
-        };
-    } catch {
-        return undefined;
-    }
-}
-
-export function __setBrowserHtmlFetcherForTests(fetcher?: typeof fetchPageHtmlWithBrowser): void {
-    browserHtmlFetcher = fetcher || fetchPageHtmlWithBrowser;
 }
 
 export function __setReadabilityParserForTests(parser?: (html: string, finalUrl: string) => Promise<ReadabilityArticle | null>): void {
@@ -291,46 +318,21 @@ export function __setReadabilityParserForTests(parser?: (html: string, finalUrl:
     });
 }
 
-async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: any; usedBrowserCookies: boolean }> {
-    let cookieHeader: string | undefined;
-    try {
-        cookieHeader = await getBrowserCookieHeader(url);
-    } catch {
-        return { response: undefined, usedBrowserCookies: false };
-    }
-
-    if (!cookieHeader) {
-        return { response: undefined, usedBrowserCookies: false };
-    }
-
-    try {
-        return {
-            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader), 'Request URL'),
-            usedBrowserCookies: true
-        };
-    } catch {
-        return {
-            response: undefined,
-            usedBrowserCookies: true
-        };
-    }
-}
-
-// ── 合并第2层（Cookie+HTTP）和第3层（浏览器渲染）──
-// 浏览器导航一次，页面 domcontentloaded 后立即取 Cookie 发起 HTTP 请求，
-// 同时浏览器继续渲染。两者竞速，先返回有效内容的路径胜出。
-// 避免旧设计中 Cookie 采集和正文渲染分别导航两次、且 Cookie 采集开新 context
-// 导致多余窗口的问题。
-async function fetchWithCookiesRace(
-    url: string
-): Promise<{
+type BrowserFetchResult = {
     contentType: string;
     finalUrl: string;
     raw: string;
     title: string;
     retrievalMethod: 'request-with-browser-cookies' | 'browser-html';
     dialogTexts?: string[];
-}> {
+};
+
+// ── 合并第2层（Cookie+HTTP）和第3层（浏览器渲染）──
+// 浏览器导航一次，页面 domcontentloaded 后立即取 Cookie 发起 HTTP 请求，
+// 同时浏览器继续渲染。两者竞速，先返回有效内容的路径胜出。
+// 避免旧设计中 Cookie 采集和正文渲染分别导航两次、且 Cookie 采集开新 context
+// 导致多余窗口的问题。
+async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFetchResult> {
     const playwright = await loadPlaywrightClient({ silent: true });
     if (!playwright) {
         throw new Error('Playwright client is not available for browser fetch');
@@ -480,6 +482,14 @@ async function fetchWithCookiesRace(
     }
 }
 
+// 浏览器抓取层的注入接缝：生产使用 Playwright 实现，测试可整体替换，
+// 从而不必在生产分支里判断"是否处于测试中"。
+let browserFetcher: (url: string) => Promise<BrowserFetchResult> = fetchWithCookiesRaceViaPlaywright;
+
+export function __setBrowserFetcherForTests(fetcher?: (url: string) => Promise<BrowserFetchResult>): void {
+    browserFetcher = fetcher || fetchWithCookiesRaceViaPlaywright;
+}
+
 export async function fetchWebContent(
     url: string,
     maxChars: number = DEFAULT_MAX_CHARS,
@@ -522,7 +532,10 @@ export async function fetchWebContent(
         response = await requestWithSafeRedirects('GET', parsedUrl.toString(), requestOptions, 'Request URL');
     } catch (error: any) {
         const status = error?.response?.status;
-        if (![401, 403, 429].includes(status)) {
+        const blockedByStatus = [401, 403, 429].includes(status);
+        // 传输层被断开的目标同样只能靠浏览器栈拿到内容，否则这里直接 rethrow
+        // 会让已有的 Playwright 回退层永远不被触及。
+        if (!blockedByStatus && !isTransportLevelFailure(error)) {
             throw error;
         }
 
@@ -572,22 +585,29 @@ export async function fetchWebContent(
     }
 
     if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
-        // 合并第2+3层：浏览器导航一次，Cookie+HTTP 和渲染竞速
-        const raceResult = await fetchWithCookiesRace(parsedUrl.toString());
-        contentType = raceResult.contentType;
-        finalUrl = raceResult.finalUrl;
-        raw = raceResult.raw;
-        retrievalMethod = raceResult.retrievalMethod;
-        htmlExtraction = extractMainTextFromHtml(raw);
-        title = htmlExtraction.title || raceResult.title;
-        extractedContent = htmlExtraction.text;
+        try {
+            // 合并第2+3层：浏览器导航一次，Cookie+HTTP 和渲染竞速
+            const raceResult = await browserFetcher(parsedUrl.toString());
+            assertPublicHttpUrl(raceResult.finalUrl, 'Final URL');
+            contentType = raceResult.contentType;
+            finalUrl = raceResult.finalUrl;
+            raw = raceResult.raw;
+            retrievalMethod = raceResult.retrievalMethod;
+            htmlExtraction = extractMainTextFromHtml(raw);
+            title = htmlExtraction.title || raceResult.title;
+            extractedContent = htmlExtraction.text;
 
-        // dialogTexts 合并
-        if (raceResult.dialogTexts && raceResult.dialogTexts.length > 0) {
-            const newTexts = raceResult.dialogTexts.filter(t => !extractedContent.includes(t));
-            if (newTexts.length > 0) {
-                extractedContent = newTexts.join('\n\n') + '\n\n' + extractedContent;
+            // dialogTexts 合并
+            if (raceResult.dialogTexts && raceResult.dialogTexts.length > 0) {
+                const newTexts = raceResult.dialogTexts.filter(t => !extractedContent.includes(t));
+                if (newTexts.length > 0) {
+                    extractedContent = newTexts.join('\n\n') + '\n\n' + extractedContent;
+                }
             }
+        } catch {
+            // 浏览器回退失败（Playwright 不可用、测试桩故意抛错等）时，
+            // 保留 HTTP 请求的提取结果。与旧 fetchHtmlViaBrowser 的
+            // try/catch 行为一致，支持"桩抛错后保留 request 模式"的测试用例。
         }
     }
 
