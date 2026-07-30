@@ -8,8 +8,7 @@ export const SUPPORTED_SEARCH_ENGINES = [
     'brave',
     'juejin',
     'startpage',
-    'sogou',
-    'youcom'
+    'sogou'
 ] as const;
 
 export type SupportedSearchEngine = typeof SUPPORTED_SEARCH_ENGINES[number];
@@ -41,10 +40,6 @@ export function normalizeEngineName(engine: string): string {
         case 'sougou':
         case '搜狗':
             return 'sogou';
-        case 'youcom':
-        case 'you':
-        case 'you.com':
-            return 'youcom';
         default:
             return cleaned;
     }
