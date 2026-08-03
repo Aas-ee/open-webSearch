@@ -3,7 +3,6 @@
 # Open-WebSearch
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=%23de5a16)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
-[![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Aas-ee/open-webSearch)](https://archestra.ai/mcp-catalog/aas-ee__open-websearch)
 [![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
 ![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
 ![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
@@ -14,6 +13,16 @@
 </div>
 
 `open-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
+
+## Sponsor
+
+<div align="center">
+  <a href="https://www.swiftproxy.net/?ref=openwebSearch" rel="sponsored">
+    <img src="./docs/assets/sponsors/a69c410018edd7c45bffd4864629e25b.png" alt="Swiftproxy" width="600">
+  </a>
+</div>
+
+> [**Swiftproxy**](https://www.swiftproxy.net/?ref=openwebSearch) provides high-quality static residential proxies with stable IPs for multi-account management, automation, web scraping, and secure online operations. Protect your accounts with clean IPs and reliable proxy infrastructure. Static proxy traffic is valid for 30 days with unlimited usage. Get **10% off** with code **`PROXY90`**.
 
 ## Features
 
