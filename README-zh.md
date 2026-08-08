@@ -14,6 +14,16 @@
 
 `open-websearch` 现已同时提供 MCP server、CLI 和本地 daemon，也可以配合 skill 引导的 agent 工作流一起使用，用于联网搜索与内容抓取，无需 API 密钥。
 
+## 赞助商
+
+<div align="center">
+  <a href="https://www.swiftproxy.net/?ref=openwebSearch" rel="sponsored">
+    <img src="./docs/assets/sponsors/fa4f0f8f08b622d8487fdb485077d2dd.png" alt="Swiftproxy" width="600">
+  </a>
+</div>
+
+> [**Swiftproxy**](https://www.swiftproxy.net/?ref=openwebSearch) 提供高质量静态住宅代理，支持稳定 IP、多账号管理、防关联运营和数据采集，帮助用户打造更安全可靠的自动化环境。静态代理流量有效期 30 天内不限使用，使用优惠码 **`PROXY90`** 可享 **9 折优惠**。
+
 
 <details>
   <summary><strong style="color: #95cfe4">点击展开查看简单示例效果(deepseek-v3)</strong></summary>
