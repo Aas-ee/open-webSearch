@@ -1,6 +1,6 @@
 import express from 'express';
 import http from 'node:http';
-import { AppConfig } from '../../config.js';
+import { AppConfig, getEffectiveSearchMode } from '../../config.js';
 import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
@@ -23,6 +23,7 @@ export type LocalDaemonStatus = {
         defaultSearchEngine: string;
         allowedSearchEngines: string[];
         searchMode: string;
+        effectiveSearchMode: string;
         useProxy: boolean;
         fetchWebAllowInsecureTls: boolean;
     };
@@ -167,6 +168,7 @@ export async function startLocalDaemon(
             defaultSearchEngine: runtime.config.defaultSearchEngine,
             allowedSearchEngines: runtime.config.allowedSearchEngines,
             searchMode: runtime.config.searchMode,
+            effectiveSearchMode: getEffectiveSearchMode(runtime.config),
             useProxy: runtime.config.useProxy,
             fetchWebAllowInsecureTls: runtime.config.fetchWebAllowInsecureTls
         }

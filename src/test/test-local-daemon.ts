@@ -108,6 +108,7 @@ async function testLocalDaemonRoutes(): Promise<void> {
                     defaultSearchEngine: string;
                     allowedSearchEngines: string[];
                     searchMode: string;
+                    effectiveSearchMode: string;
                     useProxy: boolean;
                     fetchWebAllowInsecureTls: boolean;
                 };
@@ -122,6 +123,7 @@ async function testLocalDaemonRoutes(): Promise<void> {
         assert(statusPayload.data.capabilities.includes('search'), 'daemon /status capabilities');
         assertEqual(statusPayload.data.configSummary.defaultSearchEngine, 'bing', 'daemon /status config default engine');
         assertEqual(statusPayload.data.configSummary.searchMode, 'request', 'daemon /status config search mode');
+        assertEqual(statusPayload.data.configSummary.effectiveSearchMode, 'request', 'daemon /status config effective search mode');
         assertEqual(statusPayload.data.configSummary.useProxy, false, 'daemon /status config proxy');
 
         console.log('✅ local daemon health and status routes');

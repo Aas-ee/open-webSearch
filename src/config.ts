@@ -1,3 +1,6 @@
+import { createRequire } from 'node:module';
+import path from 'node:path';
+
 // src/config.ts
 export interface AppConfig {
     // Search engine configuration
@@ -30,6 +33,9 @@ function readOptionalEnv(name: string): string | undefined {
     const value = process.env[name]?.trim();
     return value ? value : undefined;
 }
+
+// 用于解析可选 Playwright 客户端包与（本地启动时的）浏览器可执行文件。
+const configRequire = createRequire(import.meta.url);
 
 // Read from environment variables or use defaults
 export const config: AppConfig = {
@@ -124,7 +130,9 @@ if (!quietStartupLogs) {
     } else {
         console.error(`🔍 No search engine restrictions, all available engines can be used`);
     }
-    console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()} (currently only affects Bing)`);
+    const effectiveModeForLog = getEffectiveSearchMode(config);
+    const effectiveModeSuffix = effectiveModeForLog !== config.searchMode ? `, effective: ${effectiveModeForLog.toUpperCase()}` : '';
+    console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()}${effectiveModeSuffix} (currently only affects Bing)`);
 
     if (config.useProxy) {
         console.error(`🌐 Using proxy: ${config.proxyUrl}`);
@@ -170,4 +178,82 @@ if (!quietStartupLogs) {
  */
 export function getProxyUrl(): string | undefined {
     return config.useProxy ? encodeURI(<string>config.proxyUrl) : undefined;
+}
+
+/**
+ * 判断 Playwright 模式所必需的参数是否已通过环境变量配置：
+ * - 任一远端端点（PLAYWRIGHT_WS_ENDPOINT / PLAYWRIGHT_CDP_ENDPOINT）；
+ * - PLAYWRIGHT_MODULE_PATH；
+ * - Playwright 客户端包（PLAYWRIGHT_PACKAGE，或 auto 时的内置 playwright / playwright-core）可解析；
+ * - 本地启动浏览器时（无远端端点），还需浏览器二进制可解析（PLAYWRIGHT_EXECUTABLE_PATH 或内置 playwright 捆绑的 chromium）。
+ *
+ * 仅基于环境变量同步判断，供 SEARCH_MODE=auto 时决定是否向 Agent 开放模式选择与生成提示语使用。
+ */
+export function isPlaywrightModeSupported(appConfig: AppConfig = config): boolean {
+    const getBrowserExecutable = (clientEntry: string | null): string | null => {
+        if (appConfig.playwrightExecutablePath) {
+            return appConfig.playwrightExecutablePath;
+        }
+        if (!clientEntry) {
+            return null;
+        }
+        try {
+            const loaded = configRequire(clientEntry) as { chromium?: { executablePath?: () => string } };
+            const executable = loaded?.chromium?.executablePath?.();
+            return executable || null;
+        } catch {
+            return null;
+        }
+    };
+
+    // 远端端点：无需本地解析客户端包或浏览器二进制。
+    if (appConfig.playwrightWsEndpoint || appConfig.playwrightCdpEndpoint) {
+        return true;
+    }
+
+    const packageEntry = resolvePlaywrightPackageEntry(appConfig);
+    let clientEntry: string | null = null;
+    if (appConfig.playwrightModulePath) {
+        // PLAYWRIGHT_MODULE_PATH 可以是绝对路径或相对 cwd 的路径，解析为可 require 的路径后，后续可从中读取捆绑浏览器位置。
+        const modulePath = appConfig.playwrightModulePath;
+        clientEntry = isPathAbsolute(modulePath) ? modulePath : `${process.cwd()}${path.sep}${modulePath}`;
+    } else if (packageEntry) {
+        clientEntry = packageEntry;
+    }
+    if (!clientEntry) {
+        return false;
+    }
+
+    // 本地启动浏览器：需要可解析的浏览器二进制（显式路径或捆绑 chromium）。
+    return getBrowserExecutable(clientEntry) !== null;
+}
+
+function isPathAbsolute(value: string): boolean {
+    return path.isAbsolute(value);
+}
+
+function resolvePlaywrightPackageEntry(appConfig: AppConfig): string | null {
+    const packageNames = appConfig.playwrightPackage === 'auto'
+        ? ['playwright', 'playwright-core']
+        : [appConfig.playwrightPackage];
+    for (const name of packageNames) {
+        try {
+            return configRequire.resolve(name);
+        } catch {
+            // 当前候选包不可解析，继续尝试下一个。
+        }
+    }
+    return null;
+}
+
+/**
+ * 解析指定配置下实际生效的搜索模式：
+ * - 强制 request / playwright：原样采用；
+ * - auto：Playwright 参数充足时保持 auto（请求优先、失败回退 Playwright），否则退回强制 HTTP 请求模式。
+ */
+export function getEffectiveSearchMode(appConfig: AppConfig = config): AppConfig['searchMode'] {
+    if (appConfig.searchMode === 'auto') {
+        return isPlaywrightModeSupported(appConfig) ? 'auto' : 'request';
+    }
+    return appConfig.searchMode;
 }

@@ -511,10 +511,14 @@ function formatStatusHumanReadable(status: {
         defaultSearchEngine: string;
         allowedSearchEngines: string[];
         searchMode: string;
+        effectiveSearchMode?: string;
         useProxy: boolean;
         fetchWebAllowInsecureTls: boolean;
     };
 }): string {
+    const modeLineSuffix = status.configSummary.effectiveSearchMode && status.configSummary.effectiveSearchMode !== status.configSummary.searchMode
+        ? ` (effective: ${status.configSummary.effectiveSearchMode})`
+        : '';
     return [
         `Daemon: ${status.daemon}`,
         `Runtime: ${status.runtime}`,
@@ -524,7 +528,7 @@ function formatStatusHumanReadable(status: {
         `Capabilities: ${status.capabilities.join(', ')}`,
         `Default engine: ${status.configSummary.defaultSearchEngine}`,
         `Allowed engines: ${status.configSummary.allowedSearchEngines.length > 0 ? status.configSummary.allowedSearchEngines.join(', ') : '(all)'}`,
-        `Search mode: ${status.configSummary.searchMode}`,
+        `Search mode: ${status.configSummary.searchMode}${modeLineSuffix}`,
         `Proxy enabled: ${status.configSummary.useProxy ? 'yes' : 'no'}`,
         `Fetch web insecure TLS: ${status.configSummary.fetchWebAllowInsecureTls ? 'yes' : 'no'}`
     ].join('\n');
@@ -541,6 +545,7 @@ type StatusPayload = CliEnvelope<{
         defaultSearchEngine: string;
         allowedSearchEngines: string[];
         searchMode: string;
+        effectiveSearchMode?: string;
         useProxy: boolean;
         fetchWebAllowInsecureTls: boolean;
     };
