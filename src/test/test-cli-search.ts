@@ -72,7 +72,7 @@ function createStubRuntime(configOverrides: Partial<AppConfig> = {}) {
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}`,
+                content: `ok:${maxChars}:${options?.readability ? 'readability' : 'plain'}:${options?.renderMode ?? 'auto'}`,
                 readabilityApplied: options?.readability ?? false,
                 links: options?.includeLinks ? [{ text: 'Doc', href: 'https://example.com/doc' }] : undefined
             }),
@@ -142,13 +142,24 @@ function testParseFetchArgs(): void {
         '5000',
         '--readability',
         '--include-links',
+        '--render-mode',
+        'browser',
         '--json'
     ]);
     assertEqual(parsedWeb.url, 'https://example.com', 'parsed fetch-web url');
     assertEqual(parsedWeb.maxChars, 5000, 'parsed fetch-web maxChars');
     assertEqual(parsedWeb.readability, true, 'parsed fetch-web readability');
     assertEqual(parsedWeb.includeLinks, true, 'parsed fetch-web include-links');
+    assertEqual(parsedWeb.renderMode, 'browser', 'parsed fetch-web render mode');
     assertEqual(parsedWeb.json, true, 'parsed fetch-web json flag');
+
+    let invalidRenderModeRejected = false;
+    try {
+        parseFetchWebArgs(['https://example.com', '--render-mode', 'invalid']);
+    } catch {
+        invalidRenderModeRejected = true;
+    }
+    assert(invalidRenderModeRejected, 'invalid fetch-web render mode should be rejected');
 
     const parsedGithub = parseFetchGithubArgs([
         'https://github.com/Aas-ee/open-webSearch',
@@ -396,7 +407,7 @@ async function testRunCliFetchWebJsonSuccess(): Promise<void> {
     assertEqual(payload.status, 'ok', 'CLI fetch-web json status');
     assertEqual(payload.data.url, 'https://example.com', 'CLI fetch-web json url');
     assertEqual(payload.data.title, 'Example', 'CLI fetch-web json title');
-    assertEqual(payload.data.content, 'ok:4321:plain', 'CLI fetch-web json content');
+    assertEqual(payload.data.content, 'ok:4321:plain:auto', 'CLI fetch-web json content');
 
     console.log('✅ CLI runCli fetch-web json success');
 }
@@ -406,7 +417,7 @@ async function testRunCliFetchWebReadabilityJsonSuccess(): Promise<void> {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runCli(
-        ['fetch-web', 'https://example.com', '--max-chars', '4321', '--readability', '--include-links', '--json'],
+        ['fetch-web', 'https://example.com', '--max-chars', '4321', '--render-mode', 'browser', '--readability', '--include-links', '--json'],
         runtime,
         {
             stdout: (text) => stdout.push(text),
@@ -421,7 +432,7 @@ async function testRunCliFetchWebReadabilityJsonSuccess(): Promise<void> {
         data: { content: string; readabilityApplied?: boolean; links?: Array<{ href: string }> };
     };
     assertEqual(payload.status, 'ok', 'CLI fetch-web readability json status');
-    assertEqual(payload.data.content, 'ok:4321:readability', 'CLI fetch-web readability json content');
+    assertEqual(payload.data.content, 'ok:4321:readability:browser', 'CLI fetch-web readability json content');
     assertEqual(payload.data.readabilityApplied, true, 'CLI fetch-web readability flag');
     assertEqual(payload.data.links?.[0]?.href, 'https://example.com/doc', 'CLI fetch-web readability links');
 
@@ -611,7 +622,24 @@ async function testRunCliFetchLinuxDoValidationFailure(): Promise<void> {
 }
 
 async function testRunCliPrefersDaemonWhenAvailable(): Promise<void> {
-    const localRuntime = createStubRuntime();
+    let localFetchCalls = 0;
+    const localRuntime = createOpenWebSearchRuntime({
+        config: createTestConfig(),
+        dependencies: {
+            fetchWebContent: async (url, maxChars) => {
+                localFetchCalls += 1;
+                return {
+                    url,
+                    finalUrl: url,
+                    contentType: 'text/plain',
+                    title: 'Local',
+                    retrievalMethod: 'request' as const,
+                    truncated: false,
+                    content: `local:${maxChars}`
+                };
+            }
+        }
+    });
     const daemonRuntime = createOpenWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
@@ -625,14 +653,14 @@ async function testRunCliPrefersDaemonWhenAvailable(): Promise<void> {
                 }]
             },
             fetchGithubReadme: async () => '# README',
-            fetchWebContent: async (url, maxChars) => ({
+            fetchWebContent: async (url, maxChars, options) => ({
                 url,
                 finalUrl: url,
                 contentType: 'text/plain',
                 title: 'Example',
                 retrievalMethod: 'request' as const,
                 truncated: false,
-                content: `daemon:${maxChars}`
+                content: `daemon:${maxChars}:${options?.renderMode ?? 'auto'}`
             }),
             fetchCsdnArticle: async () => ({ content: 'daemon-csdn' }),
             fetchJuejinArticle: async () => ({ content: 'daemon-juejin' }),
@@ -662,6 +690,17 @@ async function testRunCliPrefersDaemonWhenAvailable(): Promise<void> {
             };
             assertEqual(payload.status, 'ok', 'CLI daemon preferred payload status');
             assertEqual(payload.data.results[0].description, 'served-by-daemon', 'CLI should prefer daemon result');
+
+            const fetchStdout: string[] = [];
+            const fetchExitCode = await runCli(
+                ['fetch-web', 'https://example.com', '--render-mode', 'browser', '--json'],
+                localRuntime,
+                { stdout: (text) => fetchStdout.push(text), stderr: () => undefined }
+            );
+            const fetchPayload = JSON.parse(fetchStdout[0]) as { status: string; data: { content: string } };
+            assertEqual(fetchExitCode, 0, 'CLI daemon fetch-web exit code');
+            assertEqual(fetchPayload.data.content, 'daemon:30000:browser', 'CLI should forward renderMode through daemon');
+            assertEqual(localFetchCalls, 0, 'CLI should not execute fetch-web locally when daemon succeeds');
         });
 
         console.log('✅ CLI prefers daemon when available');
@@ -759,6 +798,71 @@ async function testRunCliExplicitDaemonTimeout(): Promise<void> {
         });
 
         console.log('✅ CLI explicit daemon timeout');
+    } finally {
+        await daemon.close();
+    }
+}
+
+async function testRunCliImplicitDaemonTimeoutDoesNotRunTwice(): Promise<void> {
+    let localFetchCalls = 0;
+    const localRuntime = createOpenWebSearchRuntime({
+        config: createTestConfig(),
+        dependencies: {
+            fetchWebContent: async (url, maxChars) => {
+                localFetchCalls += 1;
+                return {
+                    url,
+                    finalUrl: url,
+                    contentType: 'text/plain',
+                    title: 'Local duplicate',
+                    retrievalMethod: 'request' as const,
+                    truncated: false,
+                    content: `local:${maxChars}`
+                };
+            }
+        }
+    });
+    const delayedRuntime = createOpenWebSearchRuntime({
+        config: createTestConfig(),
+        dependencies: {
+            fetchWebContent: async (url, maxChars) => {
+                await new Promise((resolve) => setTimeout(resolve, 250));
+                return {
+                    url,
+                    finalUrl: url,
+                    contentType: 'text/plain',
+                    title: 'Delayed daemon',
+                    retrievalMethod: 'browser-html' as const,
+                    truncated: false,
+                    content: `daemon:${maxChars}`
+                };
+            }
+        }
+    });
+    const daemon = await startLocalDaemon(delayedRuntime, { port: 0, version: 'implicit-timeout-test' });
+    const daemonPort = new URL(daemon.baseUrl).port;
+
+    try {
+        await withEnv('OPEN_WEBSEARCH_DAEMON_URL', undefined, async () => {
+            await withEnv('OPEN_WEBSEARCH_DAEMON_PORT', daemonPort, async () => {
+                await withEnv('OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS', '50', async () => {
+                    const stdout: string[] = [];
+                    const exitCode = await runCli(
+                        ['fetch-web', 'https://example.com', '--render-mode', 'browser', '--json'],
+                        localRuntime,
+                        { stdout: (text) => stdout.push(text), stderr: () => undefined }
+                    );
+
+                    const payload = JSON.parse(stdout[0]) as { status: string; error: { code: string } };
+                    assertEqual(exitCode, 1, 'CLI implicit daemon timeout exit code');
+                    assertEqual(payload.status, 'error', 'CLI implicit daemon timeout status');
+                    assertEqual(payload.error.code, 'daemon_timeout', 'CLI implicit daemon timeout code');
+                    assertEqual(localFetchCalls, 0, 'CLI should not re-run a timed out daemon request locally');
+                });
+            });
+        });
+
+        console.log('✅ CLI implicit daemon timeout does not duplicate fetch');
     } finally {
         await daemon.close();
     }
@@ -910,6 +1014,7 @@ async function testRunCliHelp(): Promise<void> {
     assert(stdout[0].includes('--search-mode'), 'CLI help should mention search-mode');
     assert(stdout[0].includes('--max-chars'), 'CLI help should mention max-chars');
     assert(stdout[0].includes('--readability'), 'CLI help should mention readability');
+    assert(stdout[0].includes('--render-mode'), 'CLI help should mention render mode');
     assert(stdout[0].includes('--include-links'), 'CLI help should mention include-links');
 
     console.log('✅ CLI help');
@@ -965,6 +1070,7 @@ async function main(): Promise<void> {
     await testRunCliPrefersDaemonWhenAvailable();
     await testRunCliExplicitDaemonUnavailable();
     await testRunCliExplicitDaemonTimeout();
+    await testRunCliImplicitDaemonTimeoutDoesNotRunTwice();
     await testRunCliSpawnStartsDaemon();
     console.log('\nCLI command tests passed.');
 }

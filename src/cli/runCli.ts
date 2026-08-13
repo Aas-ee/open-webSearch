@@ -53,8 +53,8 @@ function formatCliHelp(): string {
         'One-shot action commands:',
         '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--daemon-url URL] [--spawn] [--json]',
         '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing.',
-        '  open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--daemon-url URL] [--spawn] [--json]',
-        '    Fetch readable page content. `--readability` enables Mozilla Readability extraction; `--include-links` returns preserved article links.',
+        '  open-websearch fetch-web <url> [--max-chars N] [--render-mode MODE] [--readability] [--include-links] [--daemon-url URL] [--spawn] [--json]',
+        '    Fetch readable page content. `--render-mode` is request|auto|browser; browser renders directly with Playwright. `--readability` enables Mozilla Readability extraction; `--include-links` preserves article links.',
         '  open-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
         '  open-websearch fetch-csdn <url> [--daemon-url URL] [--spawn] [--json]',
         '  open-websearch fetch-juejin <url> [--daemon-url URL] [--spawn] [--json]',
@@ -94,6 +94,7 @@ export type ParsedFetchWebArgs = {
     maxChars: number;
     readability: boolean;
     includeLinks: boolean;
+    renderMode?: 'request' | 'auto' | 'browser';
     json: boolean;
 };
 
@@ -141,7 +142,14 @@ function parsePositiveTimeout(value: string | undefined, fallback: number): numb
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function getDaemonActionTimeoutMs(transport: DaemonTransportArgs): number {
+function getDaemonActionTimeoutMs(
+    transport: DaemonTransportArgs,
+    path: string,
+    body: Record<string, unknown>
+): number {
+    if (path === '/fetch-web') {
+        return parsePositiveTimeout(process.env.OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS, 60000);
+    }
     if (transport.daemonUrlExplicit) {
         return parsePositiveTimeout(process.env.OPEN_WEBSEARCH_DAEMON_ACTION_TIMEOUT_MS, 15000);
     }
@@ -286,6 +294,7 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
     let maxChars = 30000;
     let readability = false;
     let includeLinks = false;
+    let renderMode: ParsedFetchWebArgs['renderMode'];
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -316,6 +325,19 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
             continue;
         }
 
+        if (arg === '--render-mode') {
+            const next = argv[index + 1];
+            if (!next || isFlag(next)) {
+                throw new Error('Missing value for --render-mode');
+            }
+            if (next !== 'request' && next !== 'auto' && next !== 'browser') {
+                throw new Error('renderMode must be one of: request, auto, browser');
+            }
+            renderMode = next;
+            index += 1;
+            continue;
+        }
+
         if (isFlag(arg)) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -336,6 +358,7 @@ export function parseFetchWebArgs(argv: string[]): ParsedFetchWebArgs {
         maxChars,
         readability,
         includeLinks,
+        renderMode,
         json
     };
 }
@@ -631,7 +654,7 @@ async function requestDaemonEnvelope<T>(
     path: string,
     body: Record<string, unknown>
 ): Promise<CliEnvelope<T>> {
-    const timeoutMs = getDaemonActionTimeoutMs(transport);
+    const timeoutMs = getDaemonActionTimeoutMs(transport, path, body);
 
     try {
         return await requestJsonWithTimeout<CliEnvelope<T>>(new URL(path, transport.daemonUrl).toString(), {
@@ -671,7 +694,7 @@ async function tryDaemonRequest<T>(
 
         if (
             !transport.daemonUrlExplicit &&
-            (error instanceof DaemonUnavailableError || error instanceof DaemonRequestTimeoutError || error instanceof DaemonRequestFailedError)
+            error instanceof DaemonUnavailableError
         ) {
             return null;
         }
@@ -928,11 +951,11 @@ export async function runCli(
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     'invalid_arguments',
                     message,
-                    { hint: 'Use `open-websearch fetch-web <url> [--max-chars N] [--json]`.' }
+                    { hint: 'Use `open-websearch fetch-web <url> [--max-chars N] [--render-mode request|auto|browser] [--json]`.' }
                 ), null, 2));
             } else {
                 io.stderr(message);
-                io.stderr('Usage: open-websearch fetch-web <url> [--max-chars N] [--readability] [--include-links] [--json]');
+                io.stderr('Usage: open-websearch fetch-web <url> [--max-chars N] [--render-mode request|auto|browser] [--readability] [--include-links] [--json]');
             }
             return 1;
         }
@@ -945,7 +968,8 @@ export async function runCli(
                     url: parsed.url,
                     maxChars: parsed.maxChars,
                     readability: parsed.readability,
-                    includeLinks: parsed.includeLinks
+                    includeLinks: parsed.includeLinks,
+                    renderMode: parsed.renderMode
                 },
                 options
             );
@@ -967,7 +991,8 @@ export async function runCli(
                 url: parsed.url,
                 maxChars: parsed.maxChars,
                 readability: parsed.readability,
-                includeLinks: parsed.includeLinks
+                includeLinks: parsed.includeLinks,
+                renderMode: parsed.renderMode
             });
 
             if (parsed.json) {
@@ -984,7 +1009,7 @@ export async function runCli(
                     message,
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
-                        : 'Use a public HTTP(S) URL and keep maxChars within the supported range.' }
+                        : 'Use a public HTTP(S) URL, keep maxChars within the supported range, and use renderMode request, auto, or browser.' }
                 ), null, 2));
             } else {
                 io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);

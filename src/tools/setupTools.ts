@@ -298,7 +298,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 获取通用网页/Markdown 内容工具
     server.tool(
         fetchWebToolName,
-        "Fetch content from a public HTTP(S) URL (supports Markdown files and normal web pages)",
+        "Fetch content from a public HTTP(S) URL. renderMode defaults to auto: request uses HTTP only, auto uses request with browser fallback, and browser renders directly with Playwright and fails clearly when Playwright is unavailable.",
         {
             url: z.string().url().refine(
                 (url) => validatePublicWebUrl(url),
@@ -306,12 +306,13 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             ),
             maxChars: z.number().int().min(1000).max(200000).default(30000),
             readability: z.boolean().optional(),
-            includeLinks: z.boolean().optional()
+            includeLinks: z.boolean().optional(),
+            renderMode: z.enum(['request', 'auto', 'browser']).optional()
         },
-        async ({url, maxChars = 30000, readability, includeLinks}) => {
+        async ({url, maxChars = 30000, readability, includeLinks, renderMode}) => {
             try {
                 console.error(`Fetching web content: ${url}`);
-                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
+                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, renderMode });
 
                 return {
                     content: [{

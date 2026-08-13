@@ -264,7 +264,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎                               |
 | `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理                             |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL                             |
-| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验。只建议在目标站点证书链异常时临时使用 |
+| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 的请求路径关闭 TLS 校验，不影响 Playwright 浏览器导航。只建议在证书链异常时临时使用 |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
@@ -432,7 +432,7 @@ Windows 下的 NPX 配置：
 - 如果 `PROXY_URL` 指向固定上游代理或固定出口，百度、CSDN、掘金、Linux.do、GitHub 这类对地区较敏感的站点表现可能会和之前不同。
 - 如果系统里已经设置了 `HTTP_PROXY` 或 `HTTPS_PROXY`，它们不再覆盖服务器内部请求行为。
 - Windows 上如果站点缺少中间证书，优先建议配置 `NODE_EXTRA_CA_CERTS`。
-- `FETCH_WEB_INSECURE_TLS=true` 只建议作为 `fetchWebContent` 的兜底方案使用，因为它会降低 TLS 校验强度。
+- `FETCH_WEB_INSECURE_TLS=true` 只建议作为 `fetchWebContent` 请求路径的兜底方案；它会降低 TLS 校验强度，且不影响 Playwright 浏览器导航。
 
 **VSCode版(Claude开发扩展):**
 ```json
@@ -698,14 +698,21 @@ use_mcp_tool({
 
 ### fetchWebContent工具使用说明
 
-用于直接抓取公开可访问的 HTTP(S) 链接内容，支持 Markdown 文件（`.md`）和普通网页。
+用于直接抓取公开可访问的 HTTP(S) 链接内容，支持 Markdown 文件（`.md`）、普通网页，以及配置 Playwright 后的 JavaScript 渲染页面。
 
 ```typescript
 {
-  "url": string,         // 公开可访问的 HTTP(S) URL
-  "maxChars": number     // 可选：最大返回字符数（1000-200000，默认30000）
+  "url": string,          // 公开可访问的 HTTP(S) URL
+  "maxChars": number,     // 可选：最大返回字符数（1000-200000，默认30000）
+  "renderMode": string,   // 可选：request、auto（默认）或 browser
+  "readability": boolean, // 可选：对 HTML 使用 Mozilla Readability
+  "includeLinks": boolean // 可选：保留 Readability 输出中的链接
 }
 ```
+
+`request` 不会启动浏览器或使用浏览器 Cookie；`auto` 保持现有的请求优先行为，仅在必要时使用浏览器辅助；`browser` 直接渲染页面，当 Playwright 或浏览器目标不可用时返回明确错误。初始 URL 和最终 URL 仍会经过公网安全校验。
+
+浏览器请求会在继续前重新校验，但该进程不会把 DNS 结果绑定到 Chromium 最终建立的 Socket。远程 Playwright/CDP 端点仍必须使用可信的 DNS 与出站网络策略。
 
 使用示例：
 ```typescript
@@ -714,7 +721,8 @@ use_mcp_tool({
   tool_name: "fetchWebContent",
   arguments: {
     url: "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
-    maxChars: 12000
+    maxChars: 12000,
+    renderMode: "auto"
   }
 })
 ```
@@ -726,6 +734,7 @@ use_mcp_tool({
   "finalUrl": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
   "contentType": "text/plain; charset=utf-8",
   "title": "",
+  "retrievalMethod": "request",
   "truncated": false,
   "content": "# Open-WebSearch MCP Server ..."
 }
