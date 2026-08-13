@@ -84,23 +84,33 @@ function runAdvisoryBypassCases(): void {
     }
 }
 
-// nip.io resolves *.nip.io to the embedded IP — exercises the real DNS path.
-// May fail when the system DNS is behind a proxy like Clash fake IP mode.
+// 用确定性 DNS 注入覆盖解析路径：私网应答被拦截、公网应答放行。
+// 不依赖外部 nip.io，避免网络或代理（如 Clash fake-IP 模式）导致测试不稳定。
 async function runDnsResolvedCases(): Promise<void> {
-    let rejected = false;
-    try {
-        await assertPublicHttpUrlResolved('https://127.0.0.1.nip.io/');
-    } catch {
-        rejected = true;
-    }
-    assertEqual(rejected, true, 'DNS-resolved private target not blocked: 127.0.0.1.nip.io');
-    console.log('✅ DNS-resolved private target blocked: 127.0.0.1.nip.io');
+    __setDnsLookupForTests(async (hostname) => {
+        if (hostname === 'private-dns.example') {
+            return [{ address: '127.0.0.1' }];
+        }
+        if (hostname === 'public-dns.example') {
+            return [{ address: '93.184.216.34' }];
+        }
+        throw new Error(`unexpected hostname: ${hostname}`);
+    });
 
     try {
-        await assertPublicHttpUrlResolved('https://8.8.8.8.nip.io/');
-        console.log('✅ DNS-resolved public target allowed: 8.8.8.8.nip.io');
-    } catch {
-        console.log('⚠️  Skipped public DNS test — DNS may be behind a proxy (e.g. Clash fake IP mode)');
+        let rejected = false;
+        try {
+            await assertPublicHttpUrlResolved('https://private-dns.example/');
+        } catch {
+            rejected = true;
+        }
+        assertEqual(rejected, true, 'DNS-resolved private target not blocked: private-dns.example');
+        console.log('✅ DNS-resolved private target blocked: private-dns.example');
+
+        await assertPublicHttpUrlResolved('https://public-dns.example/');
+        console.log('✅ DNS-resolved public target allowed: public-dns.example');
+    } finally {
+        __setDnsLookupForTests();
     }
 }
 
