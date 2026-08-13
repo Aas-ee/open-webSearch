@@ -178,6 +178,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PLAYWRIGHT_CDP_ENDPOINT` | empty | Valid Chromium CDP endpoint | Connect to an existing Chromium instance over CDP |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Whether Playwright Chromium runs in headless mode |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing result waits |
+| `OPEN_WEBSEARCH_PROFILE_DIR` | `<tmpdir>/open-websearch-browser-profiles` | Any writable directory | Base directory for persistent local browser profiles (see browser state note below) |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool |
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | Valid MCP tool name | Custom name for the Linux.do article fetch tool |
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | Valid MCP tool name | Custom name for the CSDN article fetch tool |
@@ -266,6 +267,11 @@ Notes:
 - Remote endpoints ignore `PLAYWRIGHT_EXECUTABLE_PATH` and local proxy launch flags
 - When Playwright is available, blocked CSDN/Zhihu article fetches and generic web fetches can also retry with browser-acquired cookies
 - Without Playwright, `fetchWebContent` stays on the request-only path. Public pages can still work, but pages that require browser cookies or browser-rendered HTML may fail.
+
+Browser state note (local shared profiles):
+- Local browser mode reuses persistent contexts/pages across fetches and across process restarts. Cookies, storage, cache, and Service Worker state for the same origin therefore persist between browser-mode fetches.
+- This is intentional for single-user, stateful scraping (it keeps anti-bot state warm and avoids repeated browser launches). If you share a daemon between mutually distrusting callers, connect those callers to an isolated browser via `PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT` instead of relying on local shared profiles, or point each caller at its own `OPEN_WEBSEARCH_PROFILE_DIR`.
+- To clear profile state, delete the browser profile directories under `OPEN_WEBSEARCH_PROFILE_DIR` (default: `<tmpdir>/open-websearch-browser-profiles`) while no local browser is running.
 
 ### Local Installation
 

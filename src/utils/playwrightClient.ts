@@ -53,7 +53,7 @@ type LoadPlaywrightClientOptions = {
     silent?: boolean;
 };
 
-type LocalBrowserSessionMode = 'headed' | 'headless' | 'hidden-headed';
+type LocalBrowserSessionMode = 'headed' | 'headless' | 'hidden-headless' | 'hidden-headed';
 
 type LocalBrowserSession = {
     browser: any;
@@ -184,7 +184,9 @@ function getPageLockFilePath(poolKey: string, pageTargetId: string): string {
 
 function getLocalBrowserSessionMode(headless: boolean, options?: { hideWindow?: boolean }): LocalBrowserSessionMode {
     if (options?.hideWindow) {
-        return 'hidden-headed';
+        // Windows 隐藏桌面下仍要区分真实无头（fetch 等普通抓取）与隐藏有头（Bing antiBot），
+        // 防止 antiBot 复用 --headless=new 进程导致隐藏有头反爬失效。
+        return headless ? 'hidden-headless' : 'hidden-headed';
     }
 
     return headless ? 'headless' : 'headed';
@@ -782,8 +784,12 @@ function buildLocalSessionKey(headless: boolean, hideWindow?: boolean): string {
 /**
  * 浏览器复用域策略：
  * - headed: `headed:<executablePath>`（不同浏览器路径用不同域）
- * - hidden-headed: `hidden-headed`（所有隐藏有头进程共享一个域）
+ * - hidden-headed: `hidden-headed`（所有隐藏有头进程共享一个域，服务 Bing antiBot）
+ * - hidden-headless: `hidden-headless`（Windows 隐藏桌面上的真实无头进程独立成域）
  * - headless: `headless`（所有无头进程共享一个域）
+ *
+ * hidden-headless 与 hidden-headed 必须分域：antiBot 要求有头渲染，
+ * 若复用普通抓取的 --headless=new 进程，反爬模式会静默失效。
  */
 function buildBrowserDomainKey(mode: LocalBrowserSessionMode): string {
     if (mode === 'headed') {
@@ -814,6 +820,10 @@ function getLocalBrowserSessionModeFromDomainKey(domainKey: string): LocalBrowse
         return 'headed';
     }
 
+    if (domainKey === 'hidden-headless') {
+        return 'hidden-headless';
+    }
+
     if (domainKey === 'hidden-headed') {
         return 'hidden-headed';
     }
@@ -838,7 +848,7 @@ function listBrowserDomainMetadataEntries(): BrowserDomainMetadataEntry[] {
     try {
         mkdirSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR, { recursive: true });
         const metadataFilePattern = new RegExp(
-            `^${LOCAL_BROWSER_DOMAIN_METADATA_PREFIX}(headed|headless|hidden-headed)-([a-f0-9]+)\\.json$`,
+            `^${LOCAL_BROWSER_DOMAIN_METADATA_PREFIX}(headed|headless|hidden-headless|hidden-headed)-([a-f0-9]+)\\.json$`,
             'u'
         );
         return readdirSync(CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR)
@@ -1799,9 +1809,9 @@ async function connectLaunchedLocalBrowserSession(
     }
 }
 
-async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, headless: boolean): Promise<LocalBrowserSession> {
+async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, headless: boolean, sessionMode: LocalBrowserSessionMode): Promise<LocalBrowserSession> {
     const browserPath = getLocalBrowserExecutablePath();
-    const profileDir = getPersistentBrowserProfileDir('hidden-headed');
+    const profileDir = getPersistentBrowserProfileDir(sessionMode);
     mkdirSync(profileDir, { recursive: true });
     cleanupStaleProfileLocks(profileDir);
     const tempDir = profileDir;
@@ -1849,7 +1859,7 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
             browserPid = connectedSession.browserPid;
             writeBrowserDomainMetadata({
                 domainKey,
-                sessionMode: 'hidden-headed',
+                sessionMode,
                 browserPid,
                 debugPort: port,
                 tempDir,
@@ -1857,7 +1867,7 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
             });
             const forceKill = createForceKill(browserPid, tempDir, browser, domainKey);
             const session: LocalBrowserSession = {
-                browser, sessionKey, domainKey, sessionMode: 'hidden-headed',
+                browser, sessionKey, domainKey, sessionMode,
                 browserPid, debugPort: port, tempDir,
                 closeBrowser: async () => { await closeLocalBrowserSession(session); },
                 forceKill
@@ -1893,7 +1903,7 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
         const browser = connectedSession.browser;
         writeBrowserDomainMetadata({
             domainKey,
-            sessionMode: 'hidden-headed',
+            sessionMode,
             browserPid,
             debugPort: port,
             tempDir,
@@ -1901,7 +1911,7 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
         });
         const forceKill = createForceKill(browserPid, tempDir, browser, domainKey);
         const session: LocalBrowserSession = {
-            browser, sessionKey, domainKey, sessionMode: 'hidden-headed',
+            browser, sessionKey, domainKey, sessionMode,
             browserPid, debugPort: port, tempDir,
             closeBrowser: async () => { await closeLocalBrowserSession(session); },
             forceKill
@@ -2074,7 +2084,7 @@ async function getOrCreateLocalBrowserSession(
     }
 
     if (cachedLocalBrowserSession || localBrowserSessionPromise) {
-        // 不同 session 可能是相同域（如 headless 复用 hidden-headed），
+        // 不同 session 可能是相同域（如 headless 降级复用 hidden-headless），
         // 不能直接销毁缓存浏览器——应先通过域锁检查复用。
         if (localBrowserSessionPromise) {
             // 有正在进行的创建，等待完成后再让域锁逻辑判断。
@@ -2111,11 +2121,13 @@ async function getOrCreateLocalBrowserSession(
                 return reusedSession;
             }
 
-            // 无头模式降级：如果无头锁域内无浏览器，检查 hidden-headed 是否存在。
+            // 无头家族（headless / hidden-headless）升级复用：如果自身域内无浏览器，检查 hidden-headed 是否存在。普通抓取在有头浏览器中运行完全安全，这样可以继续共享 search 已创建的浏览器，避免为 fetch 再启一个进程。
+            // 反向绝不成立：hidden-headed（Bing antiBot）永不复用带 --headless=new 的进程，否则反爬所需的真实有头渲染会静默失效——这正是 fetch→search 顺序曾被误复用无头浏览器的缺陷，必须靠分域 + 单向升级来杜绝。
             // 必须先获取 hidden-headed 域锁，否则在我们连接的瞬间，
             // 另一个 hidden-headed 进程可能正在 closeLocalBrowserSession 中判定自己是
             // 最后一个使用者并杀死浏览器，导致我们拿到一个已死的连接。
-            if (sessionMode === 'headless') {
+            const canReuseHiddenHeaded = sessionMode === 'headless' || sessionMode === 'hidden-headless';
+            if (canReuseHiddenHeaded) {
                 const hiddenHeadedDomainKey = buildBrowserDomainKey('hidden-headed');
                 const hiddenHeadedLockPath = getBrowserDomainLockFilePath(hiddenHeadedDomainKey);
                 const hiddenHeadedLock = acquireNativeFileLock(hiddenHeadedLockPath);
@@ -2147,7 +2159,7 @@ async function getOrCreateLocalBrowserSession(
             // 没有可复用浏览器时才新建；launch* 内部会等待 stdout ready 后继续探测 CDP Browser 域可响应。
             // 整个过程仍持有原有域锁，避免第二个并发请求在 CDP 尚未可用时误判为不可复用并再启动一个浏览器。
             const session = options?.hideWindow
-                ? await launchHiddenDesktopBrowser(playwright, sessionKey, domainKey, headless)
+                ? await launchHiddenDesktopBrowser(playwright, sessionKey, domainKey, headless, sessionMode)
                 : await launchStandardLocalBrowser(playwright, sessionKey, domainKey, headless);
             session.sessionKey = sessionKey;
 

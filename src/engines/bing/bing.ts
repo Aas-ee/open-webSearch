@@ -330,9 +330,10 @@ async function waitForBingResultsChanged(page: any, previousSignature: string): 
 async function waitForBingSearchInputValue(page: any, expectedValue: string): Promise<void> {
     const selectors = SEARCH_INPUT_SELECTORS;
     const timeout = getBingUiTimeoutMs();
-    // 用 evaluate 轮询代替 waitForFunction，避免 tsx 注入 __name 变量导致 ReferenceError
+    // 使用字符串函数避免 tsx 注入 __name 变量导致 ReferenceError。
+    // Playwright 签名是 waitForFunction(pageFunction, arg, options)，只接受单个 arg，因此把两个参数包装成一个对象传入，否则页面侧 expectedValue 会是 undefined 且 timeout options 也不会生效。
     await page.waitForFunction(
-        `(selectors, expectedValue) => {
+        `({ selectors, expectedValue }) => {
             const isVisible = (el) => {
                 const s = window.getComputedStyle(el);
                 return s.visibility !== 'hidden' && s.display !== 'none' && el.getClientRects().length > 0;
@@ -342,8 +343,7 @@ async function waitForBingSearchInputValue(page: any, expectedValue: string): Pr
                 return input !== null && isVisible(input) && input.value === expectedValue;
             });
         }`,
-        selectors,
-        expectedValue,
+        { selectors, expectedValue },
         { timeout }
     );
 }

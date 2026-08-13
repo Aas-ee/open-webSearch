@@ -72,7 +72,7 @@ type BrowserDebugTarget = {
     port: number;
 };
 
-type LocalBrowserSessionMode = 'headed' | 'headless' | 'hidden-headed';
+type LocalBrowserSessionMode = 'headed' | 'headless' | 'hidden-headless' | 'hidden-headed';
 
 type LocalBrowserSessionSnapshot = {
     tempDir: string;
@@ -215,7 +215,7 @@ const queryExpectations = new Map<string, QueryExpectation>([
 const LOCAL_BROWSER_DOMAIN_METADATA_PREFIX = 'domain-session-';
 const CROSS_PROCESS_BROWSER_SESSION_LOCK_DIR = path.join(tmpdir(), 'open-websearch-browser-session-locks');
 const LOCAL_BROWSER_DOMAIN_METADATA_FILE_PATTERN = new RegExp(
-    `^${LOCAL_BROWSER_DOMAIN_METADATA_PREFIX}(headed|headless|hidden-headed)-[a-f0-9]+\\.json$`,
+    `^${LOCAL_BROWSER_DOMAIN_METADATA_PREFIX}(headed|headless|hidden-headless|hidden-headed)-[a-f0-9]+\\.json$`,
     'u'
 );
 
