@@ -9,6 +9,7 @@ import { searchBrave } from '../engines/brave/index.js';
 import { searchJuejin } from '../engines/juejin/index.js';
 import { searchStartpage } from '../engines/startpage/index.js';
 import { searchSogou } from '../engines/sogou/index.js';
+import { searchHackerNews } from '../engines/hackernews/index.js';
 import { fetchLinuxDoArticle } from '../engines/linuxdo/fetchLinuxDoArticle.js';
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
@@ -50,7 +51,8 @@ function createDefaultSearchExecutors(): SearchEngineExecutorMap {
         brave: searchBrave,
         juejin: searchJuejin,
         startpage: searchStartpage,
-        sogou: searchSogou
+        sogou: searchSogou,
+        hackernews: searchHackerNews
     };
 }
 

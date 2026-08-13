@@ -132,6 +132,15 @@ function testParseSearchArgs(): void {
     );
     assertEqual(parsedSogouAlias.engines.join(','), 'sogou', 'parsed Sogou alias');
 
+    const parsedHackerNewsAlias = parseSearchArgs(
+        ['Open', 'WebSearch', '--engine', 'Hacker News'],
+        createStubRuntime({
+            defaultSearchEngine: 'hackernews',
+            allowedSearchEngines: ['hackernews']
+        })
+    );
+    assertEqual(parsedHackerNewsAlias.engines.join(','), 'hackernews', 'parsed Hacker News alias');
+
     console.log('✅ CLI parseSearchArgs');
 }
 

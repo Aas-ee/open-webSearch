@@ -55,7 +55,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             ? ' searchMode meanings: request performs plain HTTP scraping, playwright drives a real browser through Playwright, and auto or omitting searchMode lets the server decide (request first, falling back to Playwright when it is blocked). Start with the default auto (or omit searchMode). Only retry the same query with searchMode=playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality, for example anti-bot or verification pages.'
             : '';
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗)) with no API key required.${searchModeDescription}`;
+            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗), Hacker News) with no API key required.${searchModeDescription}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -65,6 +65,8 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                         return 'Startpage';
                     case 'sogou':
                         return 'Sogou(搜狗)';
+                    case 'hackernews':
+                        return 'Hacker News';
                     default:
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
