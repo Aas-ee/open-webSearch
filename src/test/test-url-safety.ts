@@ -165,12 +165,81 @@ async function runFakeIpCidrsCases(): Promise<void> {
     }
 }
 
+async function runErrorMessageCases(): Promise<void> {
+    __setDnsLookupForTests(async (hostname) => {
+        if (hostname === 'private-dns.example') {
+            return [{ address: '192.168.1.10' }];
+        }
+        if (hostname === 'multi-dns.example') {
+            return [
+                { address: '10.0.0.5' },
+                { address: '169.254.169.254' },
+                { address: '93.184.216.34' }
+            ];
+        }
+        throw new Error(`unexpected hostname: ${hostname}`);
+    });
+
+    async function expectBlockedMessage(url: string): Promise<string> {
+        try {
+            await assertPublicHttpUrlResolved(url);
+        } catch (err) {
+            return err instanceof Error ? err.message : String(err);
+        }
+        throw new Error(`expected ${url} to be blocked`);
+    }
+
+    function assertMessage(message: string, mustInclude: string[], mustExclude: string[], caseName: string): void {
+        for (const part of mustInclude) {
+            if (!message.includes(part)) {
+                throw new Error(`${caseName}: message missing "${part}": ${message}`);
+            }
+        }
+        for (const part of mustExclude) {
+            if (message.includes(part)) {
+                throw new Error(`${caseName}: message must not include "${part}": ${message}`);
+            }
+        }
+    }
+
+    try {
+        let message = await expectBlockedMessage('https://192.168.1.1/admin');
+        assertMessage(message, ['192.168.1.1'], ['FAKE_IP_CIDRS'], 'literal IPv4');
+        console.log('✅ error message: literal IPv4 shows target without fake-ip hint');
+
+        message = await expectBlockedMessage('http://[fd00::1]/');
+        assertMessage(message, ['[fd00::1]'], ['FAKE_IP_CIDRS'], 'literal IPv6');
+        console.log('✅ error message: literal IPv6 shows target without fake-ip hint');
+
+        message = await expectBlockedMessage('https://private-dns.example/');
+        assertMessage(
+            message,
+            ['private-dns.example', '192.168.1.10', 'FAKE_IP_CIDRS', '198.18.0.0/15'],
+            ['/10'],
+            'single private DNS answer'
+        );
+        console.log('✅ error message: private DNS answer lists hostname, blocked IP and configured-CIDR hint');
+
+        message = await expectBlockedMessage('https://multi-dns.example/');
+        assertMessage(
+            message,
+            ['multi-dns.example', '10.0.0.5, 169.254.169.254'],
+            ['93.184.216.34', '/10'],
+            'multiple DNS answers'
+        );
+        console.log('✅ error message: multiple DNS answers list only blocked IPs');
+    } finally {
+        __setDnsLookupForTests();
+    }
+}
+
 async function main(): Promise<void> {
     runHostCases();
     runUrlCases();
     runAdvisoryBypassCases();
     await runDnsResolvedCases();
     await runFakeIpCidrsCases();
+    await runErrorMessageCases();
     console.log('\nURL safety tests passed.');
 }
 

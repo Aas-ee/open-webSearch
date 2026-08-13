@@ -54,11 +54,11 @@ async function assertRejects(
     throw new Error(`${label}: expected rejection, got success`);
 }
 
-async function assertPrivateRedirectRejected(from: string, to: string, label: string): Promise<void> {
+async function assertPrivateRedirectRejected(from: string, to: string, label: string, pattern: RegExp = /private or local network/): Promise<void> {
     stubAxios({ [from]: { status: 302, location: to } });
     await assertRejects(
         () => requestWithSafeRedirects('GET', from, {}),
-        /private or local network/,
+        pattern,
         label
     );
     console.log(`✅ ${label}`);
@@ -69,7 +69,7 @@ async function run(): Promise<void> {
     await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://[::1]:8080/secret', 'redirect to [::1] (bracketed IPv6 loopback) is rejected');
     await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://169.254.169.254/latest/meta-data/', 'redirect to 169.254.169.254 (IMDS) is rejected');
     // DNS-resolved private hop — exercises the async path proxy mode needs.
-    await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://127.0.0.1.nip.io/admin', 'redirect to hostname that DNS-resolves to 127.0.0.1 is rejected');
+    await assertPrivateRedirectRejected('http://8.8.8.8/', 'http://127.0.0.1.nip.io/admin', 'redirect to hostname that DNS-resolves to 127.0.0.1 is rejected', /resolves to private IP/);
 
     // Public-to-public redirect: helper follows cleanly, responseUrl tracks final hop.
     stubAxios({
