@@ -154,8 +154,8 @@ function cleanupStaleProfileLocks(profileDir: string): void {
 
 const browserPlaywrightPagePools = new WeakMap<any, Map<string, BrowserPlaywrightPagePool>>();
 
-// 用 CDP targetId（浏览器内全局唯一且跨连接稳定）作为锁文件标识，
-// 确保所有进程对同一物理页始终竞争同一把锁。
+// 用 CDP targetId（浏览器内全局唯一且跨连接稳定）作为锁文件标识，确保所有进程、所有复用池对同一物理页始终竞争同一把锁。
+// 锁路径不得混入 poolKey：不同复用池（如 bing-search 与 fetch-html）都会收编持久化 context 中的同一批物理页，若锁键含 poolKey，同一物理页会同时被两个池持有，导致一方导航页面时直接覆盖另一方的渲染状态。
 // 如果 CDP targetId 获取失败则直接抛出错误——没有任何本地生成的 ID
 // 能满足跨进程稳定性要求
 
@@ -176,9 +176,9 @@ async function getPlaywrightPageTargetId(page: any): Promise<string> {
     throw new Error('无法获取 CDP targetId，跨进程页面锁需要浏览器提供全局唯一的页面标识');
 }
 
-function getPageLockFilePath(poolKey: string, pageTargetId: string): string {
+export function getPageLockFilePath(pageTargetId: string): string {
     mkdirSync(CROSS_PROCESS_POOL_LOCK_DIR, { recursive: true });
-    const keyHash = createHash('sha1').update(`${poolKey}:${pageTargetId}`).digest('hex');
+    const keyHash = createHash('sha1').update(pageTargetId).digest('hex');
     return path.join(CROSS_PROCESS_POOL_LOCK_DIR, `page-${keyHash}.lock`);
 }
 
@@ -594,7 +594,7 @@ async function acquirePooledPlaywrightPageOnce(
         for (const poolEntry of pool.entries) {
             if (poolEntry.busy) continue;
 
-            const lockPath = getPageLockFilePath(pool.poolKey, poolEntry.pageTargetId);
+            const lockPath = getPageLockFilePath(poolEntry.pageTargetId);
             const lock = tryNativeFileLock(lockPath);
             if (lock) {
                 poolEntry.pageLock = lock;
@@ -606,7 +606,7 @@ async function acquirePooledPlaywrightPageOnce(
         // 所有锁都被占用时持续新建标签页，直到当前进程成功拿到某一页的 OS 锁。
         while (!candidate) {
             const createdEntry = await createPooledPlaywrightPageEntry(browser, pool);
-            const lockPath = getPageLockFilePath(pool.poolKey, createdEntry.pageTargetId);
+            const lockPath = getPageLockFilePath(createdEntry.pageTargetId);
             const lock = tryNativeFileLock(lockPath);
             if (lock) {
                 createdEntry.pageLock = lock;
