@@ -121,6 +121,9 @@ Example response:
       "defaultSearchEngine": "bing",
       "allowedSearchEngines": [],
       "searchMode": "request",
+      "effectiveSearchMode": "request",
+      "playwrightAvailable": false,
+      "playwrightUnavailableReason": "Playwright client cannot be loaded (attempts: playwright: Cannot find module 'playwright')",
       "useProxy": false,
       "fetchWebAllowInsecureTls": false
     }
@@ -150,6 +153,7 @@ Notes:
 - `searchMode` is optional: `request`, `auto`, or `playwright`
 - `searchMode` currently only affects Bing; other engines ignore it
 - if `engines` is omitted, the daemon uses its configured default engine
+- when the effective mode is `playwright` but the Playwright configuration is invalid, the daemon returns `status: "error"` with `error.code: "browser_unavailable"`
 
 Example:
 

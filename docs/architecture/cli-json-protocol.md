@@ -120,6 +120,7 @@ Example:
 Notes:
 - default engine resolution follows runtime/config defaults
 - `searchMode` may be provided per request and currently only affects Bing
+- if the effective mode is `playwright` but the Playwright configuration is invalid, the search fails with an error envelope whose `error.code` is `browser_unavailable`
 - if a local daemon is reachable, CLI may satisfy the request through daemon HTTP
 - if the daemon is unavailable and no explicit daemon target was requested, CLI may fall back to direct runtime execution
 

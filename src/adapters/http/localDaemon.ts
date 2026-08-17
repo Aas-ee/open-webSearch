@@ -1,6 +1,6 @@
 import express from 'express';
 import http from 'node:http';
-import { AppConfig, getEffectiveSearchMode } from '../../config.js';
+import { AppConfig, checkPlaywrightModeConfiguration, getEffectiveSearchMode } from '../../config.js';
 import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
@@ -24,6 +24,8 @@ export type LocalDaemonStatus = {
         allowedSearchEngines: string[];
         searchMode: string;
         effectiveSearchMode: string;
+        playwrightAvailable: boolean;
+        playwrightUnavailableReason: string | null;
         useProxy: boolean;
         fetchWebAllowInsecureTls: boolean;
     };
@@ -157,22 +159,27 @@ export async function startLocalDaemon(
 
     let baseUrl = '';
 
-    const getStatus = (): LocalDaemonStatus => ({
-        daemon: 'running',
-        runtime: 'ready',
-        activation: 'active',
-        version,
-        capabilities: getCapabilities(),
-        baseUrl,
-        configSummary: {
-            defaultSearchEngine: runtime.config.defaultSearchEngine,
-            allowedSearchEngines: runtime.config.allowedSearchEngines,
-            searchMode: runtime.config.searchMode,
-            effectiveSearchMode: getEffectiveSearchMode(runtime.config),
-            useProxy: runtime.config.useProxy,
-            fetchWebAllowInsecureTls: runtime.config.fetchWebAllowInsecureTls
-        }
-    });
+    const getStatus = (): LocalDaemonStatus => {
+        const playwrightAvailability = checkPlaywrightModeConfiguration(runtime.config);
+        return {
+            daemon: 'running',
+            runtime: 'ready',
+            activation: 'active',
+            version,
+            capabilities: getCapabilities(),
+            baseUrl,
+            configSummary: {
+                defaultSearchEngine: runtime.config.defaultSearchEngine,
+                allowedSearchEngines: runtime.config.allowedSearchEngines,
+                searchMode: runtime.config.searchMode,
+                effectiveSearchMode: getEffectiveSearchMode(runtime.config),
+                playwrightAvailable: playwrightAvailability.available,
+                playwrightUnavailableReason: playwrightAvailability.reason,
+                useProxy: runtime.config.useProxy,
+                fetchWebAllowInsecureTls: runtime.config.fetchWebAllowInsecureTls
+            }
+        };
+    };
 
     app.get('/health', (_req, res) => {
         res.json(createSuccessEnvelope({
@@ -201,6 +208,7 @@ export async function startLocalDaemon(
             const limit = parseLimit(req.body?.limit);
             const engines = parseRequestedEngines(runtime, req.body?.engines);
             const searchMode = parseSearchMode(req.body?.searchMode);
+
             const result = await runtime.services.search.execute({
                 query,
                 limit,
@@ -210,6 +218,20 @@ export async function startLocalDaemon(
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            const errorCode = (error as { code?: unknown })?.code;
+
+            // 强制 Playwright 而配置无效：返回清晰的配置错误信封。
+            if (errorCode === 'browser_unavailable') {
+                sendError(
+                    res,
+                    500,
+                    'browser_unavailable',
+                    message,
+                    { hint: 'Fix the Playwright configuration (install a client package, set PLAYWRIGHT_MODULE_PATH or a remote endpoint, provide a browser binary), or retry with searchMode=request.' }
+                );
+                return;
+            }
+
             const statusCode = message.includes('must') || message.includes('empty') ? 400 : 500;
             sendError(
                 res,

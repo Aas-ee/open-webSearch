@@ -190,7 +190,7 @@ async function testSearchToolPassesSearchModeOverride(): Promise<void> {
     const seenCalls: Array<{ searchMode?: string }> = [];
     // 只有 SEARCH_MODE=auto 且 Playwright 可用时，searchMode 参数才会注册并转发；因此这里使用 auto + 远端端点配置。
     const runtime = createOpenWebSearchRuntime({
-        config: createTestConfig({ searchMode: 'auto', playwrightWsEndpoint: 'ws://127.0.0.1:9999/' }),
+        config: createTestConfig({ searchMode: 'auto', playwrightWsEndpoint: 'ws://127.0.0.1:9999/', playwrightModulePath: 'test-assets/fake-playwright-client.cjs' }),
         dependencies: {
             searchExecutors: {
                 bing: async (query, limit, context) => {
@@ -244,7 +244,7 @@ async function testSearchToolPassesSearchModeOverride(): Promise<void> {
 async function testSearchToolAutoModeUsesRuntimeDefault(): Promise<void> {
     const seenCalls: Array<{ searchMode?: string }> = [];
     const runtime = createOpenWebSearchRuntime({
-        config: createTestConfig({ searchMode: 'auto', playwrightWsEndpoint: 'ws://127.0.0.1:9999/' }),
+        config: createTestConfig({ searchMode: 'auto', playwrightWsEndpoint: 'ws://127.0.0.1:9999/', playwrightModulePath: 'test-assets/fake-playwright-client.cjs' }),
         dependencies: {
             searchExecutors: {
                 bing: async (query, limit, context) => {
@@ -506,7 +506,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         'search description must not recommend Playwright when it is unavailable'
     );
 
-    // 配置了远端端点后，auto 保持 auto：提示 Agent 可优先选择 Playwright 以绕过反爬。
+    // 配置了远端端点且客户端可真实加载后，auto 保持 auto：暴露 searchMode，提示 Agent 默认保持 auto、仅在 request 结果失败或异常时切换 playwright。
     const guidedDescriptionOutput = runModuleWithEnv(
         `
             import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -521,17 +521,53 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         `,
         {
             SEARCH_MODE: 'auto',
-            PLAYWRIGHT_WS_ENDPOINT: 'ws://127.0.0.1:9999/'
+            PLAYWRIGHT_WS_ENDPOINT: 'ws://127.0.0.1:9999/',
+            PLAYWRIGHT_MODULE_PATH: 'test-assets/fake-playwright-client.cjs'
         }
     );
     const guidedDescriptionPayload = parseJsonBlock(guidedDescriptionOutput) as {
         searchDescription: string;
     };
     assert(
-        guidedDescriptionPayload.searchDescription.includes('agent may choose the mode') &&
-        guidedDescriptionPayload.searchDescription.includes('Prefer searchMode=playwright') &&
-        guidedDescriptionPayload.searchDescription.includes('anti-bot'),
-        'search description should guide agent to prefer Playwright when it is available in auto mode'
+        guidedDescriptionPayload.searchDescription.includes('Start with the default auto') &&
+        guidedDescriptionPayload.searchDescription.includes('Only retry the same query with searchMode=playwright') &&
+        guidedDescriptionPayload.searchDescription.includes('anti-bot') &&
+        !guidedDescriptionPayload.searchDescription.includes('Prefer searchMode=playwright'),
+        'search description should guide agent to default auto and only escalate to playwright on failure'
+    );
+
+    // 审查场景复现：远端端点 + 不存在的客户端路径，必须判定为 Playwright 不可用，不向 Agent 推荐 Playwright、不暴露 searchMode。
+    const brokenClientDescriptionOutput = runModuleWithEnv(
+        `
+            import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+            const { createOpenWebSearchRuntime } = await import('./build/runtime/createRuntime.js');
+            const { setupTools } = await import('./build/tools/setupTools.js');
+            const { checkPlaywrightModeConfiguration } = await import('./build/config.js');
+            const runtime = createOpenWebSearchRuntime();
+            const server = new McpServer({ name: 'test', version: '1.0.0' });
+            setupTools(server, runtime);
+            console.log(JSON.stringify({
+                searchDescription: server._registeredTools.search.description,
+                playwrightCheck: checkPlaywrightModeConfiguration()
+            }, null, 2));
+        `,
+        {
+            SEARCH_MODE: 'auto',
+            PLAYWRIGHT_CDP_ENDPOINT: 'http://127.0.0.1:65530',
+            PLAYWRIGHT_MODULE_PATH: '/definitely/missing/playwright',
+            PLAYWRIGHT_PACKAGE: '',
+            PLAYWRIGHT_WS_ENDPOINT: '',
+            PLAYWRIGHT_EXECUTABLE_PATH: ''
+        }
+    );
+    const brokenClientDescriptionPayload = parseJsonBlock(brokenClientDescriptionOutput) as {
+        searchDescription: string;
+        playwrightCheck: { available: boolean; reason: string | null };
+    };
+    assertEqual(brokenClientDescriptionPayload.playwrightCheck.available, false, 'CDP endpoint with an unloadable client must be detected as unavailable');
+    assert(
+        !brokenClientDescriptionPayload.searchDescription.includes('searchMode'),
+        'auto with a broken Playwright client must not expose searchMode guidance'
     );
 
     // 强制 Playwright：不包含任何 searchMode 提示。
@@ -569,7 +605,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         'auto without Playwright parameters must not expose searchMode guidance'
     );
 
-    // auto 且有远端端点：暴露 searchMode 参数并提示优先 Playwright（上面的guidedDescriptionPayload 已断言）；这里再断言注册工具 schema 中 searchMode 的可见性：auto+可用 -> 存在；强制模式 -> 不存在。
+    // auto 且客户端可加载：暴露 searchMode 参数；强制模式不暴露。
     const searchModeParamOutput = runModuleWithEnv(
         `
             import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -585,7 +621,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         `,
         {
             SEARCH_MODE: 'auto',
-            PLAYWRIGHT_WS_ENDPOINT: 'ws://127.0.0.1:9999/'
+            PLAYWRIGHT_WS_ENDPOINT: 'ws://127.0.0.1:9999/',
+            PLAYWRIGHT_MODULE_PATH: 'test-assets/fake-playwright-client.cjs'
         }
     );
     const searchModeParamPayload = parseJsonBlock(searchModeParamOutput) as { searchToolParamNames: string[] };

@@ -13,7 +13,7 @@ import {
     validatePublicWebUrl
 } from '../core/validation/targetValidation.js';
 import { OpenWebSearchRuntime } from '../runtime/runtimeTypes.js';
-import { AppConfig, isPlaywrightModeSupported } from '../config.js';
+import { AppConfig, checkPlaywrightModeConfiguration } from '../config.js';
 export { normalizeEngineName };
 
 // 获取工具名称，优先使用环境变量，否则使用默认值
@@ -44,15 +44,15 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 生成搜索工具的动态描述
     // 按 SEARCH_MODE 决定 searchMode 参数的暴露与提示语：
     // - 强制模式（request/playwright）：不暴露 searchMode 参数、不生成 searchMode 提示语；
-    // - auto 模式：检查 Playwright 必需参数是否可用：
-    //   - 可用：暴露 searchMode 参数并提示 Agent 优先选择 playwright 以绕过反爬；
+    // - auto 模式：检查 Playwright 配置是否真实可用：
+    //   - 可用：暴露 searchMode 参数，并引导 Agent 默认保持 auto、仅在 request 结果失败或异常时重试 playwright；
     //   - 不可用：按强制 request 处理，同样不暴露参数、不生成提示语。
     const autoWithPlaywrightAvailable =
-        runtime.config.searchMode === 'auto' && isPlaywrightModeSupported(runtime.config);
+        runtime.config.searchMode === 'auto' && checkPlaywrightModeConfiguration(runtime.config).available;
 
     const getSearchDescription = () => {
         const searchModeDescription = autoWithPlaywrightAvailable
-            ? ' searchMode meanings: the agent may choose the mode per request; request performs plain HTTP scraping, playwright drives a real browser through Playwright, and auto or omitting searchMode lets the server decide (request first, falling back to Playwright when it is blocked). Prefer searchMode=playwright because request mode is more likely to trigger anti-bot defenses and return low-relevance results; use searchMode=request only when request-based results are explicitly needed.'
+            ? ' searchMode meanings: request performs plain HTTP scraping, playwright drives a real browser through Playwright, and auto or omitting searchMode lets the server decide (request first, falling back to Playwright when it is blocked). Start with the default auto (or omit searchMode). Only retry the same query with searchMode=playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality, for example anti-bot or verification pages.'
             : '';
         if (runtime.config.allowedSearchEngines.length === 0) {
             return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage) with no API key required.${searchModeDescription}`;
@@ -89,11 +89,11 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             .pipe(enginesEnum);
     };
 
-    // searchMode 参数只在 SEARCH_MODE=auto 且 Playwright 可用时暴露给 Agent；
+    // searchMode 参数只在 SEARCH_MODE=auto 且 Playwright 配置真实可用时暴露给 Agent；
     // 强制 request/playwright 以及 auto 但 Playwright 不可用退回 request 的场景都不注册该参数，
     // Agent 无法指定。
     const searchModeSchema = z.enum(['request', 'auto', 'playwright'])
-        .describe('Optional search mode override. Prefer playwright when available because request mode is more likely to trigger anti-bot defenses and return low-relevance results. Use request only when request-based results are explicitly needed; omit or use auto to let the server decide.')
+        .describe('Optional search mode override. Start with the default auto (or omit searchMode); only retry with playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality.')
         .optional();
 
     const enginesInputSchema = z.array(getEngineInputSchema()).min(1).default([runtime.config.defaultSearchEngine])
@@ -150,10 +150,15 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             };
         } catch (error) {
             console.error('Search tool execution failed:', error);
+            // 生效模式为 playwright 而配置无效：返回清晰错误，而非外层成功。
+            const errorCode = (error as { code?: unknown })?.code;
+            const isBrowserUnavailable = errorCode === 'browser_unavailable';
             return {
                 content: [{
                     type: 'text' as const,
-                    text: `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    text: isBrowserUnavailable
+                        ? `Search failed: browser_unavailable. ${error instanceof Error ? error.message : 'Unknown error'}`
+                        : `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
                 }],
                 isError: true
             };

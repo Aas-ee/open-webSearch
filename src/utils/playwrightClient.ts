@@ -678,7 +678,26 @@ function getLocalBrowserExecutablePath(): string {
         return cachedBrowserPath;
     }
 
+    const candidates = getLocalBrowserExecutableCandidates();
+    for (const candidate of [...new Set(candidates)]) {
+        if (existsSync(candidate)) {
+            cachedBrowserPath = candidate;
+            return candidate;
+        }
+    }
+
+    throw new Error('No Chromium-based browser executable was found. Configure PLAYWRIGHT_EXECUTABLE_PATH or install Edge/Chrome.');
+}
+
+/**
+ * 本地浏览器可执行文件候选列表（显式路径、系统 Chrome/Edge）。
+ * 与 config.checkPlaywrightModeConfiguration 的系统候选保持同一来源，避免两处检测口径漂移。
+ */
+export function getLocalBrowserExecutableCandidates(): string[] {
     const candidates: string[] = [];
+    if (config.playwrightExecutablePath) {
+        candidates.push(config.playwrightExecutablePath);
+    }
     candidates.push('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe');
     candidates.push('C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe');
     candidates.push('C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe');
@@ -702,15 +721,7 @@ function getLocalBrowserExecutablePath(): string {
     candidates.push('/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/microsoft-edge');
     candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
     candidates.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
-
-    for (const candidate of [...new Set(candidates)]) {
-        if (existsSync(candidate)) {
-            cachedBrowserPath = candidate;
-            return candidate;
-        }
-    }
-
-    throw new Error('No Chromium-based browser executable was found. Configure PLAYWRIGHT_EXECUTABLE_PATH or install Edge/Chrome.');
+    return candidates;
 }
 
 function findFreePort(): Promise<number> {

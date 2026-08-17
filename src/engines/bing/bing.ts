@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { AppConfig, config, getEffectiveSearchMode } from '../../config.js';
+import { AppConfig, config, getEffectiveSearchMode, checkPlaywrightModeConfiguration } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser } from '../../utils/playwrightClient.js';
@@ -791,6 +791,12 @@ export async function searchBing(
     }
 
     if (effectiveSearchMode === 'playwright') {
+        const availability = checkPlaywrightModeConfiguration(config);
+        if (!availability.available) {
+            const unavailableError = new Error(`Playwright mode is required but the Playwright configuration is invalid: ${availability.reason}`);
+            (unavailableError as Error & { code?: string }).code = 'browser_unavailable';
+            throw unavailableError;
+        }
         return searchBingWithPlaywright(query, limit);
     }
 
