@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 // src/config.ts
@@ -133,6 +134,12 @@ if (!quietStartupLogs) {
     const effectiveModeForLog = getEffectiveSearchMode(config);
     const effectiveModeSuffix = effectiveModeForLog !== config.searchMode ? `, effective: ${effectiveModeForLog.toUpperCase()}` : '';
     console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()}${effectiveModeSuffix} (currently only affects Bing)`);
+    if (config.searchMode === 'playwright') {
+        const availability = checkPlaywrightModeConfiguration(config);
+        if (!availability.available) {
+            console.warn(`⚠️ SEARCH_MODE=playwright is set, but the Playwright configuration is currently invalid: ${availability.reason}. Playwright searches will fail with browser_unavailable until it is fixed.`);
+        }
+    }
 
     if (config.useProxy) {
         console.error(`🌐 Using proxy: ${config.proxyUrl}`);
@@ -181,79 +188,128 @@ export function getProxyUrl(): string | undefined {
 }
 
 /**
- * 判断 Playwright 模式所必需的参数是否已通过环境变量配置：
- * - 任一远端端点（PLAYWRIGHT_WS_ENDPOINT / PLAYWRIGHT_CDP_ENDPOINT）；
- * - PLAYWRIGHT_MODULE_PATH；
- * - Playwright 客户端包（PLAYWRIGHT_PACKAGE，或 auto 时的内置 playwright / playwright-core）可解析；
- * - 本地启动浏览器时（无远端端点），还需浏览器二进制可解析（PLAYWRIGHT_EXECUTABLE_PATH 或内置 playwright 捆绑的 chromium）。
+ * 按运行时加载顺序同步检查 Playwright 必需参数是否真实可用：
+ * 1. Playwright 客户端模块（PLAYWRIGHT_MODULE_PATH 优先，其次 PLAYWRIGHT_PACKAGE/auto），必须真实可加载并暴露 chromium；远端 WS/CDP 模式同样需要本地客户端；
+ * 2. 远端端点（PLAYWRIGHT_WS_ENDPOINT / PLAYWRIGHT_CDP_ENDPOINT）模式下，客户端加载成功即算可用，连通性在真实使用时验证；
+ * 3. 本地启动模式下，浏览器二进制必须真实存在：显式 PLAYWRIGHT_EXECUTABLE_PATH、客户端捆绑浏览器或系统 Chrome/Edge（候选列表与 playwrightClient.getLocalBrowserExecutablePath 保持一致）。
  *
- * 仅基于环境变量同步判断，供 SEARCH_MODE=auto 时决定是否向 Agent 开放模式选择与生成提示语使用。
+ * 供 SEARCH_MODE=auto 时判断实际生效模式，以及强制 playwright 时的启动告警使用。
  */
-export function isPlaywrightModeSupported(appConfig: AppConfig = config): boolean {
-    const getBrowserExecutable = (clientEntry: string | null): string | null => {
-        if (appConfig.playwrightExecutablePath) {
-            return appConfig.playwrightExecutablePath;
-        }
-        if (!clientEntry) {
-            return null;
-        }
-        try {
-            const loaded = configRequire(clientEntry) as { chromium?: { executablePath?: () => string } };
-            const executable = loaded?.chromium?.executablePath?.();
-            return executable || null;
-        } catch {
-            return null;
-        }
-    };
+type PlaywrightClientModule = {
+    chromium?: { executablePath?: () => string };
+    default?: unknown;
+};
 
-    // 远端端点：无需本地解析客户端包或浏览器二进制。
-    if (appConfig.playwrightWsEndpoint || appConfig.playwrightCdpEndpoint) {
-        return true;
-    }
-
-    const packageEntry = resolvePlaywrightPackageEntry(appConfig);
-    let clientEntry: string | null = null;
+export function checkPlaywrightModeConfiguration(appConfig: AppConfig = config): { available: boolean; reason: string | null } {
+    const clientCandidates: string[] = [];
     if (appConfig.playwrightModulePath) {
-        // PLAYWRIGHT_MODULE_PATH 可以是绝对路径或相对 cwd 的路径，解析为可 require 的路径后，后续可从中读取捆绑浏览器位置。
-        const modulePath = appConfig.playwrightModulePath;
-        clientEntry = isPathAbsolute(modulePath) ? modulePath : `${process.cwd()}${path.sep}${modulePath}`;
-    } else if (packageEntry) {
-        clientEntry = packageEntry;
+        clientCandidates.push(
+            path.isAbsolute(appConfig.playwrightModulePath)
+                ? appConfig.playwrightModulePath
+                : path.resolve(process.cwd(), appConfig.playwrightModulePath)
+        );
     }
-    if (!clientEntry) {
-        return false;
-    }
-
-    // 本地启动浏览器：需要可解析的浏览器二进制（显式路径或捆绑 chromium）。
-    return getBrowserExecutable(clientEntry) !== null;
-}
-
-function isPathAbsolute(value: string): boolean {
-    return path.isAbsolute(value);
-}
-
-function resolvePlaywrightPackageEntry(appConfig: AppConfig): string | null {
     const packageNames = appConfig.playwrightPackage === 'auto'
         ? ['playwright', 'playwright-core']
         : [appConfig.playwrightPackage];
-    for (const name of packageNames) {
+    clientCandidates.push(...packageNames);
+
+    const loadFailures: string[] = [];
+    let loadedModule: PlaywrightClientModule | null = null;
+    for (const candidate of clientCandidates) {
         try {
-            return configRequire.resolve(name);
-        } catch {
-            // 当前候选包不可解析，继续尝试下一个。
+            loadedModule = configRequire(candidate) as PlaywrightClientModule;
+            break;
+        } catch (error) {
+            loadFailures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
-    return null;
+
+    const unwrapped: unknown = loadedModule && loadedModule.default ? loadedModule.default : loadedModule;
+    const clientModule = (unwrapped ?? null) as PlaywrightClientModule | null;
+    if (!clientModule?.chromium) {
+        return {
+            available: false,
+            reason: loadFailures.length > 0
+                ? `Playwright client cannot be loaded (attempts: ${loadFailures.join(' | ')})`
+                : 'Playwright client module does not expose chromium'
+        };
+    }
+
+    // 远端端点：本地客户端可加载即可，连通性在真实使用时验证。
+    if (appConfig.playwrightWsEndpoint || appConfig.playwrightCdpEndpoint) {
+        return { available: true, reason: null };
+    }
+
+    // 本地启动：显式浏览器路径必须真实存在。
+    if (appConfig.playwrightExecutablePath) {
+        if (existsSync(appConfig.playwrightExecutablePath)) {
+            return { available: true, reason: null };
+        }
+        return { available: false, reason: `PLAYWRIGHT_EXECUTABLE_PATH does not exist: ${appConfig.playwrightExecutablePath}` };
+    }
+
+    // 客户端捆绑浏览器（playwright 自带 registry chromium）。
+    let bundledExecutable: string | null = null;
+    try {
+        bundledExecutable = clientModule.chromium.executablePath?.() ?? null;
+    } catch {
+        bundledExecutable = null;
+    }
+    if (bundledExecutable && existsSync(bundledExecutable)) {
+        return { available: true, reason: null };
+    }
+
+    // 系统 Chrome/Edge：与 playwrightClient.getLocalBrowserExecutablePath 的候选列表保持一致。
+    const systemCandidates: string[] = [];
+    if (process.platform === 'win32') {
+        systemCandidates.push(
+            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+        );
+        const pf86 = process.env['PROGRAMFILES(X86)'];
+        const pf = process.env['PROGRAMFILES'];
+        const localAppData = process.env['LOCALAPPDATA'];
+        if (pf86) {
+            systemCandidates.push(`${pf86}\\Microsoft\\Edge\\Application\\msedge.exe`, `${pf86}\\Google\\Chrome\\Application\\chrome.exe`);
+        }
+        if (pf) {
+            systemCandidates.push(`${pf}\\Microsoft\\Edge\\Application\\msedge.exe`, `${pf}\\Google\\Chrome\\Application\\chrome.exe`);
+        }
+        if (localAppData) {
+            systemCandidates.push(`${localAppData}\\Google\\Chrome\\Application\\chrome.exe`);
+        }
+    } else if (process.platform === 'darwin') {
+        systemCandidates.push(
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+        );
+    } else {
+        systemCandidates.push('/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/microsoft-edge');
+    }
+
+    for (const candidate of systemCandidates) {
+        if (existsSync(candidate)) {
+            return { available: true, reason: null };
+        }
+    }
+
+    return {
+        available: false,
+        reason: 'No usable browser binary was found: PLAYWRIGHT_EXECUTABLE_PATH is unset, the Playwright client has no installed bundled browser, and no system Chrome/Edge was detected. Install a browser, set PLAYWRIGHT_EXECUTABLE_PATH, or configure a remote PLAYWRIGHT_WS_ENDPOINT/PLAYWRIGHT_CDP_ENDPOINT.'
+    };
 }
 
 /**
  * 解析指定配置下实际生效的搜索模式：
  * - 强制 request / playwright：原样采用；
- * - auto：Playwright 参数充足时保持 auto（请求优先、失败回退 Playwright），否则退回强制 HTTP 请求模式。
+ * - auto：Playwright 配置真实可用时保持 auto（请求优先、失败回退 Playwright），否则退回强制 HTTP 请求模式。
  */
 export function getEffectiveSearchMode(appConfig: AppConfig = config): AppConfig['searchMode'] {
     if (appConfig.searchMode === 'auto') {
-        return isPlaywrightModeSupported(appConfig) ? 'auto' : 'request';
+        return checkPlaywrightModeConfiguration(appConfig).available ? 'auto' : 'request';
     }
     return appConfig.searchMode;
 }

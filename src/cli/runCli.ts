@@ -512,6 +512,8 @@ function formatStatusHumanReadable(status: {
         allowedSearchEngines: string[];
         searchMode: string;
         effectiveSearchMode?: string;
+        playwrightAvailable?: boolean;
+        playwrightUnavailableReason?: string | null;
         useProxy: boolean;
         fetchWebAllowInsecureTls: boolean;
     };
@@ -519,6 +521,14 @@ function formatStatusHumanReadable(status: {
     const modeLineSuffix = status.configSummary.effectiveSearchMode && status.configSummary.effectiveSearchMode !== status.configSummary.searchMode
         ? ` (effective: ${status.configSummary.effectiveSearchMode})`
         : '';
+    const playwrightLines = typeof status.configSummary.playwrightAvailable === 'boolean'
+        ? [
+            `Playwright available: ${status.configSummary.playwrightAvailable ? 'yes' : 'no'}`,
+            ...(!status.configSummary.playwrightAvailable && status.configSummary.playwrightUnavailableReason
+                ? [`Playwright unavailable reason: ${status.configSummary.playwrightUnavailableReason}`]
+                : [])
+        ]
+        : [];
     return [
         `Daemon: ${status.daemon}`,
         `Runtime: ${status.runtime}`,
@@ -529,6 +539,7 @@ function formatStatusHumanReadable(status: {
         `Default engine: ${status.configSummary.defaultSearchEngine}`,
         `Allowed engines: ${status.configSummary.allowedSearchEngines.length > 0 ? status.configSummary.allowedSearchEngines.join(', ') : '(all)'}`,
         `Search mode: ${status.configSummary.searchMode}${modeLineSuffix}`,
+        ...playwrightLines,
         `Proxy enabled: ${status.configSummary.useProxy ? 'yes' : 'no'}`,
         `Fetch web insecure TLS: ${status.configSummary.fetchWebAllowInsecureTls ? 'yes' : 'no'}`
     ].join('\n');
@@ -546,6 +557,8 @@ type StatusPayload = CliEnvelope<{
         allowedSearchEngines: string[];
         searchMode: string;
         effectiveSearchMode?: string;
+        playwrightAvailable?: boolean;
+        playwrightUnavailableReason?: string | null;
         useProxy: boolean;
         fetchWebAllowInsecureTls: boolean;
     };
@@ -696,6 +709,11 @@ function getDaemonCliErrorCode(error: unknown): string {
         return 'daemon_request_failed';
     }
 
+    // 强制 Playwright 而配置无效：直接暴露配置错误，不再归入通用的 engine_error。
+    if ((error as { code?: unknown })?.code === 'browser_unavailable') {
+        return 'browser_unavailable';
+    }
+
     return 'engine_error';
 }
 
@@ -710,6 +728,10 @@ function getDaemonCliErrorHint(error: unknown): string {
 
     if (error instanceof DaemonRequestFailedError) {
         return 'The daemon accepted the request but did not complete it cleanly. Inspect daemon logs or retry without --daemon-url to use direct execution.';
+    }
+
+    if ((error as { code?: unknown })?.code === 'browser_unavailable') {
+        return 'Fix the Playwright configuration (install a client package, set PLAYWRIGHT_MODULE_PATH or a remote endpoint, provide a browser binary), or retry with --search-mode request.';
     }
 
     return 'Retry with a different engine, or inspect proxy and search mode settings.';
