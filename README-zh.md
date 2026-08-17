@@ -276,6 +276,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 有效的 Chromium CDP 地址 | 通过 CDP 连接现有 Chromium 实例 |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Playwright Chromium 是否以无头模式运行 |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 正整数 | Playwright 页面导航和 Bing 结果等待超时时间 |
+| `OPEN_WEBSEARCH_PROFILE_DIR` | `<tmpdir>/open-websearch-browser-profiles` | 任意可写目录 | 本地浏览器持久化 profile 的根目录（见下方“浏览器状态说明”） |
 | `MCP_TOOL_SEARCH_NAME` | `search` | 有效的MCP工具名称 | 搜索工具的自定义名称 |
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | 有效的MCP工具名称 | Linux.do文章获取工具的自定义名称 |
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | 有效的MCP工具名称 | CSDN文章获取工具的自定义名称 |
@@ -363,6 +364,11 @@ npx open-websearch@latest
 - 使用远端端点时，会忽略 `PLAYWRIGHT_EXECUTABLE_PATH` 和本地启动代理参数
 - 当 Playwright 可用时，CSDN/知乎文章抓取以及通用网页抓取在遇到拦截页时也会尝试复用浏览器拿到的 cookie 进行重试
 - 没有 Playwright 时，`fetchWebContent` 会停留在纯请求路径。公开页面通常仍可抓取，但依赖浏览器 cookie 或浏览器渲染 HTML 的页面可能失败。
+
+浏览器状态说明（本地共享 profile）：
+- 本地浏览器模式会跨 fetch、跨进程重启复用持久化 context/页面。同一 origin 的 cookies、storage、cache 和 Service Worker 状态因此会在多次浏览器路径抓取之间保留。
+- 这对单用户、有状态抓取是有意为之的取舍（保持反爬状态、避免反复启动浏览器）。如果 daemon 会被多个互不信任的调用方共享，请改用 `PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT` 连接各自隔离的浏览器，或为每个调用方指定独立的 `OPEN_WEBSEARCH_PROFILE_DIR`。
+- 如需清理 profile 状态：在本地浏览器未运行时，删除 `OPEN_WEBSEARCH_PROFILE_DIR`（默认为 `<tmpdir>/open-websearch-browser-profiles`）下的浏览器 profile 目录即可。
 
 **Windows 用户注意事项：**
 - 在 PowerShell 中使用 `$env:VAR="value"; ` 语法

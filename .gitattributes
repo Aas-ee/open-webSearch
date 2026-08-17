@@ -1,0 +1,3 @@
+# 统一以 LF 行尾存入仓库：避免部分文件以 CRLF 提交后，
+# git diff --check 把行尾误报为 trailing whitespace。
+* text=auto eol=lf
