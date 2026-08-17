@@ -763,6 +763,6 @@ The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml
 ## Star History
 If you find this project helpful, please consider giving it a ⭐ Star!
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Aas-ee/open-webSearch&type=Date)](https://star-history.dera.page/#Aas-ee/open-webSearch&Date)
 
 </div>

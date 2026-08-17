@@ -858,6 +858,6 @@ use_mcp_tool({
 ## Star History
 如果项目对你有帮助，请考虑给个⭐ Star！
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Aas-ee/open-webSearch&type=Date)](https://star-history.dera.page/#Aas-ee/open-webSearch&Date)
 
 </div>
