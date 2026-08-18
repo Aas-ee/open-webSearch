@@ -3,7 +3,6 @@
 # Open-WebSearch
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=%23de5a16)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
-[![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Aas-ee/open-webSearch)](https://archestra.ai/mcp-catalog/aas-ee__open-websearch)
 [![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
 ![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
 ![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
@@ -14,6 +13,16 @@
 </div>
 
 `open-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
+
+## Sponsor
+
+<div align="center">
+  <a href="https://www.swiftproxy.net/?ref=openwebSearch" rel="sponsored">
+    <img src="./docs/assets/sponsors/a69c410018edd7c45bffd4864629e25b.png" alt="Swiftproxy" width="600">
+  </a>
+</div>
+
+> [**Swiftproxy**](https://www.swiftproxy.net/?ref=openwebSearch) provides high-quality static residential proxies with stable IPs for multi-account management, automation, web scraping, and secure online operations. Protect your accounts with clean IPs and reliable proxy infrastructure. Static proxy traffic is valid for 30 days with unlimited usage. Get **10% off** with code **`PROXY90`**.
 
 ## Features
 
@@ -27,6 +36,7 @@
     - brave
     - juejin
     - startpage
+    - sogou
 - HTTP proxy configuration support for accessing restricted resources
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
@@ -124,7 +134,7 @@ Notes:
 For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`), see [docs/http-api.md](docs/http-api.md).
 
 ## TODO
-- Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), Google and other search engines
+- Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), ~~Sogou~~ (already supported), Google and other search engines
 - Support for more blogs, forums, and social platforms
 - Optimize article content extraction, add support for more sites
 - ~~Support for GitHub README fetching~~ (already supported)
@@ -161,9 +171,10 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 |----------|-------------------------|---------|-------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage` | Default search engine |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
+| `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
 | `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
@@ -176,6 +187,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PLAYWRIGHT_CDP_ENDPOINT` | empty | Valid Chromium CDP endpoint | Connect to an existing Chromium instance over CDP |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Whether Playwright Chromium runs in headless mode |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing result waits |
+| `OPEN_WEBSEARCH_PROFILE_DIR` | `<tmpdir>/open-websearch-browser-profiles` | Any writable directory | Base directory for persistent local browser profiles (see browser state note below) |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool |
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | Valid MCP tool name | Custom name for the Linux.do article fetch tool |
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | Valid MCP tool name | Custom name for the CSDN article fetch tool |
@@ -264,6 +276,11 @@ Notes:
 - Remote endpoints ignore `PLAYWRIGHT_EXECUTABLE_PATH` and local proxy launch flags
 - When Playwright is available, blocked CSDN/Zhihu article fetches and generic web fetches can also retry with browser-acquired cookies
 - Without Playwright, `fetchWebContent` stays on the request-only path. Public pages can still work, but pages that require browser cookies or browser-rendered HTML may fail.
+
+Browser state note (local shared profiles):
+- Local browser mode reuses persistent contexts/pages across fetches and across process restarts. Cookies, storage, cache, and Service Worker state for the same origin therefore persist between browser-mode fetches.
+- This is intentional for single-user, stateful scraping (it keeps anti-bot state warm and avoids repeated browser launches). If you share a daemon between mutually distrusting callers, connect those callers to an isolated browser via `PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT` instead of relying on local shared profiles, or point each caller at its own `OPEN_WEBSEARCH_PROFILE_DIR`.
+- To clear profile state, delete the browser profile directories under `OPEN_WEBSEARCH_PROFILE_DIR` (default: `<tmpdir>/open-websearch-browser-profiles`) while no local browser is running.
 
 ### Local Installation
 
@@ -416,9 +433,10 @@ Environment variable configuration:
 |----------|-------------------------|---------|-------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave` | Default search engine |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
+| `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 
 Then configure in your MCP client:
@@ -457,7 +475,7 @@ For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`,
 {
   "query": string,        // Search query
   "limit": number,        // Optional: Number of results to return (default: 10)
-  "engines": string[],    // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage) default runtime-configured engine
+  "engines": string[],    // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) default runtime-configured engine
   "searchMode": string    // Optional: request, auto, or playwright (currently only affects Bing)
 }
 ```
@@ -470,7 +488,7 @@ use_mcp_tool({
   arguments: {
     query: "search content",
     limit: 3,  // Optional parameter
-    engines: ["bing", "csdn", "duckduckgo", "exa", "brave", "juejin"] // Optional parameter, supports multi-engine combined search
+    engines: ["bing", "csdn", "duckduckgo", "exa", "brave", "juejin", "sogou"] // Optional parameter, supports multi-engine combined search
   }
 })
 ```
@@ -675,13 +693,14 @@ Since this tool works by scraping multi-engine search results, please note the f
 
 4. **Search Engine Configuration**:
    - Default search engine can be set via the `DEFAULT_SEARCH_ENGINE` environment variable
-   - Supported engines: bing, duckduckgo, exa, brave
+   - Supported engines: bing, duckduckgo, exa, brave, baidu, csdn, juejin, startpage, sogou
    - The default engine is used when searching specific websites
 
 5. **Proxy Configuration**:
    - HTTP proxy can be configured when certain search engines are unavailable in specific regions
    - Enable proxy with environment variable `USE_PROXY=true`
    - Configure proxy server address with `PROXY_URL`
+   - For Clash fake-ip / TUN setups, configure synthetic DNS ranges with `FAKE_IP_CIDRS` (for example `198.18.0.0/15`)
 
 ## Contributing
 
@@ -744,6 +763,6 @@ The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml
 ## Star History
 If you find this project helpful, please consider giving it a ⭐ Star!
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Aas-ee/open-webSearch&type=Date)](https://star-history.dera.page/#Aas-ee/open-webSearch&Date)
 
 </div>

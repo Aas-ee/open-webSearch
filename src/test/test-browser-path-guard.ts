@@ -5,6 +5,20 @@ import {
     fetchPageHtmlWithBrowser,
     getBrowserCookieHeader
 } from '../utils/browserCookies.js';
+import { __setDnsLookupForTests } from '../utils/urlSafety.js';
+
+// 确定性 DNS 注入口：将测试主机名解析到预定地址，避免依赖外部 nip.io 服务。
+function installTestDnsLookup(): void {
+    __setDnsLookupForTests(async (hostname) => {
+        if (hostname === 'private-dns.example') {
+            return [{ address: '127.0.0.1' }];
+        }
+        if (hostname === 'public-dns.example') {
+            return [{ address: '93.184.216.34' }];
+        }
+        throw new Error(`unexpected hostname: ${hostname}`);
+    });
+}
 
 async function assertRejects(
     fn: () => Promise<unknown>,
@@ -24,6 +38,8 @@ async function assertRejects(
 }
 
 async function run(): Promise<void> {
+    installTestDnsLookup();
+
     // getBrowserCookieHeader must reject before loading Playwright.
     await assertRejects(
         () => getBrowserCookieHeader('http://127.0.0.1/admin'),
@@ -47,8 +63,8 @@ async function run(): Promise<void> {
     console.log('✅ getBrowserCookieHeader rejects IMDS pre-navigation');
 
     await assertRejects(
-        () => getBrowserCookieHeader('http://127.0.0.1.nip.io/admin'),
-        /private or local network/,
+        () => getBrowserCookieHeader('http://private-dns.example/admin'),
+        /resolves to private IP/,
         'getBrowserCookieHeader with DNS-resolved private'
     );
     console.log('✅ getBrowserCookieHeader rejects DNS-resolved private pre-navigation');
@@ -69,8 +85,8 @@ async function run(): Promise<void> {
     console.log('✅ fetchPageHtmlWithBrowser rejects [::ffff:7f00:1] pre-navigation');
 
     await assertRejects(
-        () => fetchPageHtmlWithBrowser('http://127.0.0.1.nip.io/admin'),
-        /private or local network/,
+        () => fetchPageHtmlWithBrowser('http://private-dns.example/admin'),
+        /resolves to private IP/,
         'fetchPageHtmlWithBrowser with DNS-resolved private'
     );
     console.log('✅ fetchPageHtmlWithBrowser rejects DNS-resolved private pre-navigation');
@@ -101,33 +117,36 @@ async function run(): Promise<void> {
     console.log('✅ subresource guard rejects IMDS');
 
     await assertRejects(
-        () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img.png'),
-        /private or local network/,
+        () => classifyBrowserSubresourceUrl('http://private-dns.example/img.png'),
+        /resolves to private IP/,
         'subresource DNS-resolved private'
     );
     console.log('✅ subresource guard rejects DNS-resolved private (first call)');
 
-    if (__getBrowserSubresourceClassificationForTests('127.0.0.1.nip.io') !== false) {
-        throw new Error('expected cached negative classification for 127.0.0.1.nip.io');
+    if (__getBrowserSubresourceClassificationForTests('private-dns.example') !== false) {
+        throw new Error('expected cached negative classification for private-dns.example');
     }
     console.log('✅ subresource cache stores negative classification');
 
     await assertRejects(
-        () => classifyBrowserSubresourceUrl('http://127.0.0.1.nip.io/img2.png'),
+        () => classifyBrowserSubresourceUrl('http://private-dns.example/img2.png'),
         /private or local network/,
         'subresource DNS-resolved private (second call, cached)'
     );
     console.log('✅ subresource guard rejects repeated DNS-resolved private (cache hit)');
 
-    await classifyBrowserSubresourceUrl('http://8.8.8.8.nip.io/cdn/asset.css');
-    if (__getBrowserSubresourceClassificationForTests('8.8.8.8.nip.io') !== true) {
-        throw new Error('expected cached positive classification for 8.8.8.8.nip.io');
+    await classifyBrowserSubresourceUrl('http://public-dns.example/cdn/asset.css');
+    if (__getBrowserSubresourceClassificationForTests('public-dns.example') !== true) {
+        throw new Error('expected cached positive classification for public-dns.example');
     }
     console.log('✅ subresource guard allows public DNS-resolved host and caches positive classification');
 
     // Second call must succeed and stay cached.
-    await classifyBrowserSubresourceUrl('http://8.8.8.8.nip.io/cdn/other.js');
+    await classifyBrowserSubresourceUrl('http://public-dns.example/cdn/other.js');
     console.log('✅ subresource guard allows repeated public host (cache hit)');
+
+    // 恢复默认 DNS 解析，避免影响同进程内后续测试。
+    __setDnsLookupForTests();
 
     console.log('\nBrowser path guard tests passed.');
 }

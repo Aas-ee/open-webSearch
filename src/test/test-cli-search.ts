@@ -28,6 +28,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         searchMode: 'request',
         proxyUrl: 'http://127.0.0.1:7890',
         useProxy: false,
+        fakeIpCidrs: [],
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',
         playwrightModulePath: undefined,
@@ -121,6 +122,15 @@ function testParseSearchArgs(): void {
         createStubRuntime()
     );
     assertEqual(parsedWithSearchMode.searchMode, 'playwright', 'parsed search mode');
+
+    const parsedSogouAlias = parseSearchArgs(
+        ['Open', 'WebSearch', '--engine', 'sou-gou'],
+        createStubRuntime({
+            defaultSearchEngine: 'sogou',
+            allowedSearchEngines: ['sogou']
+        })
+    );
+    assertEqual(parsedSogouAlias.engines.join(','), 'sogou', 'parsed Sogou alias');
 
     console.log('✅ CLI parseSearchArgs');
 }

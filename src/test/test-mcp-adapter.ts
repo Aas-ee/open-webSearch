@@ -54,6 +54,7 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         searchMode: 'request',
         proxyUrl: '',
         useProxy: false,
+        fakeIpCidrs: [],
         fetchWebAllowInsecureTls: false,
         playwrightPackage: 'auto',
         playwrightModulePath: undefined,
@@ -125,7 +126,7 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
     const runtime = createOpenWebSearchRuntime({
         config: createTestConfig({
             defaultSearchEngine: 'startpage',
-            allowedSearchEngines: ['startpage', 'bing']
+            allowedSearchEngines: ['startpage', 'bing', 'sogou']
         }),
         dependencies: {
             searchExecutors: {
@@ -142,6 +143,13 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
                     description: `${query}:${limit}`,
                     source: 'example.com',
                     engine: 'bing'
+                }],
+                sogou: async (query, limit) => [{
+                    title: 'Sogou Result',
+                    url: 'https://sogou.example.com',
+                    description: `${query}:${limit}`,
+                    source: 'sogou.example.com',
+                    engine: 'sogou'
                 }]
             },
             fetchGithubReadme: async () => '# README',
@@ -182,6 +190,7 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
     assertEqual(payload.engines[0], 'startpage', 'search handler should use runtime default engine');
     assertEqual(payload.results[0].engine, 'startpage', 'search execution should respect runtime default engine');
     assert(tools.search.description.includes('Startpage'), 'search description should use runtime-config allowed engines');
+    assert(tools.search.description.includes('Sogou'), 'search description should include Sogou when allowed');
 
     console.log('✅ setupTools uses runtime.config defaults');
 }
@@ -409,6 +418,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
                 proxyUrl: config.proxyUrl,
                 getProxyUrl: getProxyUrl(),
                 fetchWebAllowInsecureTls: config.fetchWebAllowInsecureTls,
+                fakeIpCidrs: config.fakeIpCidrs,
                 enableHttpServer: config.enableHttpServer
             }, null, 2));
         `,
@@ -419,7 +429,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
             SEARCH_MODE: 'auto',
             USE_PROXY: 'true',
             PROXY_URL: 'http://127.0.0.1:7890',
-            FETCH_WEB_INSECURE_TLS: 'true'
+            FETCH_WEB_INSECURE_TLS: 'true',
+            FAKE_IP_CIDRS: '198.18.0.0/15'
         }
     );
     const configPayload = parseJsonBlock(configOutput) as {
@@ -430,6 +441,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         proxyUrl: string;
         getProxyUrl: string;
         fetchWebAllowInsecureTls: boolean;
+        fakeIpCidrs: string[];
         enableHttpServer: boolean;
     };
 
@@ -440,6 +452,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
     assertEqual(configPayload.proxyUrl, 'http://127.0.0.1:7890', 'configured proxyUrl');
     assertEqual(configPayload.getProxyUrl, 'http://127.0.0.1:7890', 'configured getProxyUrl');
     assertEqual(configPayload.fetchWebAllowInsecureTls, true, 'configured fetchWebAllowInsecureTls');
+    assertEqual(configPayload.fakeIpCidrs.join(','), '198.18.0.0/15', 'configured fakeIpCidrs');
     assertEqual(configPayload.enableHttpServer, false, 'MODE=stdio should disable HTTP server');
 
     const fallbackOutput = runModuleWithEnv(

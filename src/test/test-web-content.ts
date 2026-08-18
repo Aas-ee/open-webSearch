@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
 import { __setReadabilityParserForTests } from '../engines/web/fetchWebContent.js';
 import { __setAxiosRequestForTests } from '../utils/httpRequest.js';
+import { __setDnsLookupForTests } from '../utils/urlSafety.js';
 
 type TestCase = {
     name: string;
@@ -178,6 +179,12 @@ async function runCase(testCase: TestCase): Promise<boolean> {
 async function main(): Promise<void> {
     const originalFetchWebAllowInsecureTls = config.fetchWebAllowInsecureTls;
     installAxiosMock();
+    __setDnsLookupForTests(async (hostname) => {
+        if (hostname === 'example.com') {
+            return [{ address: '93.184.216.34' }];
+        }
+        throw new Error(`unexpected hostname: ${hostname}`);
+    });
     config.fetchWebAllowInsecureTls = false;
 
     const testCases: TestCase[] = [
@@ -367,6 +374,7 @@ async function main(): Promise<void> {
     }
 
     restoreAxiosMock();
+    __setDnsLookupForTests();
     config.fetchWebAllowInsecureTls = originalFetchWebAllowInsecureTls;
     __setReadabilityParserForTests();
     __setBrowserHtmlFetcherForTests();
@@ -383,6 +391,7 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
     restoreAxiosMock();
+    __setDnsLookupForTests();
     config.fetchWebAllowInsecureTls = false;
     __setReadabilityParserForTests();
     __setBrowserHtmlFetcherForTests();
