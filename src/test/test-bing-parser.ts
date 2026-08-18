@@ -14,6 +14,7 @@ const classicHtml = `
       <h2><a href="https://example.com/article?utm_source=bing">Example Result</a></h2>
       <div class="b_caption"><p>Classic Bing result snippet.</p></div>
       <div class="b_attribution"><cite>example.com</cite></div>
+      <time datetime="2026-08-18T08:30:00+08:00">2026年8月18日</time>
     </li>
   </ol>
 </div>`;
@@ -40,11 +41,80 @@ assert(classicResults.length === 1, 'classic layout should yield one result');
 assert(classicResults[0].title === 'Example Result', 'classic layout title should parse');
 assert(classicResults[0].url === 'https://example.com/article', 'tracking params should be stripped');
 assert(classicResults[0].description.includes('Classic Bing result snippet'), 'classic layout snippet should parse');
+assert(classicResults[0].dateText === '2026年8月18日', 'explicit result date text should be preserved');
+assert(classicResults[0].publishedAt === '2026-08-18T00:30:00.000Z', 'zoned machine date should be normalized to UTC');
 
 const modernResults = parseBingSearchResults(modernHtml, 5);
 assert(modernResults.length === 1, 'modern layout should yield one result');
 assert(modernResults[0].title === 'Docs Guide', 'modern layout title should parse');
 assert(modernResults[0].url === 'https://docs.example.org/guide', 'modern layout url should parse');
+assert(modernResults[0].dateText === undefined, 'missing result date should stay absent');
+assert(modernResults[0].publishedAt === undefined, 'missing machine date should not be fabricated');
+
+const relativeDateHtml = `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/story">Recent story</a></h2>
+    <div class="b_caption"><p>Recent story snippet.</p></div>
+    <span class="b_age">3 hours ago</span>
+  </li>
+</ol>`;
+const relativeDateResults = parseBingSearchResults(relativeDateHtml, 5);
+assert(relativeDateResults[0].dateText === '3 hours ago', 'relative date text should be preserved verbatim');
+assert(relativeDateResults[0].publishedAt === undefined, 'relative date text should not be guessed into publishedAt');
+
+const descriptionDatePrefixHtml = `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/chinese-date">Chinese date</a></h2>
+    <div class="b_caption"><p>2025年10月9日 · Chinese absolute date.</p></div>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/iso-date">ISO date</a></h2>
+    <div class="b_caption"><p>2026-08-17 • ISO absolute date.</p></div>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/relative-date">Relative date</a></h2>
+    <div class="b_caption"><p>6 天之前 · Relative date.</p></div>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/relative-english">Relative English date</a></h2>
+    <div class="b_caption"><p>20 minutes ago • Relative English date.</p></div>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/history">History in body</a></h2>
+    <div class="b_caption"><p>The article discusses an event from 2024年3月13日 · not publication metadata.</p></div>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/no-separator">No separator</a></h2>
+    <div class="b_caption"><p>2026年8月18日 This lacks the required delimiter.</p></div>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/year-in-title">2026 annual report</a></h2>
+    <div class="b_caption"><p>No publication date in this snippet.</p></div>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/invalid-date">Invalid date</a></h2>
+    <div class="b_caption"><p>2025年2月29日 · Invalid dates remain auditable text only.</p></div>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/long-snippet">Long snippet</a></h2>
+    <div class="b_caption"><p>2026年8月17日 · ${'x'.repeat(1000)}</p></div>
+  </li>
+</ol>`;
+const descriptionDatePrefixResults = parseBingSearchResults(descriptionDatePrefixHtml, 20);
+const findPrefixResult = (path: string) => descriptionDatePrefixResults.find((item) => item.url.includes(path));
+assert(findPrefixResult('/chinese-date')?.dateText === '2025年10月9日', 'Chinese date prefix should be preserved');
+assert(findPrefixResult('/iso-date')?.dateText === '2026-08-17', 'ISO date prefix should be preserved');
+assert(findPrefixResult('/relative-date')?.dateText === '6 天之前', 'Chinese relative prefix should be preserved');
+assert(findPrefixResult('/relative-english')?.dateText === '20 minutes ago', 'English relative prefix should be preserved');
+assert(findPrefixResult('/history')?.dateText === undefined, 'date in snippet body should not be extracted');
+assert(findPrefixResult('/no-separator')?.dateText === undefined, 'date prefix without delimiter should not be extracted');
+assert(findPrefixResult('/year-in-title')?.dateText === undefined, 'year in title should not be extracted');
+assert(findPrefixResult('/invalid-date')?.dateText === '2025年2月29日', 'invalid but explicit date text should remain auditable');
+assert(findPrefixResult('/long-snippet')?.dateText === '2026年8月17日', 'long snippet should preserve its leading date');
+assert((findPrefixResult('/long-snippet')?.description.length ?? 0) <= 400, 'long snippet should remain bounded');
+assert(descriptionDatePrefixResults.every((item) => item.publishedAt === undefined), 'description prefixes need the shared retrieval clock before publication normalization');
 
 const fallbackResults = parseBingSearchResults(fallbackHtml, 5);
 assert(fallbackResults.length === 1, 'fallback layout should yield one result');

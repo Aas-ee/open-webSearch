@@ -249,14 +249,17 @@ async function testRunCliJsonSuccess(): Promise<void> {
         status: string;
         data: {
             query: string;
+            retrievedAt: string;
             totalResults: number;
-            results: Array<{ description: string }>;
+            results: Array<{ description: string; sourceDomain?: string }>;
         };
     };
     assertEqual(payload.status, 'ok', 'CLI json status');
     assertEqual(payload.data.query, 'Open WebSearch', 'CLI json query');
+    assert(!Number.isNaN(Date.parse(payload.data.retrievedAt)), 'CLI json retrievedAt');
     assertEqual(payload.data.totalResults, 1, 'CLI json totalResults');
     assertEqual(payload.data.results[0].description, 'Open WebSearch:2', 'CLI json description');
+    assertEqual(payload.data.results[0].sourceDomain, 'example.com', 'CLI json sourceDomain');
 
     console.log('✅ CLI runCli json success');
 }

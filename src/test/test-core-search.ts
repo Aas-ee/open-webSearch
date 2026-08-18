@@ -130,6 +130,117 @@ async function testSearchServiceExecution(): Promise<void> {
     console.log('✅ search service executes with partial failures');
 }
 
+async function testSearchMetadataEnrichment(): Promise<void> {
+    const retrievedAt = new Date('2026-08-18T09:15:00.000Z');
+    const service = createSearchService({
+        bing: async () => [{
+            title: 'Metadata result',
+            url: 'HTTPS://WWW.Example.COM./news?id=1',
+            description: 'metadata',
+            source: 'example.comhttps://www.example.com',
+            sourceDomain: 'untrusted.example',
+            dateText: '2026年8月18日',
+            publishedAt: '2026-08-18T00:00:00.000Z',
+            engine: 'bing'
+        }]
+    }, {
+        now: () => retrievedAt
+    });
+
+    const result = await service.execute({
+        query: 'metadata',
+        engines: ['bing'],
+        limit: 1
+    });
+
+    assertEqual(result.retrievedAt, retrievedAt.toISOString(), 'uses injected retrieval clock');
+    assertEqual(result.results[0].source, 'example.comhttps://www.example.com', 'preserves legacy source field');
+    assertEqual(result.results[0].sourceDomain, 'www.example.com', 'derives sourceDomain from final URL');
+    assertEqual(result.results[0].dateText, '2026年8月18日', 'preserves parser dateText');
+    assertEqual(result.results[0].publishedAt, '2026-08-18T00:00:00.000Z', 'preserves evidence-backed publishedAt');
+
+    const invalidUrlService = createSearchService({
+        bing: async () => [{
+            ...createResult('bing', 1),
+            url: 'not a URL',
+            sourceDomain: 'must-not-survive.example'
+        }]
+    }, {
+        now: () => retrievedAt
+    });
+    const invalidUrlResult = await invalidUrlService.execute({
+        query: 'invalid URL metadata',
+        engines: ['bing'],
+        limit: 1
+    });
+    assertEqual(invalidUrlResult.results[0].sourceDomain, undefined, 'omits sourceDomain for invalid result URLs');
+
+    console.log('✅ search service enriches trustworthy retrieval metadata');
+}
+
+async function testPublicationMetadataDerivation(): Promise<void> {
+    const retrievedAt = new Date('2026-08-18T10:05:32.120Z');
+    const metadataResult = (
+        key: string,
+        dateText?: string,
+        overrides: Partial<SearchResult> = {}
+    ): SearchResult => ({
+        title: key,
+        url: `https://news.example.com/${key}`,
+        description: `${dateText ?? 'no date'} · fixture`,
+        source: 'news.example.com',
+        ...(dateText ? { dateText } : {}),
+        engine: 'bing',
+        ...overrides
+    });
+    const service = createSearchService({
+        bing: async () => [
+            metadataResult('chinese', '2026年8月18日'),
+            metadataResult('iso', '2026-08-17'),
+            metadataResult('relative-days', '6 天之前'),
+            metadataResult('relative-hours', '3 hours ago'),
+            metadataResult('relative-minutes', '20 分钟前'),
+            metadataResult('leap-day', '2024-02-29'),
+            metadataResult('invalid-leap-day', '2025-02-29'),
+            metadataResult('future', '2026年8月19日'),
+            metadataResult('ambiguous', '2026/08/18'),
+            metadataResult('future-structured', undefined, { publishedAt: '2026-08-18T10:06:00.000Z' }),
+            metadataResult('timezone-less-structured', undefined, { publishedAt: '2026-08-17T10:00:00' }),
+            metadataResult('missing')
+        ],
+        startpage: async () => [metadataResult('other-engine', '6 days ago', { engine: 'startpage' })]
+    }, {
+        now: () => retrievedAt
+    });
+
+    const result = await service.execute({
+        query: 'publication metadata',
+        engines: ['bing', 'startpage'],
+        limit: 20,
+        aggregationMode: 'deep'
+    });
+    const byTitle = new Map(result.results.map((item) => [item.title, item]));
+
+    assertEqual(result.retrievedAt, retrievedAt.toISOString(), 'publication metadata uses one retrieval clock');
+    assertEqual(byTitle.get('chinese')?.publishedAt, '2026-08-17T16:00:00.000Z', 'Chinese date uses Bing zh-CN timezone');
+    assertEqual(byTitle.get('iso')?.publishedAt, '2026-08-16T16:00:00.000Z', 'ISO date uses Bing zh-CN timezone');
+    assertEqual(byTitle.get('relative-days')?.publishedAt, '2026-08-12T10:05:32.120Z', 'relative days use retrievedAt');
+    assertEqual(byTitle.get('relative-hours')?.publishedAt, '2026-08-18T07:05:32.120Z', 'relative hours use retrievedAt');
+    assertEqual(byTitle.get('relative-minutes')?.publishedAt, '2026-08-18T09:45:32.120Z', 'relative minutes use retrievedAt');
+    assertEqual(byTitle.get('leap-day')?.publishedAt, '2024-02-28T16:00:00.000Z', 'valid leap day is normalized');
+    assertEqual(byTitle.get('invalid-leap-day')?.publishedAt, undefined, 'invalid leap day is rejected');
+    assertEqual(byTitle.get('invalid-leap-day')?.dateText, '2025-02-29', 'invalid explicit dateText stays auditable');
+    assertEqual(byTitle.get('future')?.publishedAt, undefined, 'future date is rejected');
+    assertEqual(byTitle.get('ambiguous')?.publishedAt, undefined, 'ambiguous date format is rejected');
+    assertEqual(byTitle.get('future-structured')?.publishedAt, undefined, 'future structured timestamp is rejected');
+    assertEqual(byTitle.get('timezone-less-structured')?.publishedAt, undefined, 'timezone-less structured timestamp is rejected');
+    assertEqual(byTitle.get('missing')?.dateText, undefined, 'missing dateText remains absent');
+    assertEqual(byTitle.get('missing')?.publishedAt, undefined, 'missing publishedAt remains absent');
+    assertEqual(byTitle.get('other-engine')?.publishedAt, undefined, 'Bing-specific relative rules do not affect other engines');
+
+    console.log('✅ publication metadata is derived conservatively from a fixed retrieval clock');
+}
+
 async function testSearchServiceAutoModeUsesRuntimeDefault(): Promise<void> {
     const seenCalls: Array<{ searchMode?: string }> = [];
     const service = createSearchService({
@@ -310,6 +421,8 @@ async function main(): Promise<void> {
     testResolvePerEngineLimits();
     testResolveRequestedEngines();
     await testSearchServiceExecution();
+    await testSearchMetadataEnrichment();
+    await testPublicationMetadataDerivation();
     await testSearchServiceAutoModeUsesRuntimeDefault();
     await testSearchServiceDedupeAndMergeEngines();
     await testSearchServiceCanDisableDedupe();

@@ -13,6 +13,8 @@ import { runCli } from './cli/runCli.js';
 import type { OpenWebSearchRuntime } from './runtime/runtimeTypes.js';
 import { shouldCreateFullRuntimeForInvocation } from './runtime/runtimeSelection.js';
 import { shutdownLocalPlaywrightBrowserSessions } from './utils/playwrightClient.js';
+import { createSuccessEnvelope } from './cli/protocol.js';
+import { OPEN_WEBSEARCH_VERSION } from './version.js';
 
 type StreamableSession = {
   server: McpServer;
@@ -29,7 +31,7 @@ type SseSession = {
 function createServer(runtime: OpenWebSearchRuntime): McpServer {
   const server = new McpServer({
     name: 'web-search',
-    version: '1.2.0'
+    version: OPEN_WEBSEARCH_VERSION
   });
 
   setupTools(server, runtime);
@@ -108,6 +110,14 @@ async function main() {
       app.use(cors(mcpCorsOptions));
       app.options('*', cors(mcpCorsOptions));
     }
+
+    app.get('/health', (_req, res) => {
+      res.json(createSuccessEnvelope({
+        service: 'open-websearch',
+        transport: 'mcp-http',
+        version: OPEN_WEBSEARCH_VERSION
+      }));
+    });
 
     // Store transports for each session type
     const transports = {

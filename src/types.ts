@@ -3,6 +3,9 @@ export interface SearchResult {
     url: string;
     description: string;
     source: string;
+    sourceDomain?: string;
+    dateText?: string;
+    publishedAt?: string;
     engine: string;
     engines?: string[];
     score?: number;

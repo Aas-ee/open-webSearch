@@ -11,6 +11,7 @@ import {
     SupportedSearchEngine
 } from '../../core/search/searchEngines.js';
 import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
+import { OPEN_WEBSEARCH_VERSION } from '../../version.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -211,7 +212,7 @@ export async function startLocalDaemon(
 ): Promise<LocalDaemonHandle> {
     const host = options.host ?? DEFAULT_HOST;
     const requestedPort = options.port ?? Number(process.env.OPEN_WEBSEARCH_DAEMON_PORT || DEFAULT_PORT);
-    const version = options.version ?? 'unknown';
+    const version = options.version ?? OPEN_WEBSEARCH_VERSION;
 
     const app = express();
     app.use(express.json());
