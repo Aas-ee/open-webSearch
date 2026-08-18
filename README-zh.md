@@ -137,6 +137,15 @@ MCP工具支持：
 - `skill`
   - 适合作为 agent 的引导层，帮助 agent 发现、启用并使用最小可行路径；skill 不替代 MCP、CLI 或本地 daemon，通常推荐与 CLI 和/或本地 daemon 搭配使用。
 
+两种 HTTP 进程有意保持为不同的 API：
+
+| 启动命令 | 用途 | 端点 |
+|---|---|---|
+| `MODE=http node build/index.js` | MCP HTTP transport | `GET /health`、`/mcp`、`/sse`、`/messages` |
+| `node build/index.js serve` | 本地应用 daemon | `GET /health`、`GET /status`、`POST /search`、`POST /fetch-*` |
+
+MCP 进程不会暴露 `POST /search`；MCP 客户端应连接 `/mcp`，普通 HTTP 集成则要显式启动 daemon。
+
 ## 配合 skill 使用
 
 先给 agent 安装 `open-websearch` skill：
@@ -520,8 +529,23 @@ docker-compose up -d
 
 或者直接使用Docker：
 ```bash
-docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
+docker run -d --name web-search -p 3000:3000 \
+  -e MODE=http -e ENABLE_CORS=true -e CORS_ORIGIN=* \
+  --health-cmd="node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"" \
+  ghcr.io/aas-ee/open-web-search:latest
 ```
+
+这个命令启动 MCP HTTP 服务，语义健康检查是 `GET /health`，MCP 客户端连接 `/mcp` 或 `/sse`。
+
+如果普通业务代码需要调用 `POST /search`，应单独启动 daemon；除非前面有私有网络或带鉴权的网关，否则只映射到宿主机回环地址：
+
+```bash
+docker run -d --name web-search-daemon -p 127.0.0.1:3210:3210 \
+  ghcr.io/aas-ee/open-web-search:latest \
+  node build/index.js serve --host 0.0.0.0 --port 3210
+```
+
+生产环境应固定不可变 tag 和 digest，不要依赖漂移的 `latest`。MCP HTTP 当前监听 `0.0.0.0`，且为了向后兼容默认未开启 DNS rebinding 防护。两个原生 HTTP 入口都不提供公网鉴权；跨主机访问必须在网关补充网络隔离、明确的 Host 白名单、TLS、认证和限流。
 
 配置环境变量说明：
 

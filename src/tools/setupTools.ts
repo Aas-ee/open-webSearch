@@ -131,6 +131,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                         text: JSON.stringify({
                             query: searchResult.query,
                             engines: searchResult.engines,
+                            retrievedAt: searchResult.retrievedAt,
                             totalResults: searchResult.totalResults,
                             results: searchResult.results,
                             partialFailures: searchResult.partialFailures

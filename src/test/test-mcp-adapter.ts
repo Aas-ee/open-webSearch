@@ -107,15 +107,18 @@ async function testSearchToolReturnsCompatiblePayload(): Promise<void> {
     const payload = JSON.parse(response.content[0].text) as {
         query: string;
         engines: string[];
+        retrievedAt: string;
         totalResults: number;
-        results: Array<{ title: string; url: string; description: string; source: string; engine: string }>;
+        results: Array<{ title: string; url: string; description: string; source: string; sourceDomain?: string; engine: string }>;
         partialFailures: Array<{ engine: string; code: string; message: string }>;
     };
 
     assertEqual(payload.query, 'Open WebSearch', 'search payload query');
     assertEqual(payload.engines[0], 'bing', 'search payload engine');
+    assert(!Number.isNaN(Date.parse(payload.retrievedAt)), 'search payload should expose a valid retrievedAt');
     assertEqual(payload.totalResults, 1, 'search payload totalResults');
     assertEqual(payload.results[0].description, 'Open WebSearch:3', 'search payload result description');
+    assertEqual(payload.results[0].sourceDomain, 'example.com', 'search payload result sourceDomain');
     assert(Array.isArray(payload.partialFailures), 'search payload should expose partialFailures');
     assertEqual(payload.partialFailures.length, 0, 'search payload partialFailures length');
 

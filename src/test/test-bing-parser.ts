@@ -14,6 +14,7 @@ const classicHtml = `
       <h2><a href="https://example.com/article?utm_source=bing">Example Result</a></h2>
       <div class="b_caption"><p>Classic Bing result snippet.</p></div>
       <div class="b_attribution"><cite>example.com</cite></div>
+      <time datetime="2026-08-18T08:30:00+08:00">2026年8月18日</time>
     </li>
   </ol>
 </div>`;
@@ -40,11 +41,27 @@ assert(classicResults.length === 1, 'classic layout should yield one result');
 assert(classicResults[0].title === 'Example Result', 'classic layout title should parse');
 assert(classicResults[0].url === 'https://example.com/article', 'tracking params should be stripped');
 assert(classicResults[0].description.includes('Classic Bing result snippet'), 'classic layout snippet should parse');
+assert(classicResults[0].dateText === '2026年8月18日', 'explicit result date text should be preserved');
+assert(classicResults[0].publishedAt === '2026-08-18T00:30:00.000Z', 'zoned machine date should be normalized to UTC');
 
 const modernResults = parseBingSearchResults(modernHtml, 5);
 assert(modernResults.length === 1, 'modern layout should yield one result');
 assert(modernResults[0].title === 'Docs Guide', 'modern layout title should parse');
 assert(modernResults[0].url === 'https://docs.example.org/guide', 'modern layout url should parse');
+assert(modernResults[0].dateText === undefined, 'missing result date should stay absent');
+assert(modernResults[0].publishedAt === undefined, 'missing machine date should not be fabricated');
+
+const relativeDateHtml = `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a href="https://news.example.net/story">Recent story</a></h2>
+    <div class="b_caption"><p>Recent story snippet.</p></div>
+    <span class="b_age">3 hours ago</span>
+  </li>
+</ol>`;
+const relativeDateResults = parseBingSearchResults(relativeDateHtml, 5);
+assert(relativeDateResults[0].dateText === '3 hours ago', 'relative date text should be preserved verbatim');
+assert(relativeDateResults[0].publishedAt === undefined, 'relative date text should not be guessed into publishedAt');
 
 const fallbackResults = parseBingSearchResults(fallbackHtml, 5);
 assert(fallbackResults.length === 1, 'fallback layout should yield one result');

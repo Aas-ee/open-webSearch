@@ -4,6 +4,7 @@ import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
+import { OPEN_WEBSEARCH_VERSION } from '../version.js';
 
 function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -155,9 +156,10 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
             status: string;
             data: {
                 query: string;
+                retrievedAt: string;
                 totalResults: number;
                 engines: string[];
-                results: Array<{ description: string }>;
+                results: Array<{ description: string; sourceDomain?: string }>;
                 partialFailures: Array<{ engine: string; code: string; message: string }>;
             };
         }>(daemon.baseUrl, '/search', {
@@ -177,8 +179,10 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         assertEqual(searchResult.response.status, 200, 'daemon /search http status');
         assertEqual(searchResult.payload.status, 'ok', 'daemon /search payload status');
         assertEqual(searchResult.payload.data.query, 'Open WebSearch', 'daemon /search query');
+        assert(!Number.isNaN(Date.parse(searchResult.payload.data.retrievedAt)), 'daemon /search retrievedAt');
         assertEqual(searchResult.payload.data.totalResults, 2, 'daemon /search totalResults');
         assert(searchResult.payload.data.results.some((item) => item.description === 'Open WebSearch:4:playwright'), 'daemon /search result content');
+        assert(searchResult.payload.data.results.every((item) => typeof item.sourceDomain === 'string'), 'daemon /search sourceDomain');
 
         const fetchWebResult = await postJson<{
             status: string;
@@ -417,9 +421,10 @@ async function testCliServeWaitsForSignal(): Promise<void> {
     const baseUrl = match[1];
 
     const statusResponse = await fetch(`${baseUrl}/status`);
-    const statusPayload = await statusResponse.json() as { status: string; data: { daemon: string } };
+    const statusPayload = await statusResponse.json() as { status: string; data: { daemon: string; version: string } };
     assertEqual(statusPayload.status, 'ok', 'CLI serve should keep daemon alive until signal');
     assertEqual(statusPayload.data.daemon, 'running', 'CLI serve daemon state before signal');
+    assertEqual(statusPayload.data.version, OPEN_WEBSEARCH_VERSION, 'CLI serve reports package version');
 
     signals.emit('SIGINT');
     const exitCode = await runPromise;

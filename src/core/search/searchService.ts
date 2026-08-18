@@ -22,9 +22,14 @@ export type SearchExecutionFailure = {
 export type SearchExecutionResult = {
     query: string;
     engines: string[];
+    retrievedAt: string;
     totalResults: number;
     results: SearchResult[];
     partialFailures: SearchExecutionFailure[];
+};
+
+export type SearchServiceOptions = {
+    now?: () => Date;
 };
 
 export type SearchExecutionInput = {
@@ -107,6 +112,20 @@ function normalizeSearchResultUrl(url: string): string {
         return parsed.toString();
     } catch {
         return url.trim();
+    }
+}
+
+function getSourceDomain(url: string): string | undefined {
+    try {
+        const parsed = new URL(url.trim());
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return undefined;
+        }
+
+        const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+        return hostname || undefined;
+    } catch {
+        return undefined;
     }
 }
 
@@ -238,15 +257,23 @@ function aggregateSearchResults(
         rankingMode
     );
 
-    return groups.slice(0, limit).map((group) => ({
-        ...group.bestCandidate.result,
-        engine: group.bestCandidate.engine,
-        engines: group.engines,
-        score: roundScore(group.score)
-    }));
+    return groups.slice(0, limit).map((group) => {
+        const { sourceDomain: _ignoredSourceDomain, ...result } = group.bestCandidate.result;
+        const sourceDomain = getSourceDomain(result.url);
+
+        return {
+            ...result,
+            ...(sourceDomain ? { sourceDomain } : {}),
+            engine: group.bestCandidate.engine,
+            engines: group.engines,
+            score: roundScore(group.score)
+        };
+    });
 }
 
-export function createSearchService(engineMap: SearchEngineExecutorMap) {
+export function createSearchService(engineMap: SearchEngineExecutorMap, options: SearchServiceOptions = {}) {
+    const now = options.now ?? (() => new Date());
+
     return {
         async execute({
             query,
@@ -304,6 +331,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap) {
             return {
                 query: cleanQuery,
                 engines,
+                retrievedAt: now().toISOString(),
                 totalResults: results.length,
                 results,
                 partialFailures

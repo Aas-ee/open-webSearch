@@ -130,6 +130,54 @@ async function testSearchServiceExecution(): Promise<void> {
     console.log('✅ search service executes with partial failures');
 }
 
+async function testSearchMetadataEnrichment(): Promise<void> {
+    const retrievedAt = new Date('2026-08-18T09:15:00.000Z');
+    const service = createSearchService({
+        bing: async () => [{
+            title: 'Metadata result',
+            url: 'HTTPS://WWW.Example.COM./news?id=1',
+            description: 'metadata',
+            source: 'example.comhttps://www.example.com',
+            sourceDomain: 'untrusted.example',
+            dateText: '2026年8月18日',
+            publishedAt: '2026-08-18T00:00:00.000Z',
+            engine: 'bing'
+        }]
+    }, {
+        now: () => retrievedAt
+    });
+
+    const result = await service.execute({
+        query: 'metadata',
+        engines: ['bing'],
+        limit: 1
+    });
+
+    assertEqual(result.retrievedAt, retrievedAt.toISOString(), 'uses injected retrieval clock');
+    assertEqual(result.results[0].source, 'example.comhttps://www.example.com', 'preserves legacy source field');
+    assertEqual(result.results[0].sourceDomain, 'www.example.com', 'derives sourceDomain from final URL');
+    assertEqual(result.results[0].dateText, '2026年8月18日', 'preserves parser dateText');
+    assertEqual(result.results[0].publishedAt, '2026-08-18T00:00:00.000Z', 'preserves evidence-backed publishedAt');
+
+    const invalidUrlService = createSearchService({
+        bing: async () => [{
+            ...createResult('bing', 1),
+            url: 'not a URL',
+            sourceDomain: 'must-not-survive.example'
+        }]
+    }, {
+        now: () => retrievedAt
+    });
+    const invalidUrlResult = await invalidUrlService.execute({
+        query: 'invalid URL metadata',
+        engines: ['bing'],
+        limit: 1
+    });
+    assertEqual(invalidUrlResult.results[0].sourceDomain, undefined, 'omits sourceDomain for invalid result URLs');
+
+    console.log('✅ search service enriches trustworthy retrieval metadata');
+}
+
 async function testSearchServiceAutoModeUsesRuntimeDefault(): Promise<void> {
     const seenCalls: Array<{ searchMode?: string }> = [];
     const service = createSearchService({
@@ -310,6 +358,7 @@ async function main(): Promise<void> {
     testResolvePerEngineLimits();
     testResolveRequestedEngines();
     await testSearchServiceExecution();
+    await testSearchMetadataEnrichment();
     await testSearchServiceAutoModeUsesRuntimeDefault();
     await testSearchServiceDedupeAndMergeEngines();
     await testSearchServiceCanDisableDedupe();

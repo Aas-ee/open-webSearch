@@ -49,6 +49,15 @@
 - `Skill`
   - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it typically works together with the CLI and/or local daemon to help an agent discover, activate, and use the smallest working path.
 
+The two HTTP processes intentionally expose different APIs:
+
+| Start command | Purpose | Endpoints |
+|---|---|---|
+| `MODE=http node build/index.js` | MCP HTTP transport | `GET /health`, `/mcp`, `/sse`, `/messages` |
+| `node build/index.js serve` | Local application daemon | `GET /health`, `GET /status`, `POST /search`, `POST /fetch-*` |
+
+The MCP process does not expose `POST /search`; use an MCP client with `/mcp`, or explicitly start the daemon for ordinary HTTP integrations.
+
 ## Use with a Skill
 
 Install the `open-websearch` skill for your agent first:
@@ -423,8 +432,23 @@ docker-compose up -d
 
 Or use Docker directly:
 ```bash
-docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
+docker run -d --name web-search -p 3000:3000 \
+  -e MODE=http -e ENABLE_CORS=true -e CORS_ORIGIN=* \
+  --health-cmd="node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"" \
+  ghcr.io/aas-ee/open-web-search:latest
 ```
+
+This starts the MCP HTTP service. Its semantic health endpoint is `GET /health`; MCP clients connect to `/mcp` or `/sse`.
+
+To start the separate daemon for ordinary HTTP calls such as `POST /search`, bind it to loopback unless it is protected by a private network or authenticated gateway:
+
+```bash
+docker run -d --name web-search-daemon -p 127.0.0.1:3210:3210 \
+  ghcr.io/aas-ee/open-web-search:latest \
+  node build/index.js serve --host 0.0.0.0 --port 3210
+```
+
+For production deployments, pin an immutable image tag and digest instead of relying on the moving `latest` tag. MCP HTTP currently listens on `0.0.0.0`, and DNS-rebinding protection remains disabled by default for backward compatibility. Neither raw HTTP entrypoint provides public-internet authentication; apply network isolation, an explicit host allowlist at the gateway, TLS, authentication, and rate limits when remote access is required.
 
 Environment variable configuration:
 

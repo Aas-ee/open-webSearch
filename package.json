@@ -32,6 +32,7 @@
     "test:engine-normalization": "tsc && node build/test/test-engine-normalization.js",
     "test:local-daemon": "tsc && node build/test/test-local-daemon.js",
     "test:mcp-adapter": "tsc && node build/test/test-mcp-adapter.js",
+    "test:mcp-http": "tsc && node build/test/test-mcp-http.js",
     "test:runtime": "tsc && node build/test/test-runtime.js",
     "test:sogou": "tsc && node build/test/test-sogou.js",
     "test:startpage": "tsc && node build/test/test-startpage.js",
