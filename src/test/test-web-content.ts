@@ -1,6 +1,6 @@
-import type { AxiosRequestConfig, AxiosResponse } from 'axios';
+﻿import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config } from '../config.js';
-import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
+import { __setBrowserFetcherForTests, fetchWebContent } from '../engines/web/index.js';
 import { __setReadabilityParserForTests } from '../engines/web/fetchWebContent.js';
 import { __setAxiosRequestForTests } from '../utils/httpRequest.js';
 import { __setDnsLookupForTests } from '../utils/urlSafety.js';
@@ -156,7 +156,7 @@ function installAxiosMock(): void {
 
 function restoreAxiosMock(): void {
     __setAxiosRequestForTests();
-    __setBrowserHtmlFetcherForTests();
+    __setBrowserFetcherForTests();
 }
 
 function assert(condition: unknown, message: string): void {
@@ -222,7 +222,7 @@ async function main(): Promise<void> {
         {
             name: 'should fallback to metadata for js-rendered html pages',
             run: async () => {
-                __setBrowserHtmlFetcherForTests(async () => {
+                __setBrowserFetcherForTests(async () => {
                     throw new Error('browser fallback disabled for metadata-only test');
                 });
                 const result = await fetchWebContent('https://example.com/spa', 5000);
@@ -234,8 +234,9 @@ async function main(): Promise<void> {
         {
             name: 'should fallback to browser html when html only contains shell metadata',
             run: async () => {
-                __setBrowserHtmlFetcherForTests(async () => ({
-                    html: `
+                __setBrowserFetcherForTests(async () => ({
+                    contentType: 'text/html; charset=utf-8',
+                    raw: `
                     <html>
                       <head><title>Browser SPA</title></head>
                       <body>
@@ -247,7 +248,8 @@ async function main(): Promise<void> {
                     </html>
                     `,
                     finalUrl: 'https://example.com/browser-spa?rendered=1',
-                    title: 'Browser SPA'
+                    title: 'Browser SPA',
+                    retrievalMethod: 'browser-html' as const
                 }));
 
                 const result = await fetchWebContent('https://example.com/browser-spa', 5000);
@@ -306,8 +308,9 @@ async function main(): Promise<void> {
         {
             name: 'should fallback to browser html after cookie-assisted retry still fails',
             run: async () => {
-                __setBrowserHtmlFetcherForTests(async () => ({
-                    html: `
+                __setBrowserFetcherForTests(async () => ({
+                    contentType: 'text/html; charset=utf-8',
+                    raw: `
                     <html>
                       <head><title>Blocked Browser SPA</title></head>
                       <body>
@@ -319,13 +322,90 @@ async function main(): Promise<void> {
                     </html>
                     `,
                     finalUrl: 'https://example.com/blocked-browser-spa?rendered=1',
-                    title: 'Blocked Browser SPA'
+                    title: 'Blocked Browser SPA',
+                    retrievalMethod: 'browser-html' as const
                 }));
 
                 const result = await fetchWebContent('https://example.com/blocked-browser-spa', 5000);
                 assert(result.retrievalMethod === 'browser-html', 'blocked request should end in browser html fallback');
                 assert((requestAttempts.get('https://example.com/blocked-browser-spa') || 0) >= 1, 'blocked url should attempt request path first');
                 assert(result.content.includes('Recovered after blocked request'), 'browser fallback should recover readable content');
+            }
+        },
+        {
+            name: 'should fallback to browser html when connection times out',
+            run: async () => {
+                __setAxiosRequestForTests(async (config) => {
+                    const url = String(config.url || '');
+                    if (url.endsWith('/timeout-site')) {
+                        const error: any = new Error('connect ETIMEDOUT 34.117.97.190:443');
+                        error.code = 'ETIMEDOUT';
+                        throw error;
+                    }
+                    throw new Error(`Unexpected mocked URL: ${url}`);
+                });
+
+                __setBrowserFetcherForTests(async () => ({
+                    contentType: 'text/html; charset=utf-8',
+                    raw: `
+                    <html>
+                      <head><title>Timeout Site</title></head>
+                      <body>
+                        <main>
+                          <h1>Timeout Site</h1>
+                          <p>${'Content recovered via browser after timeout '.repeat(10)}</p>
+                        </main>
+                      </body>
+                    </html>
+                    `,
+                    finalUrl: 'https://example.com/timeout-site',
+                    title: 'Timeout Site',
+                    retrievalMethod: 'browser-html' as const
+                }));
+
+                const result = await fetchWebContent('https://example.com/timeout-site', 5000);
+                assert(result.retrievalMethod === 'browser-html', 'timeout should trigger browser fallback');
+                assert(result.content.includes('Content recovered via browser after timeout'), 'browser should recover content after transport timeout');
+
+                installAxiosMock();
+            }
+        },
+        {
+            name: 'should fallback to browser html when TLS handshake fails',
+            run: async () => {
+                __setAxiosRequestForTests(async (config) => {
+                    const url = String(config.url || '');
+                    if (url.endsWith('/tls-fail-site')) {
+                        const error: any = new Error('Client network socket disconnected before secure TLS connection was established');
+                        error.code = 'ECONNRESET';
+                        throw error;
+                    }
+                    throw new Error(`Unexpected mocked URL: ${url}`);
+                });
+
+                __setBrowserFetcherForTests(async () => ({
+                    contentType: 'text/html; charset=utf-8',
+                    raw: `
+                    <html>
+                      <head><title>TLS Fail Site</title></head>
+                      <body>
+                        <main>
+                          <h1>TLS Fail Site</h1>
+                          <p>${'Content recovered via browser after TLS failure '.repeat(10)}</p>
+                        </main>
+                      </body>
+                    </html>
+                    `,
+                    finalUrl: 'https://example.com/tls-fail-site',
+                    title: 'TLS Fail Site',
+                    retrievalMethod: 'browser-html' as const
+                }));
+
+                const result = await fetchWebContent('https://example.com/tls-fail-site', 5000);
+                assert(result.retrievalMethod === 'browser-html', 'TLS handshake failure should trigger browser fallback');
+                assert(result.content.includes('Content recovered via browser after TLS failure'), 'browser should recover content after TLS failure');
+
+                installAxiosMock();
             }
         },
         {
@@ -363,6 +443,42 @@ async function main(): Promise<void> {
                 }
                 assert(failed, 'oversized response should be rejected');
             }
+        },
+        {
+            name: 'should not use browser fallback to bypass safety errors',
+            run: async () => {
+                let browserWasCalled = false;
+                __setBrowserFetcherForTests(async () => {
+                    browserWasCalled = true;
+                    return {
+                        contentType: 'text/html; charset=utf-8',
+                        raw: '<html><body><main><p>should never be reached</p></main></body></html>',
+                        finalUrl: 'https://example.com/ssrf-target',
+                        title: 'Should Not Happen',
+                        retrievalMethod: 'browser-html' as const
+                    };
+                });
+
+                __setAxiosRequestForTests(async (config) => {
+                    const url = String(config.url || '');
+                    if (url.endsWith('/ssrf-target')) {
+                        throw new Error('Redirect target points to a private or local network address');
+                    }
+                    throw new Error(`Unexpected mocked URL: ${url}`);
+                });
+
+                let failed = false;
+                try {
+                    await fetchWebContent('https://example.com/ssrf-target', 5000);
+                } catch {
+                    failed = true;
+                }
+
+                assert(failed, 'safety error should stay fatal');
+                assert(browserWasCalled === false, 'browser fallback must not be used to bypass safety errors');
+
+                installAxiosMock();
+            }
         }
     ];
 
@@ -377,7 +493,7 @@ async function main(): Promise<void> {
     __setDnsLookupForTests();
     config.fetchWebAllowInsecureTls = originalFetchWebAllowInsecureTls;
     __setReadabilityParserForTests();
-    __setBrowserHtmlFetcherForTests();
+    __setBrowserFetcherForTests();
 
     const total = testCases.length;
     console.log(`\nResult: ${passed}/${total} passed`);
@@ -394,7 +510,7 @@ main().catch((error) => {
     __setDnsLookupForTests();
     config.fetchWebAllowInsecureTls = false;
     __setReadabilityParserForTests();
-    __setBrowserHtmlFetcherForTests();
+    __setBrowserFetcherForTests();
     console.error('❌ test-web-content failed:', error);
     process.exit(1);
 });
