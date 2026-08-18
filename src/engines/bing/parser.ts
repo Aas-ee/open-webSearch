@@ -56,7 +56,7 @@ function sanitizeBingUrl(rawUrl?: string): string {
         if (resolvedUrl.startsWith('/search') || resolvedUrl.startsWith('/ck/a') || resolvedUrl.startsWith('/newtabredir')) {
             return '';
         }
-        resolvedUrl = `https://cn.bing.com${resolvedUrl}`;
+        resolvedUrl = `https://www.bing.com${resolvedUrl}`;
     }
 
     if (!resolvedUrl.startsWith('http://') && !resolvedUrl.startsWith('https://')) {
