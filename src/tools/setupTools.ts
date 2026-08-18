@@ -13,6 +13,7 @@ import {
     validatePublicWebUrl
 } from '../core/validation/targetValidation.js';
 import { OpenWebSearchRuntime } from '../runtime/runtimeTypes.js';
+import { AppConfig, checkPlaywrightModeConfiguration } from '../config.js';
 export { normalizeEngineName };
 
 // 获取工具名称，优先使用环境变量，否则使用默认值
@@ -41,9 +42,18 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
 
     // 搜索工具
     // 生成搜索工具的动态描述
+    // 按 SEARCH_MODE 决定 searchMode 参数的暴露与提示语：
+    // - 强制模式（request/playwright）：不暴露 searchMode 参数、不生成 searchMode 提示语；
+    // - auto 模式：检查 Playwright 配置是否真实可用：
+    //   - 可用：暴露 searchMode 参数，并引导 Agent 默认保持 auto、仅在 request 结果失败或异常时重试 playwright；
+    //   - 不可用：按强制 request 处理，同样不暴露参数、不生成提示语。
+    const autoWithPlaywrightAvailable =
+        runtime.config.searchMode === 'auto' && checkPlaywrightModeConfiguration(runtime.config).available;
+
     const getSearchDescription = () => {
-        // 明确 auto/省略会使用服务端 SEARCH_MODE，只有 request/playwright 才是强制覆盖。
-        const searchModeDescription = ' searchMode meanings: omit or set auto to use the server configured SEARCH_MODE; request forces request-based search; playwright forces browser-based search.';
+        const searchModeDescription = autoWithPlaywrightAvailable
+            ? ' searchMode meanings: request performs plain HTTP scraping, playwright drives a real browser through Playwright, and auto or omitting searchMode lets the server decide (request first, falling back to Playwright when it is blocked). Start with the default auto (or omit searchMode). Only retry the same query with searchMode=playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality, for example anti-bot or verification pages.'
+            : '';
         if (runtime.config.allowedSearchEngines.length === 0) {
             return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗)) with no API key required.${searchModeDescription}`;
         } else {
@@ -81,64 +91,97 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             .pipe(enginesEnum);
     };
 
-    server.tool(
-        searchToolName,
-        getSearchDescription(),
-        {
-            query: z.string().min(1, "Search query must not be empty"),
-            limit: z.number().min(1).max(50).default(10),
-            searchMode: z.enum(['request', 'auto', 'playwright']).optional(),
-            engines: z.array(getEngineInputSchema()).min(1).default([runtime.config.defaultSearchEngine])
-                .transform(requestedEngines => resolveRequestedEngines(
-                    requestedEngines,
-                    runtime.config.allowedSearchEngines,
-                    runtime.config.defaultSearchEngine
-                ) as [SupportedSearchEngine, ...SupportedSearchEngine[]])
-        },
-        async ({query, limit = 10, searchMode, engines}) => {
-            try {
-                const resolvedEngines = resolveRequestedEngines(
-                    engines ?? [runtime.config.defaultSearchEngine],
-                    runtime.config.allowedSearchEngines,
-                    runtime.config.defaultSearchEngine
-                ) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
+    // searchMode 参数只在 SEARCH_MODE=auto 且 Playwright 配置真实可用时暴露给 Agent；
+    // 强制 request/playwright 以及 auto 但 Playwright 不可用退回 request 的场景都不注册该参数，
+    // Agent 无法指定。
+    const searchModeSchema = z.enum(['request', 'auto', 'playwright'])
+        .describe('Optional search mode override. Start with the default auto (or omit searchMode); only retry with playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality.')
+        .optional();
 
-                console.error(`Searching for "${query}" using engines: ${resolvedEngines.join(', ')}`);
+    const enginesInputSchema = z.array(getEngineInputSchema()).min(1).default([runtime.config.defaultSearchEngine])
+        .transform(requestedEngines => resolveRequestedEngines(
+            requestedEngines,
+            runtime.config.allowedSearchEngines,
+            runtime.config.defaultSearchEngine
+        ) as [SupportedSearchEngine, ...SupportedSearchEngine[]]);
 
-                const searchResult = await runtime.services.search.execute({
-                    query,
-                    engines: resolvedEngines,
-                    limit,
-                    searchMode
-                });
-                for (const failure of searchResult.partialFailures) {
-                    console.error(`Search failed for engine ${failure.engine}:`, failure.message);
-                }
+    const searchBaseSchema = {
+        query: z.string().min(1, "Search query must not be empty"),
+        limit: z.number().min(1).max(50).default(10),
+        engines: enginesInputSchema
+    };
 
-                return {
-                    content: [{
-                        type: 'text',
-                        text: JSON.stringify({
-                            query: searchResult.query,
-                            engines: searchResult.engines,
-                            totalResults: searchResult.totalResults,
-                            results: searchResult.results,
-                            partialFailures: searchResult.partialFailures
-                        }, null, 2)
-                    }]
-                };
-            } catch (error) {
-                console.error('Search tool execution failed:', error);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }],
-                    isError: true
-                };
+    type SearchToolInput = {
+        query: string;
+        limit: number;
+        searchMode?: AppConfig['searchMode'];
+        engines: [SupportedSearchEngine, ...SupportedSearchEngine[]];
+    };
+
+    const executeSearch = async ({query, limit, searchMode, engines}: SearchToolInput) => {
+        try {
+            const resolvedEngines = resolveRequestedEngines(
+                engines ?? [runtime.config.defaultSearchEngine],
+                runtime.config.allowedSearchEngines,
+                runtime.config.defaultSearchEngine
+            ) as [SupportedSearchEngine, ...SupportedSearchEngine[]];
+
+            console.error(`Searching for "${query}" using engines: ${resolvedEngines.join(', ')}`);
+
+            const searchResult = await runtime.services.search.execute({
+                query,
+                engines: resolvedEngines,
+                limit,
+                searchMode
+            });
+            for (const failure of searchResult.partialFailures) {
+                console.error(`Search failed for engine ${failure.engine}:`, failure.message);
             }
+
+            return {
+                content: [{
+                    type: 'text' as const,
+                    text: JSON.stringify({
+                        query: searchResult.query,
+                        engines: searchResult.engines,
+                        totalResults: searchResult.totalResults,
+                        results: searchResult.results,
+                        partialFailures: searchResult.partialFailures
+                    }, null, 2)
+                }]
+            };
+        } catch (error) {
+            console.error('Search tool execution failed:', error);
+            // 生效模式为 playwright 而配置无效：返回清晰错误，而非外层成功。
+            const errorCode = (error as { code?: unknown })?.code;
+            const isBrowserUnavailable = errorCode === 'browser_unavailable';
+            return {
+                content: [{
+                    type: 'text' as const,
+                    text: isBrowserUnavailable
+                        ? `Search failed: browser_unavailable. ${error instanceof Error ? error.message : 'Unknown error'}`
+                        : `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+                }],
+                isError: true
+            };
         }
-    );
+    };
+
+    if (autoWithPlaywrightAvailable) {
+        server.tool(
+            searchToolName,
+            getSearchDescription(),
+            {...searchBaseSchema, searchMode: searchModeSchema},
+            ({query, limit, searchMode, engines}) => executeSearch({query, limit, searchMode, engines})
+        );
+    } else {
+        server.tool(
+            searchToolName,
+            getSearchDescription(),
+            searchBaseSchema,
+            ({query, limit, engines}) => executeSearch({query, limit, engines})
+        );
+    }
 
     // 获取 Linux.do 文章工具
     server.tool(

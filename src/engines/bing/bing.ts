@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { AppConfig, config } from '../../config.js';
+import { AppConfig, config, getEffectiveSearchMode, checkPlaywrightModeConfiguration } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser, retryOnBrowserCrash } from '../../utils/playwrightClient.js';
@@ -711,13 +711,20 @@ export async function searchBing(
     limit: number,
     options?: { searchMode?: AppConfig['searchMode'] }
 ): Promise<SearchResult[]> {
-    const effectiveSearchMode = options?.searchMode ?? config.searchMode;
+    // 请求级未显式覆盖时使用服务端模式：强制 request/playwright 原样采用，SEARCH_MODE=auto 但 Playwright 必需参数未配置时退回强制请求模式。
+    const effectiveSearchMode = options?.searchMode ?? getEffectiveSearchMode(config);
 
     if (effectiveSearchMode === 'request') {
         return searchBingWithHttp(query, limit);
     }
 
     if (effectiveSearchMode === 'playwright') {
+        const availability = checkPlaywrightModeConfiguration(config);
+        if (!availability.available) {
+            const unavailableError = new Error(`Playwright mode is required but the Playwright configuration is invalid: ${availability.reason}`);
+            (unavailableError as Error & { code?: string }).code = 'browser_unavailable';
+            throw unavailableError;
+        }
         return searchBingWithPlaywright(query, limit);
     }
 

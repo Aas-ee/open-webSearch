@@ -179,7 +179,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
-| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: request only, request then Playwright fallback, or force Playwright |
+| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: force HTTP request mode (`request`), force Playwright mode (`playwright`), or let the agent choose (`auto`, default). Forced modes never expose a `searchMode` override to the agent. In `auto` mode the server checks whether Playwright is really usable (the client module can actually be loaded, and for local launches a real browser binary exists: explicit `PLAYWRIGHT_EXECUTABLE_PATH`, bundled browser, or system Chrome/Edge); if available, the search tool exposes a `searchMode` parameter and directs the agent to stay on the default `auto` and only retry with `playwright` when request results fail, return empty, or look blocked; otherwise it behaves as forced request mode. If `playwright` is forced but not usable, searches fail with a `browser_unavailable` error |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |
 | `PLAYWRIGHT_MODULE_PATH` | empty | Absolute path or project-relative path | Reuse an existing Playwright client package outside this project |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | empty | Any valid browser binary path | Launch an existing Chromium/Chrome executable without installing bundled browsers |
@@ -266,9 +266,9 @@ npx open-websearch@latest
 ```
 
 Mode behavior:
-- `request`: only uses request-based Bing scraping
-- `auto`: tries request first, and only falls back to Playwright when request fails and a manually accessible Playwright client + browser are available
-- `playwright`: forces Playwright and errors if the configured Playwright client or browser target is unavailable
+- `request`: only uses request-based Bing scraping; the search tool exposes no `searchMode` parameter and no mode guidance
+- `playwright`: forces Playwright; the search tool exposes no `searchMode` parameter and no mode guidance. Playwright availability is checked at startup and an invalid configuration logs a warning; searches then fail with a clear `browser_unavailable` error
+- `auto`: checks whether Playwright is really usable (the client module actually loads; for local launches a real browser binary must exist). If available, the search tool exposes a `searchMode` parameter (request / auto / playwright) and directs the agent to stay on the default `auto`, retrying with `playwright` only when request results fail, return empty, or look blocked; otherwise the server behaves as request mode
 
 Notes:
 - `PLAYWRIGHT_MODULE_PATH` takes precedence over `PLAYWRIGHT_PACKAGE`

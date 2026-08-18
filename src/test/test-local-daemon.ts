@@ -109,6 +109,9 @@ async function testLocalDaemonRoutes(): Promise<void> {
                     defaultSearchEngine: string;
                     allowedSearchEngines: string[];
                     searchMode: string;
+                    effectiveSearchMode: string;
+                    playwrightAvailable: boolean;
+                    playwrightUnavailableReason: string | null;
                     useProxy: boolean;
                     fetchWebAllowInsecureTls: boolean;
                 };
@@ -123,6 +126,11 @@ async function testLocalDaemonRoutes(): Promise<void> {
         assert(statusPayload.data.capabilities.includes('search'), 'daemon /status capabilities');
         assertEqual(statusPayload.data.configSummary.defaultSearchEngine, 'bing', 'daemon /status config default engine');
         assertEqual(statusPayload.data.configSummary.searchMode, 'request', 'daemon /status config search mode');
+        assertEqual(statusPayload.data.configSummary.effectiveSearchMode, 'request', 'daemon /status config effective search mode');
+        assertEqual(typeof statusPayload.data.configSummary.playwrightAvailable, 'boolean', 'daemon /status exposes playwrightAvailable');
+        if (!statusPayload.data.configSummary.playwrightAvailable) {
+            assert(typeof statusPayload.data.configSummary.playwrightUnavailableReason === 'string', 'daemon /status exposes unavailable reason when Playwright is unavailable');
+        }
         assertEqual(statusPayload.data.configSummary.useProxy, false, 'daemon /status config proxy');
 
         console.log('✅ local daemon health and status routes');
