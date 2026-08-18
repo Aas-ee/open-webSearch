@@ -156,9 +156,8 @@ function parsePublishedAt(value?: string): string | undefined {
         return undefined;
     }
 
-    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(candidate);
     const isZonedDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(candidate);
-    if (!isDateOnly && !isZonedDateTime) {
+    if (!isZonedDateTime) {
         return undefined;
     }
 
@@ -172,13 +171,19 @@ function parsePublishedAt(value?: string): string | undefined {
         return undefined;
     }
 
-    const parsed = new Date(isDateOnly ? `${candidate}T00:00:00.000Z` : candidate);
+    const parsed = new Date(candidate);
     return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
-function extractDateMetadata(element: any): Pick<SearchResult, 'dateText' | 'publishedAt'> {
+function extractDescriptionDatePrefix(description: string): string | undefined {
+    const match = /^(\d{4}年\d{1,2}月\d{1,2}日|\d{4}-\d{2}-\d{2}|\d{1,4}\s*(?:分钟|小时|天)\s*(?:之前|前)|\d{1,4}\s*(?:minutes?|hours?|days?)\s+ago)\s*[·•]\s*/i.exec(description);
+    return match?.[1]?.trim();
+}
+
+function extractDateMetadata(element: any, description: string): Pick<SearchResult, 'dateText' | 'publishedAt'> {
     const visibleDateElement = element.find('.news_dt, .b_age, time[datetime]').first();
-    const dateText = normalizeWhitespace(visibleDateElement.text());
+    const structuredDateText = normalizeWhitespace(visibleDateElement.text());
+    const dateText = structuredDateText || extractDescriptionDatePrefix(description);
     const machineDate = element.find('time[datetime]').first().attr('datetime');
     const publishedAt = parsePublishedAt(machineDate);
 
@@ -212,7 +217,7 @@ function collectFallbackLinks($: any, limit: number, seenUrls: Set<string>, resu
             url,
             description,
             source: extractSource(container, url),
-            ...extractDateMetadata(container),
+            ...extractDateMetadata(container, description),
             engine: 'bing'
         });
     });
@@ -252,7 +257,7 @@ export function parseBingSearchResults(htmlContent: string, limit: number): Sear
                 url,
                 description,
                 source: extractSource(element, url),
-                ...extractDateMetadata(element),
+                ...extractDateMetadata(element, description),
                 engine: 'bing'
             });
         });

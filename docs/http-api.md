@@ -174,6 +174,14 @@ Notes:
 - parsers may include the source page's `dateText`; `publishedAt` is included only when machine-readable date evidence can be normalized confidently, and is otherwise omitted
 - aggregated results preserve the original result fields and may include `engines` plus `score`
 
+For Bing's `zh-CN` result page, publication metadata follows these conservative rules:
+
+- dedicated result date nodes and machine-readable zoned `datetime` attributes take precedence
+- a snippet fallback is accepted only when the date is at the beginning and immediately followed by `·` or `•`; dates elsewhere in the snippet are ignored
+- supported absolute prefixes are `YYYY年M月D日` and `YYYY-MM-DD`; date-only values use Bing `zh-CN` time (`UTC+08:00`)
+- supported relative values are numeric days, hours, or minutes in Chinese (`6 天之前`) or English (`3 hours ago`), calculated from the response's single `retrievedAt`
+- invalid calendar dates, future timestamps, timezone-less datetimes, unknown formats, and missing evidence never produce `publishedAt`; a trustworthy but unparseable `dateText` may remain for auditing
+
 Response excerpt:
 
 ```json

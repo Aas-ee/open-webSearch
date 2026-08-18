@@ -14,7 +14,7 @@ import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
 import { fetchGithubReadme } from '../engines/github/index.js';
 import { fetchWebContent } from '../engines/web/index.js';
-import { createSearchService, SearchEngineExecutorMap } from '../core/search/searchService.js';
+import { createSearchService, SearchEngineExecutorMap, SearchServiceOptions } from '../core/search/searchService.js';
 import {
     createArticleFetchService,
     createGithubReadmeService,
@@ -37,6 +37,7 @@ export type RuntimeDependencies = {
 export type CreateOpenWebSearchRuntimeOptions = {
     config?: AppConfig;
     dependencies?: RuntimeDependencies;
+    searchServiceOptions?: SearchServiceOptions;
 };
 
 function createDefaultSearchExecutors(): SearchEngineExecutorMap {
@@ -62,7 +63,7 @@ export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOp
     return {
         config: runtimeConfig,
         services: {
-            search: createSearchService(searchExecutors),
+            search: createSearchService(searchExecutors, options.searchServiceOptions),
             fetchLinuxDoArticle: createArticleFetchService('linuxdo', dependencies.fetchLinuxDoArticle ?? fetchLinuxDoArticle),
             fetchCsdnArticle: createArticleFetchService('csdn', dependencies.fetchCsdnArticle ?? fetchCsdnArticle),
             fetchJuejinArticle: createArticleFetchService('juejin', dependencies.fetchJuejinArticle ?? fetchJuejinArticle),

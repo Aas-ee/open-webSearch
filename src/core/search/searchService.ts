@@ -5,6 +5,7 @@ import {
     SearchAggregationMode,
     SearchRankingMode
 } from './searchEngines.js';
+import { normalizePublicationMetadata } from './publicationMetadata.js';
 
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
@@ -234,6 +235,7 @@ function aggregateSearchResults(
         ranking?: SearchRankingMode;
         engineWeights?: Record<string, number>;
         dedupe: boolean;
+        retrievedAt: Date;
     }
 ): SearchResult[] {
     let globalIndex = 0;
@@ -260,9 +262,10 @@ function aggregateSearchResults(
     return groups.slice(0, limit).map((group) => {
         const { sourceDomain: _ignoredSourceDomain, ...result } = group.bestCandidate.result;
         const sourceDomain = getSourceDomain(result.url);
+        const resultWithMetadata = normalizePublicationMetadata(result, options.retrievedAt);
 
         return {
-            ...result,
+            ...resultWithMetadata,
             ...(sourceDomain ? { sourceDomain } : {}),
             engine: group.bestCandidate.engine,
             engines: group.engines,
@@ -321,17 +324,20 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, options:
             });
 
             const engineResults = await Promise.all(tasks);
+            const retrievedAtDate = now();
+            const retrievedAt = retrievedAtDate.toISOString();
             const results = aggregateSearchResults(engineResults, engines, limit, {
                 aggregationMode,
                 ranking,
                 engineWeights,
-                dedupe
+                dedupe,
+                retrievedAt: retrievedAtDate
             });
 
             return {
                 query: cleanQuery,
                 engines,
-                retrievedAt: now().toISOString(),
+                retrievedAt,
                 totalResults: results.length,
                 results,
                 partialFailures

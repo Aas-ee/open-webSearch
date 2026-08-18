@@ -44,6 +44,9 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 function createStubRuntime() {
     return createOpenWebSearchRuntime({
         config: createTestConfig(),
+        searchServiceOptions: {
+            now: () => new Date('2026-08-18T10:05:32.120Z')
+        },
         dependencies: {
             searchExecutors: {
                 bing: async (query, limit, context) => [{
@@ -51,6 +54,7 @@ function createStubRuntime() {
                     url: 'https://example.com',
                     description: `${query}:${limit}:${context?.searchMode ?? 'none'}`,
                     source: 'example.com',
+                    dateText: '6 天之前',
                     engine: 'bing'
                 }],
                 startpage: async (query, limit) => [{
@@ -159,7 +163,12 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
                 retrievedAt: string;
                 totalResults: number;
                 engines: string[];
-                results: Array<{ description: string; sourceDomain?: string }>;
+                results: Array<{
+                    description: string;
+                    sourceDomain?: string;
+                    dateText?: string;
+                    publishedAt?: string;
+                }>;
                 partialFailures: Array<{ engine: string; code: string; message: string }>;
             };
         }>(daemon.baseUrl, '/search', {
@@ -179,10 +188,18 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         assertEqual(searchResult.response.status, 200, 'daemon /search http status');
         assertEqual(searchResult.payload.status, 'ok', 'daemon /search payload status');
         assertEqual(searchResult.payload.data.query, 'Open WebSearch', 'daemon /search query');
-        assert(!Number.isNaN(Date.parse(searchResult.payload.data.retrievedAt)), 'daemon /search retrievedAt');
+        assertEqual(searchResult.payload.data.retrievedAt, '2026-08-18T10:05:32.120Z', 'daemon /search retrievedAt');
         assertEqual(searchResult.payload.data.totalResults, 2, 'daemon /search totalResults');
         assert(searchResult.payload.data.results.some((item) => item.description === 'Open WebSearch:4:playwright'), 'daemon /search result content');
         assert(searchResult.payload.data.results.every((item) => typeof item.sourceDomain === 'string'), 'daemon /search sourceDomain');
+        const bingResult = searchResult.payload.data.results.find((item) => item.description === 'Open WebSearch:4:playwright');
+        assert(bingResult, 'daemon /search should include Bing result');
+        assertEqual(bingResult.dateText, '6 天之前', 'daemon /search dateText');
+        assertEqual(bingResult.publishedAt, '2026-08-12T10:05:32.120Z', 'daemon /search publishedAt');
+        const startpageResult = searchResult.payload.data.results.find((item) => item.description === 'Open WebSearch:4');
+        assert(startpageResult, 'daemon /search should include Startpage result');
+        assertEqual(startpageResult.dateText, undefined, 'daemon /search omits absent dateText');
+        assertEqual(startpageResult.publishedAt, undefined, 'daemon /search omits absent publishedAt');
 
         const fetchWebResult = await postJson<{
             status: string;
