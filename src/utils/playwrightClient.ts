@@ -6,6 +6,7 @@ import { createServer } from 'net';
 import { tmpdir } from 'os';
 import path from 'path';
 import { config, getProxyUrl } from '../config.js';
+import { getSystemBrowserCandidates } from './browserPaths.js';
 import { launchProcessOnHiddenDesktopWithPipes, readNamedPipeAsync, closeHandle, acquireNativeFileLock, tryNativeFileLock } from './nativeInterop.js';
 import type { NativeFileLockHandle } from './nativeInterop.js';
 
@@ -669,7 +670,7 @@ function normalizeLoadedPlaywrightModule(loaded: any): PlaywrightModule | null {
     return null;
 }
 
-function getLocalBrowserExecutablePath(): string {
+function getLocalBrowserExecutablePath(playwright?: PlaywrightModule): string {
     if (config.playwrightExecutablePath && existsSync(config.playwrightExecutablePath)) {
         return config.playwrightExecutablePath;
     }
@@ -678,8 +679,16 @@ function getLocalBrowserExecutablePath(): string {
         return cachedBrowserPath;
     }
 
-    const candidates = getLocalBrowserExecutableCandidates();
-    for (const candidate of [...new Set(candidates)]) {
+    // 与配置检测（checkPlaywrightModeConfiguration）完全一致的顺序：显式路径 → 捆绑浏览器 → 系统候选。
+    if (playwright) {
+        const fallback = resolveLocalBrowserExecutableFallback(playwright);
+        if (fallback) {
+            cachedBrowserPath = fallback;
+            return fallback;
+        }
+    }
+
+    for (const candidate of [...new Set(getSystemBrowserCandidates())]) {
         if (existsSync(candidate)) {
             cachedBrowserPath = candidate;
             return candidate;
@@ -690,38 +699,27 @@ function getLocalBrowserExecutablePath(): string {
 }
 
 /**
- * 本地浏览器可执行文件候选列表（显式路径、系统 Chrome/Edge）。
- * 与 config.checkPlaywrightModeConfiguration 的系统候选保持同一来源，避免两处检测口径漂移。
+ * 运行时本地启动的浏览器路径兜底解析，与配置检测（config.checkPlaywrightModeConfiguration）共用同一套候选（src/utils/browserPaths.ts 的 getSystemBrowserCandidates）：先探测客户端捆绑浏览器，再探测系统 Chrome/Edge。
+ * 确保检测判定可用的路径与实际启动一致，避免 playwright-core + 系统 Chrome 场景下检测返回可用、launch 却找不到捆绑浏览器而失败。
  */
-export function getLocalBrowserExecutableCandidates(): string[] {
-    const candidates: string[] = [];
-    if (config.playwrightExecutablePath) {
-        candidates.push(config.playwrightExecutablePath);
-    }
-    candidates.push('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe');
-    candidates.push('C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe');
-    candidates.push('C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe');
-    candidates.push('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
-
-    const pf86 = process.env['PROGRAMFILES(X86)'];
-    const pf = process.env['PROGRAMFILES'];
-    const localAppData = process.env['LOCALAPPDATA'];
-    if (pf86) {
-        candidates.push(`${pf86}\\Microsoft\\Edge\\Application\\msedge.exe`);
-        candidates.push(`${pf86}\\Google\\Chrome\\Application\\chrome.exe`);
-    }
-    if (pf) {
-        candidates.push(`${pf}\\Microsoft\\Edge\\Application\\msedge.exe`);
-        candidates.push(`${pf}\\Google\\Chrome\\Application\\chrome.exe`);
-    }
-    if (localAppData) {
-        candidates.push(`${localAppData}\\Google\\Chrome\\Application\\chrome.exe`);
+function resolveLocalBrowserExecutableFallback(playwright: PlaywrightModule): string | undefined {
+    try {
+        const chromium = playwright.chromium as { executablePath?: () => string | null | undefined };
+        const bundled = chromium?.executablePath?.();
+        if (bundled && existsSync(bundled)) {
+            return bundled;
+        }
+    } catch {
+        // playwright-core 未安装捆绑浏览器时调用 executablePath 会抛错，跳过即可。
     }
 
-    candidates.push('/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/microsoft-edge');
-    candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
-    candidates.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
-    return candidates;
+    for (const candidate of [...new Set(getSystemBrowserCandidates())]) {
+        if (existsSync(candidate)) {
+            return candidate;
+        }
+    }
+
+    return undefined;
 }
 
 function findFreePort(): Promise<number> {
@@ -1745,7 +1743,7 @@ async function connectLaunchedLocalBrowserSession(
 }
 
 async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, launchArgs: string[]): Promise<LocalBrowserSession> {
-    const browserPath = getLocalBrowserExecutablePath();
+    const browserPath = getLocalBrowserExecutablePath(playwright);
     const tempDir = mkdtempSync(path.join(tmpdir(), 'mcp-search-'));
     const port = await findFreePort();
     const args = buildLocalBrowserProcessArgs(port, tempDir, launchArgs);
@@ -1857,7 +1855,7 @@ async function launchHiddenDesktopBrowser(playwright: PlaywrightModule, sessionK
 
 async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionKey: string, domainKey: string, headless: boolean, launchArgs: string[]): Promise<LocalBrowserSession> {
     if (process.platform === 'win32') {
-        const browserPath = getLocalBrowserExecutablePath();
+        const browserPath = getLocalBrowserExecutablePath(playwright);
         const tempDir = mkdtempSync(path.join(tmpdir(), 'mcp-search-'));
         const port = await findFreePort();
         const args = buildLocalBrowserProcessArgs(port, tempDir, launchArgs, headless);
@@ -1915,12 +1913,12 @@ async function launchStandardLocalBrowser(playwright: PlaywrightModule, sessionK
         }
     }
 
-    // 非 Windows：使用 Playwright 自带 launch
+    // 非 Windows：使用 Playwright 自带 launch；executablePath 使用与配置检测同一套解析，确保检测判定的可用路径（显式路径 → 捆绑浏览器 → 系统候选）与实际启动一致。
     const browser = await playwright.chromium.launch({
         headless,
         proxy: buildPlaywrightProxy(),
         args: launchArgs,
-        executablePath: config.playwrightExecutablePath
+        executablePath: config.playwrightExecutablePath || resolveLocalBrowserExecutableFallback(playwright)
     });
 
     const forceKill = createForceKill(undefined, undefined, browser);
@@ -2168,6 +2166,17 @@ export async function loadPlaywrightClient(options?: LoadPlaywrightClientOptions
     return playwright;
 }
 
+/**
+ * 将浏览器启动或远程连接失败统一包装为 browser_unavailable 错误。
+ * 在显式选择 playwright 模式时，各入口（MCP/CLI/daemon）据此返回明确错误，而不是降级为“成功但 0 条结果”；auto 模式的回退探测（isPlaywrightAvailable）仍然按 catch 语义处理，不受 code 影响。
+ */
+export function asBrowserUnavailableError(error: unknown, context: string): Error {
+    const original = error instanceof Error ? error.message : String(error);
+    const wrapped = new Error(`${context}: ${original}`);
+    (wrapped as Error & { code?: string }).code = 'browser_unavailable';
+    return wrapped;
+}
+
 export async function openPlaywrightBrowser(
     headless: boolean,
     launchArgs: string[] = [],
@@ -2175,14 +2184,22 @@ export async function openPlaywrightBrowser(
 ): Promise<PlaywrightBrowserSession> {
     const playwright = await loadPlaywrightClient();
     if (!playwright) {
-        throw new Error('Playwright client is not available. Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.');
+        throw asBrowserUnavailableError(
+            new Error('Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.'),
+            'Playwright client is not available'
+        );
     }
 
     if (config.playwrightWsEndpoint) {
-        const browser = await playwright.chromium.connect({
-            wsEndpoint: config.playwrightWsEndpoint,
-            timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
-        });
+        let browser;
+        try {
+            browser = await playwright.chromium.connect({
+                wsEndpoint: config.playwrightWsEndpoint,
+                timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
+            });
+        } catch (error) {
+            throw asBrowserUnavailableError(error, `Failed to connect to remote Playwright WebSocket endpoint ${config.playwrightWsEndpoint}`);
+        }
         const release = async () => {
             await browser.close().catch(() => undefined);
         };
@@ -2193,9 +2210,14 @@ export async function openPlaywrightBrowser(
     }
 
     if (config.playwrightCdpEndpoint) {
-        const browser = await playwright.chromium.connectOverCDP(config.playwrightCdpEndpoint, {
-            timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
-        });
+        let browser;
+        try {
+            browser = await playwright.chromium.connectOverCDP(config.playwrightCdpEndpoint, {
+                timeout: PLAYWRIGHT_CONNECT_TIMEOUT_MS
+            });
+        } catch (error) {
+            throw asBrowserUnavailableError(error, `Failed to connect to remote Playwright CDP endpoint ${config.playwrightCdpEndpoint}`);
+        }
         const release = async () => {
             await browser.close().catch(() => undefined);
         };
@@ -2208,7 +2230,12 @@ export async function openPlaywrightBrowser(
     // 修复 Playwright 本地搜索每次都重新拉起浏览器的问题：
     // 这里改为复用单个后台浏览器会话，只有会话失活或启动参数变化时才重建。
     // 对 Bing 的隐藏有头模式，还会复用同一个隐藏桌面上的浏览器进程，避免窗口闪现到用户桌面。
-    const session = await getOrCreateLocalBrowserSession(playwright, headless, launchArgs, options);
+    let session;
+    try {
+        session = await getOrCreateLocalBrowserSession(playwright, headless, launchArgs, options);
+    } catch (error) {
+        throw asBrowserUnavailableError(error, 'Failed to launch local Playwright browser');
+    }
     const release = async () => {
         // 本地模式返回共享浏览器句柄，release 只释放调用方引用，
         // 不真正关闭浏览器；真正销毁由 CLI/daemon 在生命周期结束时调用 shutdownLocalPlaywrightBrowserSessions()。

@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { getSystemBrowserCandidates } from './utils/browserPaths.js';
 
 // src/config.ts
 export interface AppConfig {
@@ -260,37 +261,8 @@ export function checkPlaywrightModeConfiguration(appConfig: AppConfig = config):
         return { available: true, reason: null };
     }
 
-    // 系统 Chrome/Edge：与 playwrightClient.getLocalBrowserExecutablePath 的候选列表保持一致。
-    const systemCandidates: string[] = [];
-    if (process.platform === 'win32') {
-        systemCandidates.push(
-            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-        );
-        const pf86 = process.env['PROGRAMFILES(X86)'];
-        const pf = process.env['PROGRAMFILES'];
-        const localAppData = process.env['LOCALAPPDATA'];
-        if (pf86) {
-            systemCandidates.push(`${pf86}\\Microsoft\\Edge\\Application\\msedge.exe`, `${pf86}\\Google\\Chrome\\Application\\chrome.exe`);
-        }
-        if (pf) {
-            systemCandidates.push(`${pf}\\Microsoft\\Edge\\Application\\msedge.exe`, `${pf}\\Google\\Chrome\\Application\\chrome.exe`);
-        }
-        if (localAppData) {
-            systemCandidates.push(`${localAppData}\\Google\\Chrome\\Application\\chrome.exe`);
-        }
-    } else if (process.platform === 'darwin') {
-        systemCandidates.push(
-            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
-        );
-    } else {
-        systemCandidates.push('/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/microsoft-edge');
-    }
-
-    for (const candidate of systemCandidates) {
+    // 系统 Chrome/Edge：与运行时启动共用同一份候选（src/utils/browserPaths.ts），保证检测判定的可用路径与实际启动用的路径一致。
+    for (const candidate of [...new Set(getSystemBrowserCandidates())]) {
         if (existsSync(candidate)) {
             return { available: true, reason: null };
         }
