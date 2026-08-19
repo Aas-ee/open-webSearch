@@ -1003,13 +1003,22 @@ export async function runCli(
             return 0;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            // 直连(非 daemon)路径: renderMode=browser 而 Playwright/浏览器不可用时,
+            // 与 daemon 的 /fetch-web 保持一致, 返回 browser_unavailable 而非 validation_failed。
+            const directBrowserUnavailable = !isDaemonRequestError(error)
+                && ((error as { code?: unknown })?.code === 'browser_unavailable'
+                    || /Playwright client is not available|No Chromium-based browser executable|request interception (?:is unavailable|could not be installed)|connect(?:ion)? (?:failed|refused|timed out)/i.test(message));
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
-                    isDaemonRequestError(error) ? getDaemonCliErrorCode(error) : 'validation_failed',
+                    isDaemonRequestError(error)
+                        ? getDaemonCliErrorCode(error)
+                        : (directBrowserUnavailable ? 'browser_unavailable' : 'validation_failed'),
                     message,
                     { hint: isDaemonRequestError(error)
                         ? getDaemonCliErrorHint(error)
-                        : 'Use a public HTTP(S) URL, keep maxChars within the supported range, and use renderMode request, auto, or browser.' }
+                        : (directBrowserUnavailable
+                            ? 'Configure a usable Playwright client and browser target, or retry with renderMode request/auto.'
+                            : 'Use a public HTTP(S) URL, keep maxChars within the supported range, and use renderMode request, auto, or browser.') }
                 ), null, 2));
             } else {
                 io.stderr(`${getDaemonCliErrorLabel(error, 'Fetch failed')}: ${message}`);

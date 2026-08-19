@@ -491,6 +491,60 @@ async function testRunCliFetchWebValidationFailure(): Promise<void> {
     console.log('✅ CLI runCli fetch-web validation failure');
 }
 
+async function testRunCliFetchWebBrowserUnavailable(): Promise<void> {
+    const runtime = createOpenWebSearchRuntime({
+        config: createTestConfig(),
+        dependencies: {
+            searchExecutors: {
+                bing: async (query, limit) => [{
+                    title: 'Result',
+                    url: 'https://example.com',
+                    description: `${query}:${limit}`,
+                    source: 'example.com',
+                    engine: 'bing'
+                }]
+            },
+            fetchGithubReadme: async () => '# README',
+            fetchWebContent: async () => {
+                const error = new Error(
+                    'Playwright client is not available: Install `playwright`/`playwright-core` manually or configure PLAYWRIGHT_MODULE_PATH.'
+                );
+                (error as Error & { code?: string }).code = 'browser_unavailable';
+                throw error;
+            },
+            fetchCsdnArticle: async () => ({ content: 'csdn' }),
+            fetchJuejinArticle: async () => ({ content: 'juejin' }),
+            fetchLinuxDoArticle: async () => ({ content: 'linuxdo' })
+        }
+    });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        ['fetch-web', 'https://example.com', '--render-mode', 'browser', '--json'],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 1, 'CLI fetch-web browser_unavailable exit code');
+    assertEqual(stderr.length, 0, 'CLI fetch-web browser_unavailable stderr');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        error: { code: string; message: string };
+        hint?: string | null;
+    };
+    assertEqual(payload.status, 'error', 'CLI fetch-web browser_unavailable status');
+    assertEqual(payload.error.code, 'browser_unavailable', 'CLI fetch-web browser_unavailable code');
+    assert(
+        (payload.hint ?? '').includes('Playwright'),
+        'CLI fetch-web browser_unavailable hint should guide Playwright configuration'
+    );
+
+    console.log('✅ CLI runCli fetch-web browser_unavailable');
+}
+
 async function testRunCliFetchCsdnJsonSuccess(): Promise<void> {
     const runtime = createStubRuntime();
     const stdout: string[] = [];
@@ -1056,6 +1110,7 @@ async function main(): Promise<void> {
             await testRunCliFetchWebReadabilityJsonSuccess();
             await testRunCliFetchGithubReadmeJsonSuccess();
             await testRunCliFetchWebValidationFailure();
+            await testRunCliFetchWebBrowserUnavailable();
             await testRunCliFetchCsdnJsonSuccess();
             await testRunCliFetchJuejinJsonSuccess();
             await testRunCliFetchCsdnValidationFailure();
