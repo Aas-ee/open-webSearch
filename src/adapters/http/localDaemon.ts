@@ -5,7 +5,7 @@ import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
 import { validatePublicWebUrl } from '../../core/validation/targetValidation.js';
-import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
+import { isBrowserUnavailableError, shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -290,7 +290,8 @@ export async function startLocalDaemon(
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            const browserUnavailable = /Playwright client is not available|No Chromium-based browser executable|request interception (?:is unavailable|could not be installed)|connect(?:ion)? (?:failed|refused|timed out)/i.test(message);
+            // code 优先（browser_unavailable），消息特征只作未带 code 的历史错误回退。
+            const browserUnavailable = isBrowserUnavailableError(error);
             sendError(res, browserUnavailable ? 503 : 502, browserUnavailable ? 'browser_unavailable' : 'fetch_failed', message, {
                 retryable: !browserUnavailable,
                 hint: browserUnavailable

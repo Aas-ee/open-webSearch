@@ -7,6 +7,7 @@ import https from 'node:https';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { AppConfig } from '../config.js';
+import { isBrowserUnavailableError } from '../utils/playwrightClient.js';
 
 export type CliIo = {
     stdout: (text: string) => void;
@@ -733,7 +734,7 @@ function getDaemonCliErrorCode(error: unknown): string {
     }
 
     // 强制 Playwright 而配置无效：直接暴露配置错误，不再归入通用的 engine_error。
-    if ((error as { code?: unknown })?.code === 'browser_unavailable') {
+    if (isBrowserUnavailableError(error)) {
         return 'browser_unavailable';
     }
 
@@ -753,7 +754,7 @@ function getDaemonCliErrorHint(error: unknown): string {
         return 'The daemon accepted the request but did not complete it cleanly. Inspect daemon logs or retry without --daemon-url to use direct execution.';
     }
 
-    if ((error as { code?: unknown })?.code === 'browser_unavailable') {
+    if (isBrowserUnavailableError(error)) {
         return 'Fix the Playwright configuration (install a client package, set PLAYWRIGHT_MODULE_PATH or a remote endpoint, provide a browser binary), or retry with --search-mode request.';
     }
 
@@ -1006,8 +1007,7 @@ export async function runCli(
             // 直连(非 daemon)路径: renderMode=browser 而 Playwright/浏览器不可用时,
             // 与 daemon 的 /fetch-web 保持一致, 返回 browser_unavailable 而非 validation_failed。
             const directBrowserUnavailable = !isDaemonRequestError(error)
-                && ((error as { code?: unknown })?.code === 'browser_unavailable'
-                    || /Playwright client is not available|No Chromium-based browser executable|request interception (?:is unavailable|could not be installed)|connect(?:ion)? (?:failed|refused|timed out)/i.test(message));
+                && isBrowserUnavailableError(error);
             if (parsed.json) {
                 io.stdout(JSON.stringify(createErrorEnvelope(
                     isDaemonRequestError(error)

@@ -65,6 +65,12 @@ function createStubRuntime() {
                 if (url.endsWith('/browser-unavailable')) {
                     throw new Error('Playwright client is not available for browser HTML fetch');
                 }
+                if (url.endsWith('/browser-launch-code')) {
+                    throw Object.assign(new Error('unable to spawn browser process'), { code: 'browser_unavailable' });
+                }
+                if (url.endsWith('/browser-remote-code')) {
+                    throw Object.assign(new Error('unexpected EOF from CDP endpoint'), { code: 'browser_unavailable' });
+                }
                 return {
                     url,
                     finalUrl: url,
@@ -215,6 +221,23 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         });
         assertEqual(browserUnavailableResult.response.status, 503, 'daemon browser unavailable http status');
         assertEqual(browserUnavailableResult.payload.error.code, 'browser_unavailable', 'daemon browser unavailable error code');
+
+        // code 优先：message 不匹配历史正则时，仍应按 code 归类为 browser_unavailable（#107 review 反馈）。
+        const browserLaunchCodeResult = await postJson<{ status: string; error: { code: string; retryable: boolean } }>(daemon.baseUrl, '/fetch-web', {
+            url: 'https://example.com/browser-launch-code',
+            renderMode: 'browser'
+        });
+        assertEqual(browserLaunchCodeResult.response.status, 503, 'daemon browser launch code http status');
+        assertEqual(browserLaunchCodeResult.payload.error.code, 'browser_unavailable', 'daemon browser launch code error code');
+        assertEqual(browserLaunchCodeResult.payload.error.retryable, false, 'daemon browser launch code retryable');
+
+        const browserRemoteCodeResult = await postJson<{ status: string; error: { code: string; retryable: boolean } }>(daemon.baseUrl, '/fetch-web', {
+            url: 'https://example.com/browser-remote-code',
+            renderMode: 'browser'
+        });
+        assertEqual(browserRemoteCodeResult.response.status, 503, 'daemon browser remote code http status');
+        assertEqual(browserRemoteCodeResult.payload.error.code, 'browser_unavailable', 'daemon browser remote code error code');
+        assertEqual(browserRemoteCodeResult.payload.error.retryable, false, 'daemon browser remote code retryable');
 
         const fetchGithubResult = await postJson<{
             status: string;
