@@ -1,6 +1,6 @@
 import { AppConfig } from '../config.js';
 import { SearchExecutionInput, SearchExecutionResult } from '../core/search/searchService.js';
-import { FetchWebContentResult } from '../engines/web/fetchWebContent.js';
+import { FetchWebContentOptions, FetchWebContentResult } from '../engines/web/fetchWebContent.js';
 
 export type SearchService = {
     execute(input: SearchExecutionInput): Promise<SearchExecutionResult>;
@@ -20,6 +20,7 @@ export type FetchWebService = {
         maxChars: number;
         readability?: boolean;
         includeLinks?: boolean;
+        renderMode?: FetchWebContentOptions['renderMode'];
     }): Promise<FetchWebContentResult>;
 };
 

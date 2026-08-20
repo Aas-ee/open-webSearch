@@ -1,7 +1,10 @@
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config } from '../config.js';
 import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
-import { __setReadabilityParserForTests } from '../engines/web/fetchWebContent.js';
+import {
+    __setBrowserCookieHeaderFetcherForTests,
+    __setReadabilityParserForTests
+} from '../engines/web/fetchWebContent.js';
 import { __setAxiosRequestForTests } from '../utils/httpRequest.js';
 import { __setDnsLookupForTests } from '../utils/urlSafety.js';
 
@@ -157,6 +160,7 @@ function installAxiosMock(): void {
 function restoreAxiosMock(): void {
     __setAxiosRequestForTests();
     __setBrowserHtmlFetcherForTests();
+    __setBrowserCookieHeaderFetcherForTests();
 }
 
 function assert(condition: unknown, message: string): void {
@@ -182,6 +186,9 @@ async function main(): Promise<void> {
     __setDnsLookupForTests(async (hostname) => {
         if (hostname === 'example.com') {
             return [{ address: '93.184.216.34' }];
+        }
+        if (hostname === 'private-final.example') {
+            return [{ address: '127.0.0.1' }];
         }
         throw new Error(`unexpected hostname: ${hostname}`);
     });
@@ -255,6 +262,168 @@ async function main(): Promise<void> {
                 assert(result.retrievalMethod === 'browser-html', 'browser html fallback should be reported');
                 assert(result.finalUrl.endsWith('rendered=1'), 'browser fallback finalUrl should be used');
                 assert(result.content.includes('Rendered browser content'), 'browser html content should replace shell metadata');
+            }
+        },
+        {
+            name: 'auto mode should keep request metadata when browser fallback fails',
+            run: async () => {
+                let browserCalls = 0;
+                __setBrowserHtmlFetcherForTests(async () => {
+                    browserCalls += 1;
+                    throw new Error('browser unavailable');
+                });
+
+                const result = await fetchWebContent('https://example.com/browser-spa', 5000, {
+                    renderMode: 'auto'
+                });
+                assert(result.retrievalMethod === 'request', 'failed auto fallback should retain request retrieval');
+                assert(result.content.includes('JS bootstrap shell'), 'failed auto fallback should retain request metadata');
+                assert(browserCalls === 1, 'auto mode should attempt browser fallback exactly once');
+            }
+        },
+        {
+            name: 'request mode should never invoke browser fallback for shell html',
+            run: async () => {
+                let browserCalled = false;
+                __setBrowserHtmlFetcherForTests(async () => {
+                    browserCalled = true;
+                    throw new Error('request mode must not use browser');
+                });
+
+                const result = await fetchWebContent('https://example.com/browser-spa', 5000, {
+                    renderMode: 'request'
+                });
+                assert(result.retrievalMethod === 'request', 'request mode should report request retrieval');
+                assert(result.content.includes('JS bootstrap shell'), 'request mode should preserve request metadata result');
+                assert(browserCalled === false, 'request mode should not invoke browser fetcher');
+            }
+        },
+        {
+            name: 'request mode should not use browser assistance for blocked responses',
+            run: async () => {
+                let cookieCalled = false;
+                let browserCalled = false;
+                __setBrowserCookieHeaderFetcherForTests(async () => {
+                    cookieCalled = true;
+                    return 'session=unexpected';
+                });
+                __setBrowserHtmlFetcherForTests(async () => {
+                    browserCalled = true;
+                    throw new Error('request mode must not use browser');
+                });
+
+                let failed = false;
+                try {
+                    await fetchWebContent('https://example.com/blocked-browser-spa', 5000, {
+                        renderMode: 'request'
+                    });
+                } catch {
+                    failed = true;
+                }
+                assert(failed, 'request mode should surface the blocked request error');
+                assert(cookieCalled === false, 'request mode should not request browser cookies');
+                assert(browserCalled === false, 'request mode should not invoke browser html fallback');
+            }
+        },
+        {
+            name: 'browser mode should render directly without request traffic',
+            run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => ({
+                    html: `
+                    <html>
+                      <head><title>Direct Browser Page</title></head>
+                      <body><main><p>${'Direct rendered content '.repeat(12)}</p></main></body>
+                    </html>
+                    `,
+                    finalUrl: 'https://example.com/direct-browser?rendered=1',
+                    title: 'Direct Browser Page'
+                }));
+
+                const requestsBefore = Array.from(requestConfigs.values()).reduce((sum, calls) => sum + calls.length, 0);
+                const result = await fetchWebContent('https://example.com/direct-browser', 5000, {
+                    renderMode: 'browser'
+                });
+                const requestsAfter = Array.from(requestConfigs.values()).reduce((sum, calls) => sum + calls.length, 0);
+
+                assert(requestsAfter === requestsBefore, 'browser mode should not issue HEAD or GET requests');
+                assert(result.retrievalMethod === 'browser-html', 'browser mode should report browser-html retrieval');
+                assert(result.title === 'Direct Browser Page', 'browser mode should preserve rendered title');
+                assert(result.finalUrl.endsWith('rendered=1'), 'browser mode should preserve final browser URL');
+                assert(result.content.includes('Direct rendered content'), 'browser mode should extract rendered content');
+            }
+        },
+        {
+            name: 'browser mode should extract browser html for markdown-looking paths',
+            run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => ({
+                    html: `<html><head><title>Rendered Markdown Route</title></head><body><main><p>${'Rendered route body '.repeat(12)}</p></main></body></html>`,
+                    finalUrl: 'https://example.com/rendered.md',
+                    title: 'Rendered Markdown Route'
+                }));
+
+                const result = await fetchWebContent('https://example.com/rendered.md', 5000, {
+                    renderMode: 'browser'
+                });
+                assert(result.content.includes('Rendered route body'), 'browser .md route should extract html text');
+                assert(!result.content.includes('<html>'), 'browser .md route should not return raw html as markdown');
+            }
+        },
+        {
+            name: 'browser mode should surface browser availability errors',
+            run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => {
+                    throw new Error('Playwright client is not available for browser HTML fetch');
+                });
+
+                let message = '';
+                try {
+                    await fetchWebContent('https://example.com/browser-required', 5000, {
+                        renderMode: 'browser'
+                    });
+                } catch (error) {
+                    message = error instanceof Error ? error.message : String(error);
+                }
+                assert(message.includes('Playwright client is not available'), 'browser mode should surface Playwright errors');
+            }
+        },
+        {
+            name: 'browser mode should reject a final URL that resolves to a private address',
+            run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => ({
+                    html: '<html><body><main>private redirect</main></body></html>',
+                    finalUrl: 'https://private-final.example/page',
+                    title: 'Private Redirect'
+                }));
+
+                let failed = false;
+                try {
+                    await fetchWebContent('https://example.com/browser-redirect', 5000, {
+                        renderMode: 'browser'
+                    });
+                } catch {
+                    failed = true;
+                }
+                assert(failed, 'browser mode should reject DNS-resolved private final URLs');
+            }
+        },
+        {
+            name: 'browser mode should reject oversized rendered html',
+            run: async () => {
+                __setBrowserHtmlFetcherForTests(async () => ({
+                    html: `<html><body>${'x'.repeat(2 * 1024 * 1024)}</body></html>`,
+                    finalUrl: 'https://example.com/oversized-browser',
+                    title: 'Oversized'
+                }));
+
+                let failed = false;
+                try {
+                    await fetchWebContent('https://example.com/oversized-browser', 5000, {
+                        renderMode: 'browser'
+                    });
+                } catch {
+                    failed = true;
+                }
+                assert(failed, 'browser mode should enforce the rendered html byte limit');
             }
         },
         {
@@ -378,6 +547,7 @@ async function main(): Promise<void> {
     config.fetchWebAllowInsecureTls = originalFetchWebAllowInsecureTls;
     __setReadabilityParserForTests();
     __setBrowserHtmlFetcherForTests();
+    __setBrowserCookieHeaderFetcherForTests();
 
     const total = testCases.length;
     console.log(`\nResult: ${passed}/${total} passed`);
@@ -395,6 +565,7 @@ main().catch((error) => {
     config.fetchWebAllowInsecureTls = false;
     __setReadabilityParserForTests();
     __setBrowserHtmlFetcherForTests();
+    __setBrowserCookieHeaderFetcherForTests();
     console.error('❌ test-web-content failed:', error);
     process.exit(1);
 });

@@ -305,7 +305,7 @@ async function testSearchToolAutoModeUsesRuntimeDefault(): Promise<void> {
 }
 
 async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
-    const seenCalls: Array<{ readability?: boolean; includeLinks?: boolean }> = [];
+    const seenCalls: Array<{ readability?: boolean; includeLinks?: boolean; renderMode?: string }> = [];
     const runtime = createOpenWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
@@ -322,7 +322,8 @@ async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
             fetchWebContent: async (url, maxChars, options) => {
                 seenCalls.push({
                     readability: options?.readability,
-                    includeLinks: options?.includeLinks
+                    includeLinks: options?.includeLinks,
+                    renderMode: options?.renderMode
                 });
                 return {
                     url,
@@ -345,11 +346,15 @@ async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
     setupTools(server, runtime);
 
     const tools = (server as unknown as { _registeredTools: Record<string, { handler: (input: unknown) => Promise<{ content: Array<{ text: string }> }> }> })._registeredTools;
+    const fetchWebSchema = (tools.fetchWebContent as unknown as { inputSchema: { safeParse: (input: unknown) => { success: boolean } } }).inputSchema;
+    assert(fetchWebSchema.safeParse({ url: 'https://example.com', renderMode: 'browser' }).success, 'MCP fetch-web schema should accept browser renderMode');
+    assert(!fetchWebSchema.safeParse({ url: 'https://example.com', renderMode: 'invalid' }).success, 'MCP fetch-web schema should reject invalid renderMode');
     const response = await tools.fetchWebContent.handler({
         url: 'https://example.com',
         maxChars: 3000,
         readability: true,
-        includeLinks: true
+        includeLinks: true,
+        renderMode: 'browser'
     });
     const payload = JSON.parse(response.content[0].text) as {
         readabilityApplied?: boolean;
@@ -358,6 +363,7 @@ async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
 
     assertEqual(seenCalls[0].readability, true, 'MCP fetch-web should pass readability');
     assertEqual(seenCalls[0].includeLinks, true, 'MCP fetch-web should pass includeLinks');
+    assertEqual(seenCalls[0].renderMode, 'browser', 'MCP fetch-web should pass renderMode');
     assertEqual(payload.readabilityApplied, true, 'MCP fetch-web should expose readabilityApplied');
     assertEqual(payload.links?.[0]?.href, 'https://example.com/doc', 'MCP fetch-web should expose links');
 

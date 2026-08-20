@@ -170,13 +170,19 @@ Request body:
 ```json
 {
   "url": "https://awiki.ai",
-  "maxChars": 30000
+  "maxChars": 30000,
+  "renderMode": "auto",
+  "readability": false,
+  "includeLinks": false
 }
 ```
 
 Notes:
 - `url` is required
 - `maxChars` is optional, integer `1000-200000`, default `30000`
+- `renderMode` is optional: `request` uses HTTP only, `auto` (default) uses request with browser fallback, and `browser` renders directly with Playwright
+- `readability` and `includeLinks` are optional booleans; `includeLinks` applies to successful Readability output
+- `browser` returns a clear error if Playwright or its configured browser target is unavailable
 - returns the full structured web-fetch payload
 
 Example:
@@ -184,7 +190,7 @@ Example:
 ```bash
 curl --noproxy '*' -X POST http://127.0.0.1:3210/fetch-web \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://awiki.ai","maxChars":3000}'
+  -d '{"url":"https://awiki.ai","maxChars":3000,"renderMode":"browser"}'
 ```
 
 ### `POST /fetch-github-readme`

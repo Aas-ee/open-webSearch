@@ -175,7 +175,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
-| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
+| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS verification only for the request leg of `fetchWebContent`; it does not affect Playwright browser navigation. Use only for broken certificate chains |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
@@ -395,7 +395,7 @@ Proxy and TLS notes:
 - If `PROXY_URL` points to a fixed upstream proxy or overseas egress, region-sensitive sites such as Baidu, CSDN, Juejin, Linux.do, or GitHub may behave differently than before.
 - If your host machine already sets `HTTP_PROXY` or `HTTPS_PROXY`, they will no longer override the server's internal request behavior.
 - Prefer configuring `NODE_EXTRA_CA_CERTS` on Windows when a site has a missing intermediate CA.
-- Use `FETCH_WEB_INSECURE_TLS=true` only as a last resort for `fetchWebContent`, since it weakens TLS verification.
+- Use `FETCH_WEB_INSECURE_TLS=true` only as a last resort for the request leg of `fetchWebContent`; it weakens TLS verification and does not affect Playwright browser navigation.
 
 **Local STDIO Configuration for Cherry Studio (Windows):**
 ```json
@@ -604,14 +604,21 @@ Response example:
 
 ### fetchWebContent Tool Usage
 
-Fetch content directly from public HTTP(S) links, including Markdown files (`.md`) and ordinary web pages.
+Fetch content directly from public HTTP(S) links, including Markdown files (`.md`), ordinary pages, and JavaScript-rendered pages when Playwright is configured.
 
 ```typescript
 {
-  "url": string,         // Public HTTP(S) URL
-  "maxChars": number     // Optional: max returned content length (1000-200000, default 30000)
+  "url": string,          // Public HTTP(S) URL
+  "maxChars": number,     // Optional: max returned content length (1000-200000, default 30000)
+  "renderMode": string,   // Optional: request, auto (default), or browser
+  "readability": boolean, // Optional: use Mozilla Readability for HTML
+  "includeLinks": boolean // Optional: preserve links from Readability output
 }
 ```
+
+`request` never starts a browser or uses browser cookies. `auto` preserves the existing request-first behavior and uses browser assistance only when needed. `browser` renders the page directly and returns a clear error if Playwright or its browser target is unavailable. Initial and final URLs remain subject to public-network safety checks.
+
+Browser requests are revalidated before continuation, but this process does not pin DNS answers to Chromium's eventual socket. Remote Playwright/CDP endpoints must therefore enforce their own trusted DNS and egress policy.
 
 Usage example:
 ```typescript
@@ -620,7 +627,8 @@ use_mcp_tool({
   tool_name: "fetchWebContent",
   arguments: {
     url: "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
-    maxChars: 12000
+    maxChars: 12000,
+    renderMode: "auto"
   }
 })
 ```
@@ -632,6 +640,7 @@ Response example:
   "finalUrl": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
   "contentType": "text/plain; charset=utf-8",
   "title": "",
+  "retrievalMethod": "request",
   "truncated": false,
   "content": "# Open-WebSearch MCP Server ..."
 }
