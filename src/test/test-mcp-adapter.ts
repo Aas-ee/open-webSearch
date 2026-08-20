@@ -523,8 +523,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         {
             ALLOWED_SEARCH_ENGINES: 'hackernews,bing',
             DEFAULT_SEARCH_ENGINE: 'hackernews',
-            // 显式清零 Playwright 参数，确保“参数不足退回请求模式”断言不受宿主环境污染影响。
-            PLAYWRIGHT_MODULE_PATH: '',
+            // 将模块路径指向"可加载但不暴露 chromium"的夹具，确定性模拟 Playwright 不可用：本分支 devDependencies 已安装 playwright，无法再靠"清零参数=包加载不到"强制不可用。
+            PLAYWRIGHT_MODULE_PATH: 'test-assets/fake-playwright-no-chromium-client.cjs',
             PLAYWRIGHT_PACKAGE: '',
             PLAYWRIGHT_WS_ENDPOINT: '',
             PLAYWRIGHT_CDP_ENDPOINT: '',
@@ -599,7 +599,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         {
             SEARCH_MODE: 'auto',
             PLAYWRIGHT_CDP_ENDPOINT: 'http://127.0.0.1:65530',
-            PLAYWRIGHT_MODULE_PATH: '/definitely/missing/playwright',
+            // 用"可加载但无 chromium"夹具确定性模拟客户端无效（playwright 已安装后，缺失路径会回退到已装包而不可复现）。
+            PLAYWRIGHT_MODULE_PATH: 'test-assets/fake-playwright-no-chromium-client.cjs',
             PLAYWRIGHT_PACKAGE: '',
             PLAYWRIGHT_WS_ENDPOINT: '',
             PLAYWRIGHT_EXECUTABLE_PATH: ''

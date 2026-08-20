@@ -58,6 +58,37 @@ export function looksLikeBotChallengePage(html: string): boolean {
     return BOT_KEYWORDS.some((keyword) => normalized.includes(keyword));
 }
 
+// 页面侧脚本：检测视口中心的顶层悬浮浮层文本，用于捕获非语义化 <dialog> 的模态框，例如放在 Shadow DOM 内的 Salesforce SLDS 模态。
+// 注意：本函数作为 page.evaluate 的参数传入，被序列化后在页面上下文执行，因此函数体必须自包含，不得引用外部模块变量。
+export function detectFloatingOverlayPageScript(): string[] | undefined {
+    function isVisuallyFloating(el: Element): boolean {
+        const style = window.getComputedStyle(el);
+        const pos = style.position;
+        if (pos !== 'fixed' && pos !== 'absolute') return false;
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const z = parseInt(style.zIndex || '0', 10);
+        return !isNaN(z) && z > 0;
+    }
+    function findFloatingInTree(el: Element): string | undefined {
+        if (isVisuallyFloating(el)) return el.textContent?.trim();
+        if (el.shadowRoot) {
+            const all = el.shadowRoot.querySelectorAll('*');
+            for (const desc of all) {
+                if (isVisuallyFloating(desc)) return desc.textContent?.trim();
+            }
+        }
+        return undefined;
+    }
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const topEl = document.elementFromPoint(cx, cy);
+    if (topEl) {
+        const text = findFloatingInTree(topEl);
+        if (text) return [text];
+    }
+    return undefined;
+}
+
 // Cache only blocked hostname classifications. Public resolutions are checked
 // on every request so DNS rebinding cannot reuse an earlier allow decision.
 const SUBRESOURCE_CLASSIFICATION_TTL_MS = 60 * 1000;
@@ -134,7 +165,8 @@ export async function __installNavigationGuardForTests(page: any): Promise<void>
 // aborts ones whose target is private/loopback at either the literal or
 // DNS-resolved level. Navigation hits DNS fresh every time to keep the
 // rebinding window tight; sub-resources go through a hostname TTL cache.
-async function installNavigationGuard(page: any): Promise<void> {
+// 安装本身是 fail-closed：route 不可用或安装失败都会抛出，调用方必须拒绝无守卫的导航。
+export async function installNavigationGuard(page: any): Promise<void> {
     if (typeof page.route !== 'function') {
         throw new Error('Browser request interception is unavailable; refusing browser navigation because public-network safety cannot be enforced');
     }
@@ -208,7 +240,7 @@ export async function __createCookieCollectionPageForTests(browser: any): Promis
     return await createCookieCollectionPage(browser);
 }
 
-async function readCookiesFromPage(page: any, url: string): Promise<string> {
+export async function readCookiesFromPage(page: any, url: string): Promise<string> {
     if (typeof page.context === 'function') {
         const context = page.context();
         if (context && typeof context.cookies === 'function') {
@@ -269,7 +301,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
     }
 }
 
-export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string }> {
+export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string; dialogTexts?: string[] }> {
     await assertPublicHttpUrlResolved(urlInput, 'Browser fetch URL');
 
     const playwright = await loadPlaywrightClient({ silent: true });
@@ -289,6 +321,53 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
         });
 
         try {
+            // 在页面 JS 自动关闭弹层之前抢先捕获 <dialog> 悬浮层文本：<dialog> 是"悬浮于内容之上"的语义化 HTML 元素。通过 addInitScript 注入 MutationObserver，使其先于任何页面脚本运行，待页面稳定后再取回捕获到的文本。
+            if (typeof page.addInitScript === 'function') {
+                await page.addInitScript(() => {
+                    (window as any).__mcpCapturedDialogs = [];
+
+                    function startDialogObserver() {
+                        const root = document.documentElement;
+                        // 使用 document.open() 的页面会让 documentElement 暂时为 null，等 DOMContentLoaded 或下一轮任务再重试。
+                        if (!root) {
+                            if (document.readyState === 'loading') {
+                                document.addEventListener('DOMContentLoaded', startDialogObserver, { once: true });
+                            } else {
+                                setTimeout(startDialogObserver, 0);
+                            }
+                            return;
+                        }
+
+                        const observer = new MutationObserver((mutations: MutationRecord[]) => {
+                            for (const m of mutations) {
+                                for (const node of m.addedNodes) {
+                                    if (node instanceof Element) {
+                                        if (node.tagName === 'DIALOG' && (node as HTMLDialogElement).open) {
+                                            const text = node.textContent?.trim();
+                                            if (text) {
+                                                (window as any).__mcpCapturedDialogs.push(text);
+                                            }
+                                        }
+                                        const nested = node.querySelectorAll?.('dialog[open]');
+                                        if (nested) {
+                                            for (const d of nested) {
+                                                const text = d.textContent?.trim();
+                                                if (text) {
+                                                    (window as any).__mcpCapturedDialogs.push(text);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        observer.observe(root, { childList: true, subtree: true });
+                    }
+
+                    startDialogObserver();
+                }).catch(() => undefined);
+            }
+
             await page.goto(urlInput, {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
@@ -317,10 +396,37 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
             const finalUrl = typeof page.url === 'function' ? page.url() : urlInput;
             const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';
 
+            // 取回捕获到的 dialog 文本，同时补查此刻仍处于打开状态的 dialog（以防它们在 MutationObserver 停止响应后才出现或被漏掉）。
+            // 若仍为空，回退到视口中心悬浮层检测，因为真实站点的模态框经常不是语义化 <dialog>（例如 Salesforce SLDS 模态 SECTION.slds-modal 位于 Shadow DOM 内），只能靠 fixed/absolute + z-index 的视觉悬浮判定捕获。
+            let dialogTexts: string[] | undefined;
+            if (typeof page.evaluate === 'function') {
+                const collected = await page.evaluate(() => {
+                    const captured: string[] = (window as any).__mcpCapturedDialogs || [];
+                    for (const d of document.querySelectorAll('dialog[open]')) {
+                        const text = d.textContent?.trim();
+                        if (text && !captured.includes(text)) {
+                            captured.push(text);
+                        }
+                    }
+                    return captured;
+                }).catch(() => [] as string[]);
+
+                if (collected && collected.length > 0) {
+                    dialogTexts = collected;
+                } else {
+                    dialogTexts = await page.evaluate(detectFloatingOverlayPageScript).catch(() => undefined) ?? undefined;
+                }
+
+                if (dialogTexts && dialogTexts.length > 1) {
+                    dialogTexts = Array.from(new Set(dialogTexts));
+                }
+            }
+
             return {
                 html: String(html || ''),
                 finalUrl: String(finalUrl || urlInput),
-                title: String(title || '')
+                title: String(title || ''),
+                ...(dialogTexts ? { dialogTexts } : {})
             };
         } finally {
             await releasePage();

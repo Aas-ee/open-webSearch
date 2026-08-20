@@ -4,11 +4,18 @@ import { config } from '../../config.js';
 import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
 import {
+    detectFloatingOverlayPageScript,
     fetchPageHtmlWithBrowser,
-    getBrowserCookieHeader,
+    installNavigationGuard,
     looksLikeBotChallengePage,
+    readCookiesFromPage,
     MAX_BROWSER_HTML_BYTES
 } from '../../utils/browserCookies.js';
+import {
+    loadPlaywrightClient,
+    openPlaywrightBrowser,
+    acquirePooledPlaywrightPage
+} from '../../utils/playwrightClient.js';
 
 export interface FetchWebContentResult {
     url: string;
@@ -109,7 +116,6 @@ function isMarkdownContentType(contentType: string): boolean {
 }
 
 let browserHtmlFetcher: typeof fetchPageHtmlWithBrowser = fetchPageHtmlWithBrowser;
-let browserCookieHeaderFetcher: typeof getBrowserCookieHeader = getBrowserCookieHeader;
 let readabilityParser: (html: string, finalUrl: string) => Promise<ReadabilityArticle | null> = async (html, finalUrl) => {
     try {
         const moduleName = '@mozilla/readability';
@@ -241,6 +247,28 @@ function buildRequestOptions(cookieHeader?: string): any {
     return requestOptions;
 }
 
+// 致命错误黑名单：命中即必须原样上抛，不得进入浏览器回退。黑名单只收录三类“换任何栈也改变不了结果”的错误——安全与资源上限拒绝（来自本项目 urlSafety/requestWithSafeRedirects 的策略约束）、DNS 确定性失败；其余所有错误（传输层被断、TLS 指纹被拒、未知的新错误形态）一律委托给 Playwright 竞速层。黑名单若有遗漏，竞速层入口的 assertPublicHttpUrlResolved 与导航守卫会作为纵深防御兜底拦截。
+const FATAL_FALLBACK_ERROR_CODES = new Set(['ERR_RESPONSE_TOO_LARGE', 'ENOTFOUND']);
+
+const FATAL_FALLBACK_MESSAGE_PATTERN =
+    /private or local network|resolves to private|must use HTTP or HTTPS|could not be resolved|Too many redirects|body too large|maxContentLength/i;
+
+function isFatalRequestError(error: any): boolean {
+    let current = error;
+    // 沿 cause 链逐层检查（axios/undici 会把原生错误包在 cause 里），避免被包装的致命错误绕过判定
+    for (let depth = 0; current && depth < 5; depth += 1) {
+        const code = String(current.code || '');
+        if (code && FATAL_FALLBACK_ERROR_CODES.has(code)) {
+            return true;
+        }
+        if (FATAL_FALLBACK_MESSAGE_PATTERN.test(String(current.message || ''))) {
+            return true;
+        }
+        current = current.cause;
+    }
+    return false;
+}
+
 function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extraction?: HtmlExtractionResult): boolean {
     if (looksLikeBotChallengePage(raw)) {
         return true;
@@ -270,20 +298,8 @@ async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; 
     };
 }
 
-async function tryFetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string } | undefined> {
-    try {
-        return await fetchHtmlViaBrowser(url);
-    } catch {
-        return undefined;
-    }
-}
-
 export function __setBrowserHtmlFetcherForTests(fetcher?: typeof fetchPageHtmlWithBrowser): void {
     browserHtmlFetcher = fetcher || fetchPageHtmlWithBrowser;
-}
-
-export function __setBrowserCookieHeaderFetcherForTests(fetcher?: typeof getBrowserCookieHeader): void {
-    browserCookieHeaderFetcher = fetcher || getBrowserCookieHeader;
 }
 
 export function __setReadabilityParserForTests(parser?: (html: string, finalUrl: string) => Promise<ReadabilityArticle | null>): void {
@@ -302,29 +318,206 @@ export function __setReadabilityParserForTests(parser?: (html: string, finalUrl:
     });
 }
 
-async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: any; usedBrowserCookies: boolean }> {
-    let cookieHeader: string | undefined;
-    try {
-        cookieHeader = await browserCookieHeaderFetcher(url);
-    } catch {
-        return { response: undefined, usedBrowserCookies: false };
+type BrowserFetchResult = {
+    contentType: string;
+    finalUrl: string;
+    raw: string;
+    title: string;
+    retrievalMethod: 'request-with-browser-cookies' | 'browser-html';
+    dialogTexts?: string[];
+};
+
+const MIN_RACE_HTTP_HTML_CHARS = 200;
+
+function isUsableHttpRaceResult(raw: string): boolean {
+    return raw.length > MIN_RACE_HTTP_HTML_CHARS && !looksLikeBotChallengePage(raw);
+}
+
+type HttpRaceOutcome = { ok: true; contentType: string; raw: string } | { ok: false };
+type BrowserRaceOutcome = { ok: true; result: BrowserFetchResult } | { ok: false; error: unknown };
+
+// 浏览器导航一次，页面 domcontentloaded 后立即取 Cookie 发起 HTTP 请求，同时浏览器继续渲染。
+// 两条路径竞速：任一结果到达 settle 循环即评估，内容可用的先达者立即胜出。HTTP 失败或无效时，浏览器渲染结果可以先于 HTTP 返回，不必等 HTTP 请求耗尽。
+async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFetchResult> {
+    const playwright = await loadPlaywrightClient({ silent: true });
+    if (!playwright) {
+        throw new Error('Playwright client is not available for browser fetch');
     }
 
-    if (!cookieHeader) {
-        return { response: undefined, usedBrowserCookies: false };
-    }
+    await assertPublicHttpUrlResolved(url, 'Browser fetch URL');
+
+    const session = await openPlaywrightBrowser();
+
+    // 竞速取消与延迟释放：HTTP 胜出时浏览器臂可能仍在渲染，赢家立即返回结果，page/session 留到浏览器臂收尾完成后于后台释放，避免浏览器臂继续操作已释放的 page。
+    let deferRelease = false;
+    let raceCancelled = false;
 
     try {
-        return {
-            response: await requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader), 'Request URL'),
-            usedBrowserCookies: true
-        };
-    } catch {
-        return {
-            response: undefined,
-            usedBrowserCookies: true
-        };
+        const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
+            poolKey: 'fetch-race',
+            preparePage: async (p: any) => {
+                // 复用 browserCookies 的 fail-closed 导航守卫：导航与子资源都经过 DNS 解析级公网校验，route不可用或安装失败会直接抛错并终止本次抓取，杜绝无守卫导航带来的私网解析绕过。
+                await installNavigationGuard(p);
+            }
+        });
+
+        try {
+            // ── 导航（只此一次）──
+            await page.goto(url, {
+                waitUntil: 'domcontentloaded',
+                timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
+            });
+
+            // ── 立即取 Cookie，发起 HTTP 请求 ──
+            const cookieHeader = await readCookiesFromPage(page, url);
+            const httpPromise: Promise<HttpRaceOutcome> = cookieHeader
+                ? requestWithSafeRedirects('GET', url, buildRequestOptions(cookieHeader), 'Request URL')
+                    .then((resp): HttpRaceOutcome => ({
+                        ok: true as const,
+                        contentType: String(resp.headers['content-type'] || '').toLowerCase(),
+                        raw: typeof resp.data === 'string' ? resp.data : ''
+                    }))
+                    .catch((): HttpRaceOutcome => ({ ok: false as const }))
+                : Promise.resolve({ ok: false as const } as HttpRaceOutcome);
+
+            // ── 浏览器继续渲染（与 HTTP 请求真正并行竞速）──
+            const renderBrowserHtml = async (): Promise<BrowserFetchResult> => {
+                if (typeof page.waitForLoadState === 'function') {
+                    await page.waitForLoadState('networkidle', {
+                        timeout: Math.min(Math.max(config.playwrightNavigationTimeoutMs, 5000), 15000)
+                    }).catch(() => undefined);
+                }
+                if (raceCancelled) {
+                    throw new Error('browser race arm cancelled');
+                }
+                if (typeof page.waitForTimeout === 'function') {
+                    await page.waitForTimeout(1200).catch(() => undefined);
+                }
+                if (raceCancelled) {
+                    throw new Error('browser race arm cancelled');
+                }
+                const html = typeof page.content === 'function' ? await page.content() : '';
+                if (raceCancelled) {
+                    throw new Error('browser race arm cancelled');
+                }
+                const finalUrl = typeof page.url === 'function' ? page.url() : url;
+                const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';
+                if (raceCancelled) {
+                    throw new Error('browser race arm cancelled');
+                }
+
+                let dialogTexts: string[] | undefined;
+                if (typeof page.evaluate === 'function') {
+                    dialogTexts = await page.evaluate(detectFloatingOverlayPageScript).catch(() => undefined);
+                }
+
+                const resolvedFinalUrl = String(finalUrl || url);
+                // 浏览器导航可能到达任意最终 URL，这里执行 DNS 解析级公网校验，因为字面量校验无法拦截解析到私网地址的域名。
+                await assertPublicHttpUrlResolved(resolvedFinalUrl, 'Final URL');
+
+                const htmlBytes = Buffer.byteLength(String(html || ''), 'utf8');
+                if (htmlBytes > MAX_BROWSER_HTML_BYTES) {
+                    throw new Error(`Response body too large (${htmlBytes} bytes). Max allowed is ${MAX_BROWSER_HTML_BYTES} bytes`);
+                }
+
+                return {
+                    contentType: 'text/html; charset=utf-8',
+                    finalUrl: resolvedFinalUrl,
+                    raw: String(html || ''),
+                    title: String(title || ''),
+                    retrievalMethod: 'browser-html' as const,
+                    dialogTexts
+                };
+            };
+
+            const browserOutcome: Promise<BrowserRaceOutcome> = renderBrowserHtml()
+                .then((result): BrowserRaceOutcome => ({ ok: true, result }), (error): BrowserRaceOutcome => ({ ok: false, error }));
+
+            // ── 竞速：两条臂并行推进，任一结果 settle 即评估，内容可用的先达者立即胜出。HTTP 无效时浏览器可以先返回；HTTP 有效时立即采纳，再异步收尾浏览器臂，避免其继续操作已释放的 page。
+            let httpResolved: HttpRaceOutcome | undefined;
+            let browserOutcomeValue: BrowserRaceOutcome | undefined;
+            let httpConsumed = false;
+            let browserConsumed = false;
+            let browserFailure: unknown;
+
+            const httpArrival: Promise<void> = httpPromise.then((outcome) => { httpResolved = outcome; });
+            const browserArrival: Promise<void> = browserOutcome.then((outcome) => { browserOutcomeValue = outcome; });
+            const remaining: Array<Promise<void>> = [httpArrival, browserArrival];
+
+            for (;;) {
+                if (remaining.length === 0) {
+                    break;
+                }
+                await Promise.race(remaining);
+                if (httpResolved !== undefined && remaining.includes(httpArrival)) {
+                    remaining.splice(remaining.indexOf(httpArrival), 1);
+                }
+                if (browserOutcomeValue !== undefined && remaining.includes(browserArrival)) {
+                    remaining.splice(remaining.indexOf(browserArrival), 1);
+                }
+
+                // HTTP 臂先 settle 且内容可用 → 立即胜出，浏览器臂转入后台收尾。
+                if (!httpConsumed && httpResolved) {
+                    if (httpResolved.ok && isUsableHttpRaceResult(httpResolved.raw)) {
+                        raceCancelled = true;
+                        deferRelease = true;
+                        // 浏览器臂收尾后在后台释放 page/session（本函数已立即返回结果）。
+                        browserOutcome
+                            .catch(() => undefined)
+                            .then(async () => {
+                                await releasePage();
+                                await session.release();
+                            })
+                            .catch(() => undefined);
+                        return {
+                            contentType: httpResolved.contentType,
+                            finalUrl: url,
+                            raw: httpResolved.raw,
+                            title: '',
+                            retrievalMethod: 'request-with-browser-cookies'
+                        };
+                    }
+                    // HTTP 失败或内容不足/疑似验证页 → 放弃该臂，交给浏览器。
+                    httpConsumed = true;
+                }
+
+                // 浏览器臂 settle：成功即返回；失败则记录并继续等待 HTTP（若仍在途）。
+                if (!browserConsumed && browserOutcomeValue) {
+                    if (browserOutcomeValue.ok) {
+                        return browserOutcomeValue.result;
+                    }
+                    browserFailure = browserOutcomeValue.error;
+                    browserConsumed = true;
+                }
+
+                if (httpConsumed && browserConsumed) {
+                    break;
+                }
+            }
+
+            // 两条臂都未产出可用内容：优先上抛浏览器失败原因。
+            raceCancelled = true;
+            if (browserFailure instanceof Error) {
+                throw browserFailure;
+            }
+            throw new Error('Browser race fallback produced no usable content');
+        } finally {
+            if (!deferRelease) {
+                await releasePage();
+            }
+        }
+    } finally {
+        if (!deferRelease) {
+            await session.release();
+        }
     }
+}
+
+// 浏览器抓取层的注入接缝：生产使用 Playwright 实现，测试可整体替换，从而不必在生产分支里判断"是否处于测试中"。
+let browserFetcher: (url: string) => Promise<BrowserFetchResult> = fetchWithCookiesRaceViaPlaywright;
+
+export function __setBrowserFetcherForTests(fetcher?: (url: string) => Promise<BrowserFetchResult>): void {
+    browserFetcher = fetcher || fetchWithCookiesRaceViaPlaywright;
 }
 
 export async function fetchWebContent(
@@ -380,28 +573,25 @@ export async function fetchWebContent(
         }
 
         let response: any;
-        let usedBrowserCookies = false;
 
         try {
             response = await requestWithSafeRedirects('GET', parsedUrl.toString(), requestOptions, 'Request URL');
         } catch (error: any) {
             const status = error?.response?.status;
-            if (renderMode === 'request' || ![401, 403, 429].includes(status)) {
+            const blockedByStatus = [401, 403, 429].includes(status);
+            // 黑名单语义：request 模式不使用任何浏览器辅助；带明确 HTTP 响应且不属于反爬状态码的（404/500 等真实拒绝），以及安全/资源/DNS 致命错误，必须原样上抛；其余错误全部委托浏览器竞速层。
+            if (renderMode === 'request' || (!blockedByStatus && (error?.response || isFatalRequestError(error)))) {
                 throw error;
             }
 
-            const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
-            if (cookieRetry.response) {
-                response = cookieRetry.response;
-                usedBrowserCookies = cookieRetry.usedBrowserCookies;
-                retrievalMethod = 'request-with-browser-cookies';
-            } else {
-                response = {
-                    headers: { 'content-type': 'text/html; charset=utf-8' },
-                    data: '',
-                    request: { res: { responseUrl: parsedUrl.toString() } }
-                };
-            }
+            console.error(`fetchWebContent: HTTP request failed (${error instanceof Error ? error.message : String(error)}), falling back to the browser race layer`);
+
+            // HTTP 被拦截：设空响应，后续统一走 fetchWithCookiesRace 竞速（竞速层自己带 Cookie+HTTP 路径）
+            response = {
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+                data: '',
+                request: { res: { responseUrl: parsedUrl.toString() } }
+            };
         }
 
         contentType = String(response.headers['content-type'] || '').toLowerCase();
@@ -410,21 +600,6 @@ export async function fetchWebContent(
         raw = typeof response.data === 'string'
             ? response.data
             : JSON.stringify(response.data, null, 2);
-
-        if (renderMode === 'auto' && !usedBrowserCookies && looksLikeBotChallengePage(raw)) {
-            const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
-            if (cookieRetry.response) {
-                response = cookieRetry.response;
-                usedBrowserCookies = true;
-                retrievalMethod = 'request-with-browser-cookies';
-                contentType = String(response.headers['content-type'] || '').toLowerCase();
-                finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
-                assertPublicHttpUrl(finalUrl, 'Final URL');
-                raw = typeof response.data === 'string'
-                    ? response.data
-                    : JSON.stringify(response.data, null, 2);
-            }
-        }
 
         const contentLength = Number(response.headers['content-length']);
         if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
@@ -458,15 +633,27 @@ export async function fetchWebContent(
     }
 
     if (renderMode === 'auto' && shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
-        const browserResult = await tryFetchHtmlViaBrowser(parsedUrl.toString());
-        if (browserResult) {
-            contentType = browserResult.contentType;
-            finalUrl = browserResult.finalUrl;
-            raw = browserResult.raw;
-            retrievalMethod = 'browser-html';
+        try {
+            // 合并第2+3层：浏览器导航一次，Cookie+HTTP 和渲染竞速
+            const raceResult = await browserFetcher(parsedUrl.toString());
+            assertPublicHttpUrl(raceResult.finalUrl, 'Final URL');
+            contentType = raceResult.contentType;
+            finalUrl = raceResult.finalUrl;
+            raw = raceResult.raw;
+            retrievalMethod = raceResult.retrievalMethod;
             htmlExtraction = extractMainTextFromHtml(raw);
-            title = htmlExtraction.title || browserResult.title;
+            title = htmlExtraction.title || raceResult.title;
             extractedContent = htmlExtraction.text;
+
+            // dialogTexts 合并
+            if (raceResult.dialogTexts && raceResult.dialogTexts.length > 0) {
+                const newTexts = raceResult.dialogTexts.filter(t => !extractedContent.includes(t));
+                if (newTexts.length > 0) {
+                    extractedContent = newTexts.join('\n\n') + '\n\n' + extractedContent;
+                }
+            }
+        } catch {
+            // 浏览器回退失败（Playwright 不可用、测试桩故意抛错等）时，保留 HTTP 请求的提取结果。支持"桩抛错后保留 request 模式"的测试用例。
         }
     }
 
