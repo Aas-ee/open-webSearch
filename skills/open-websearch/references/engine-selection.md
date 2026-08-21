@@ -13,6 +13,10 @@ Engine choice is heuristic, not mandatory. If a preferred engine is unavailable,
 - Use `csdn` for developer blog content and tutorial-style posts.
 - Use `juejin` for Chinese developer posts and frontend/backend engineering topics.
 
+## Community discussions
+
+- Use `hackernews` for Hacker News stories and technology-community discussions. Results link to the submitted page when available and otherwise to the Hacker News discussion.
+
 ## Source-specific retrieval
 
 - Use `fetchGithubReadme` for GitHub repositories.

@@ -140,8 +140,8 @@ Request body:
 ```json
 {
   "query": "open web search",
-  "limit": 3,
-  "engines": ["startpage", "bing", "sogou"],
+  "limit": 4,
+  "engines": ["startpage", "bing", "sogou", "hackernews"],
   "searchMode": "playwright"
 }
 ```
