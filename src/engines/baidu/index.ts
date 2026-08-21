@@ -1,1 +1,1 @@
-export { searchBaidu } from './baidu.js';
+export { __setBaiduHttpGetForTests, parseBaiduSearchResults, searchBaidu } from './baidu.js';
