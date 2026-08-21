@@ -2283,6 +2283,22 @@ export function asBrowserUnavailableError(error: unknown, context: string): Erro
     return wrapped;
 }
 
+/** 已知的浏览器不可用消息特征，作为未带 code 的历史错误回退。 */
+const BROWSER_UNAVAILABLE_MESSAGE_RE =
+    /Playwright client is not available|No Chromium-based browser executable|request interception (?:is unavailable|could not be installed)|connect(?:ion)? (?:failed|refused|timed out)/i;
+
+/**
+ * 判定错误是否为浏览器不可用：优先看 code（各入口用 asBrowserUnavailableError 统一打标），
+ * 其次回退到已知消息特征。daemon 与 CLI 共用同一判定，避免两边分类漂移。
+ */
+export function isBrowserUnavailableError(error: unknown): boolean {
+    if ((error as { code?: unknown })?.code === 'browser_unavailable') {
+        return true;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return BROWSER_UNAVAILABLE_MESSAGE_RE.test(message);
+}
+
 export async function openPlaywrightBrowser(
     options?: { antiBot?: boolean }
 ): Promise<PlaywrightBrowserSession> {

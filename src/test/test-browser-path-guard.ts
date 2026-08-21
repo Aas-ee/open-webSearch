@@ -1,5 +1,7 @@
 import {
     __getBrowserSubresourceClassificationForTests,
+    __createCookieCollectionPageForTests,
+    __installNavigationGuardForTests,
     __resetBrowserSubresourceCacheForTests,
     classifyBrowserSubresourceUrl,
     fetchPageHtmlWithBrowser,
@@ -39,6 +41,47 @@ async function assertRejects(
 
 async function run(): Promise<void> {
     installTestDnsLookup();
+
+    await assertRejects(
+        () => __installNavigationGuardForTests({}),
+        /request interception is unavailable/,
+        'browser page without route interception'
+    );
+    console.log('✅ browser navigation fails closed without route interception');
+
+    await assertRejects(
+        () => __installNavigationGuardForTests({
+            route: async () => {
+                throw new Error('route unsupported');
+            }
+        }),
+        /could not be installed/,
+        'browser page whose route installation fails'
+    );
+    console.log('✅ browser navigation fails closed when route installation fails');
+
+    let abandonedContextClosed = 0;
+    const fallbackPage = { close: async () => undefined };
+    const fallbackContext = {
+        newPage: async () => fallbackPage,
+        clearCookies: async () => undefined
+    };
+    const pageHandle = await __createCookieCollectionPageForTests({
+        newContext: async () => ({
+            newPage: async () => {
+                throw new Error('new page failed');
+            },
+            close: async () => {
+                abandonedContextClosed += 1;
+            }
+        }),
+        contexts: () => [fallbackContext]
+    });
+    if (abandonedContextClosed !== 1 || pageHandle.page !== fallbackPage) {
+        throw new Error('failed dedicated browser context should close before default-context fallback');
+    }
+    await pageHandle.close();
+    console.log('✅ failed dedicated browser context closes before fallback');
 
     // getBrowserCookieHeader must reject before loading Playwright.
     await assertRejects(
@@ -135,15 +178,41 @@ async function run(): Promise<void> {
     );
     console.log('✅ subresource guard rejects repeated DNS-resolved private (cache hit)');
 
-    await classifyBrowserSubresourceUrl('http://public-dns.example/cdn/asset.css');
-    if (__getBrowserSubresourceClassificationForTests('public-dns.example') !== true) {
-        throw new Error('expected cached positive classification for public-dns.example');
+    // Rebind defense: a host that resolves public then private across requests
+    // must be blocked on the second request (public allows are never cached).
+    let rebindLookups = 0;
+    __setDnsLookupForTests(async (hostname) => {
+        if (hostname !== 'rebind.example') {
+            throw new Error(`unexpected hostname: ${hostname}`);
+        }
+        rebindLookups += 1;
+        return [{ address: rebindLookups === 1 ? '93.184.216.34' : '127.0.0.1' }];
+    });
+    await classifyBrowserSubresourceUrl('https://rebind.example/first.js');
+    await assertRejects(
+        () => classifyBrowserSubresourceUrl('https://rebind.example/second.js'),
+        /resolves to private IP/,
+        'subresource host that resolves public then private across requests'
+    );
+    if (rebindLookups !== 2) {
+        throw new Error(`expected two DNS lookups for rebinding defense, got ${rebindLookups}`);
     }
-    console.log('✅ subresource guard allows public DNS-resolved host and caches positive classification');
+    console.log('✅ subresource guard revalidates public hosts on subsequent requests');
 
-    // Second call must succeed and stay cached.
+    // 重新装回确定性映射，供下面的 public-host 断言使用。
+    installTestDnsLookup();
+
+    // Public hosts are never cached: each request re-resolves so a later
+    // private resolution cannot be masked by an earlier allow decision.
+    await classifyBrowserSubresourceUrl('http://public-dns.example/cdn/asset.css');
+    if (__getBrowserSubresourceClassificationForTests('public-dns.example') !== undefined) {
+        throw new Error('public subresource classifications must not be cached');
+    }
+    console.log('✅ subresource guard allows public DNS-resolved host without caching an allow decision');
+
+    // Second call must resolve again rather than trusting an earlier allow.
     await classifyBrowserSubresourceUrl('http://public-dns.example/cdn/other.js');
-    console.log('✅ subresource guard allows repeated public host (cache hit)');
+    console.log('✅ subresource guard revalidates repeated public hosts');
 
     // 恢复默认 DNS 解析，避免影响同进程内后续测试。
     __setDnsLookupForTests();

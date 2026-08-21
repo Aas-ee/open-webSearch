@@ -14,6 +14,8 @@ function assertEqual(actual: boolean, expected: boolean, message: string): void 
 function runHostCases(): void {
     const hostCases: Case[] = [
         { value: 'localhost', expected: true },
+        { value: 'localhost.', expected: true },
+        { value: 'foo.localhost.', expected: true },
         { value: '127.0.0.1', expected: true },
         { value: '10.0.0.5', expected: true },
         { value: '172.20.1.8', expected: true },
@@ -38,6 +40,7 @@ function runUrlCases(): void {
         { value: 'http://8.8.8.8/resource', expected: true },
         { value: 'ftp://example.com/file', expected: false },
         { value: 'http://localhost:3000/secret', expected: false },
+        { value: 'http://foo.localhost./secret', expected: false },
         { value: 'http://127.0.0.1/admin', expected: false },
         { value: 'http://169.254.169.254/latest/meta-data', expected: false }
     ];

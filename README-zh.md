@@ -126,6 +126,7 @@ MCP工具支持：
     - juejin
     - startpage
     - sogou
+    - hackernews
 - 支持HTTP代理配置，轻松解决网络访问限制
 - 无需API密钥或身份验证
 - 返回带标题、URL和描述的结构化结果
@@ -223,7 +224,7 @@ npm run search:cli -- "open web search" --json
 本地 daemon HTTP API（`serve`、`status`、`GET /health`、`POST /search`、`POST /fetch-*`）请参考 [docs/http-api.md](docs/http-api.md)。
 
 ## TODO
-- 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,~~Sogou~~（已支持）,Google等搜索引擎
+- 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,~~Sogou~~（已支持）,~~Hacker News~~（已支持）,Google等搜索引擎
 - 支持更多博客论坛、社交软件
 - 优化文章内容提取功能，增加更多站点支持
 - ~~支持GitHub README获取~~（已支持）
@@ -261,10 +262,10 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 |--------|-------------------------|--------|--------------------------------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS                               |
 | `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置                             |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎                               |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | 默认搜索引擎                               |
 | `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理                             |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL                             |
-| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验。只建议在目标站点证书链异常时临时使用 |
+| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 的请求路径关闭 TLS 校验，不影响 Playwright 浏览器导航。只建议在证书链异常时临时使用 |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
@@ -432,7 +433,7 @@ Windows 下的 NPX 配置：
 - 如果 `PROXY_URL` 指向固定上游代理或固定出口，百度、CSDN、掘金、Linux.do、GitHub 这类对地区较敏感的站点表现可能会和之前不同。
 - 如果系统里已经设置了 `HTTP_PROXY` 或 `HTTPS_PROXY`，它们不再覆盖服务器内部请求行为。
 - Windows 上如果站点缺少中间证书，优先建议配置 `NODE_EXTRA_CA_CERTS`。
-- `FETCH_WEB_INSECURE_TLS=true` 只建议作为 `fetchWebContent` 的兜底方案使用，因为它会降低 TLS 校验强度。
+- `FETCH_WEB_INSECURE_TLS=true` 只建议作为 `fetchWebContent` 请求路径的兜底方案；它会降低 TLS 校验强度，且不影响 Playwright 浏览器导航。
 
 **VSCode版(Claude开发扩展):**
 ```json
@@ -525,7 +526,7 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 |--------|-------------------------|--------|------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS |
 | `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置 |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎 |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | 默认搜索引擎 |
 | `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理 |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口 |
@@ -566,7 +567,7 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 {
   "query": string,        // 搜索查询词
   "limit": number,        // 可选：返回结果数量（默认：10）
-  "engines": string[],    // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) 默认使用当前运行配置
+  "engines": string[],    // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou,hackernews) 默认使用当前运行配置
   "searchMode": string    // 可选：request、auto 或 playwright（当前仅对 Bing 生效）
 }
 ```
@@ -698,14 +699,21 @@ use_mcp_tool({
 
 ### fetchWebContent工具使用说明
 
-用于直接抓取公开可访问的 HTTP(S) 链接内容，支持 Markdown 文件（`.md`）和普通网页。
+用于直接抓取公开可访问的 HTTP(S) 链接内容，支持 Markdown 文件（`.md`）、普通网页，以及配置 Playwright 后的 JavaScript 渲染页面。
 
 ```typescript
 {
-  "url": string,         // 公开可访问的 HTTP(S) URL
-  "maxChars": number     // 可选：最大返回字符数（1000-200000，默认30000）
+  "url": string,          // 公开可访问的 HTTP(S) URL
+  "maxChars": number,     // 可选：最大返回字符数（1000-200000，默认30000）
+  "renderMode": string,   // 可选：request、auto（默认）或 browser
+  "readability": boolean, // 可选：对 HTML 使用 Mozilla Readability
+  "includeLinks": boolean // 可选：保留 Readability 输出中的链接
 }
 ```
+
+`request` 不会启动浏览器或使用浏览器 Cookie；`auto` 保持现有的请求优先行为，仅在必要时使用浏览器辅助；`browser` 直接渲染页面，当 Playwright 或浏览器目标不可用时返回明确错误。初始 URL 和最终 URL 仍会经过公网安全校验。
+
+浏览器请求会在继续前重新校验，但该进程不会把 DNS 结果绑定到 Chromium 最终建立的 Socket。远程 Playwright/CDP 端点仍必须使用可信的 DNS 与出站网络策略。
 
 使用示例：
 ```typescript
@@ -714,7 +722,8 @@ use_mcp_tool({
   tool_name: "fetchWebContent",
   arguments: {
     url: "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
-    maxChars: 12000
+    maxChars: 12000,
+    renderMode: "auto"
   }
 })
 ```
@@ -726,6 +735,7 @@ use_mcp_tool({
   "finalUrl": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
   "contentType": "text/plain; charset=utf-8",
   "title": "",
+  "retrievalMethod": "request",
   "truncated": false,
   "content": "# Open-WebSearch MCP Server ..."
 }
@@ -789,7 +799,7 @@ use_mcp_tool({
 
 4. **搜索引擎配置**：
    - 可通过环境变量`DEFAULT_SEARCH_ENGINE`设置默认搜索引擎
-   - 支持的引擎有：bing, duckduckgo, exa, brave, baidu, csdn, juejin, startpage, sogou
+   - 支持的引擎有：bing, duckduckgo, exa, brave, baidu, csdn, linuxdo, juejin, startpage, sogou, hackernews
    - 当搜索特定网站内容时，会自动使用默认搜索引擎
 
 5. **代理服务配置**：

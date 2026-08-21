@@ -195,6 +195,32 @@ async function testSetupToolsUsesRuntimeConfigDefaults(): Promise<void> {
     console.log('✅ setupTools uses runtime.config defaults');
 }
 
+function testSearchSchemaSupportsHackerNews(): void {
+    const server = new McpServer({ name: 'test', version: '1.0.0' });
+    setupTools(server, createOpenWebSearchRuntime({ config: createTestConfig() }));
+
+    const tools = (server as unknown as {
+        _registeredTools: Record<string, {
+            description: string;
+            inputSchema: { safeParse: (input: unknown) => { success: boolean } };
+        }>;
+    })._registeredTools;
+    const accepted = tools.search.inputSchema.safeParse({
+        query: 'Model Context Protocol',
+        engines: ['Hacker News']
+    });
+    const rejected = tools.search.inputSchema.safeParse({
+        query: 'Model Context Protocol',
+        engines: ['not-a-real-engine']
+    });
+
+    assert(accepted.success, 'MCP search schema should accept the Hacker News alias');
+    assert(!rejected.success, 'MCP search schema should still reject unsupported engines');
+    assert(tools.search.description.includes('Hacker News'), 'MCP search description should mention Hacker News');
+
+    console.log('✅ MCP search schema supports Hacker News');
+}
+
 async function testSearchToolPassesSearchModeOverride(): Promise<void> {
     const seenCalls: Array<{ searchMode?: string }> = [];
     // 只有 SEARCH_MODE=auto 且 Playwright 可用时，searchMode 参数才会注册并转发；因此这里使用 auto + 远端端点配置。
@@ -305,7 +331,7 @@ async function testSearchToolAutoModeUsesRuntimeDefault(): Promise<void> {
 }
 
 async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
-    const seenCalls: Array<{ readability?: boolean; includeLinks?: boolean }> = [];
+    const seenCalls: Array<{ readability?: boolean; includeLinks?: boolean; renderMode?: string }> = [];
     const runtime = createOpenWebSearchRuntime({
         config: createTestConfig(),
         dependencies: {
@@ -322,7 +348,8 @@ async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
             fetchWebContent: async (url, maxChars, options) => {
                 seenCalls.push({
                     readability: options?.readability,
-                    includeLinks: options?.includeLinks
+                    includeLinks: options?.includeLinks,
+                    renderMode: options?.renderMode
                 });
                 return {
                     url,
@@ -345,11 +372,15 @@ async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
     setupTools(server, runtime);
 
     const tools = (server as unknown as { _registeredTools: Record<string, { handler: (input: unknown) => Promise<{ content: Array<{ text: string }> }> }> })._registeredTools;
+    const fetchWebSchema = (tools.fetchWebContent as unknown as { inputSchema: { safeParse: (input: unknown) => { success: boolean } } }).inputSchema;
+    assert(fetchWebSchema.safeParse({ url: 'https://example.com', renderMode: 'browser' }).success, 'MCP fetch-web schema should accept browser renderMode');
+    assert(!fetchWebSchema.safeParse({ url: 'https://example.com', renderMode: 'invalid' }).success, 'MCP fetch-web schema should reject invalid renderMode');
     const response = await tools.fetchWebContent.handler({
         url: 'https://example.com',
         maxChars: 3000,
         readability: true,
-        includeLinks: true
+        includeLinks: true,
+        renderMode: 'browser'
     });
     const payload = JSON.parse(response.content[0].text) as {
         readabilityApplied?: boolean;
@@ -358,6 +389,7 @@ async function testFetchWebToolPassesReadabilityFlags(): Promise<void> {
 
     assertEqual(seenCalls[0].readability, true, 'MCP fetch-web should pass readability');
     assertEqual(seenCalls[0].includeLinks, true, 'MCP fetch-web should pass includeLinks');
+    assertEqual(seenCalls[0].renderMode, 'browser', 'MCP fetch-web should pass renderMode');
     assertEqual(payload.readabilityApplied, true, 'MCP fetch-web should expose readabilityApplied');
     assertEqual(payload.links?.[0]?.href, 'https://example.com/doc', 'MCP fetch-web should expose links');
 
@@ -424,8 +456,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         `,
         {
             MODE: 'stdio',
-            DEFAULT_SEARCH_ENGINE: 'duckduckgo',
-            ALLOWED_SEARCH_ENGINES: 'duckduckgo,bing,exa',
+            DEFAULT_SEARCH_ENGINE: 'hackernews',
+            ALLOWED_SEARCH_ENGINES: 'hackernews,bing,exa',
             SEARCH_MODE: 'auto',
             USE_PROXY: 'true',
             PROXY_URL: 'http://127.0.0.1:7890',
@@ -445,8 +477,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
         enableHttpServer: boolean;
     };
 
-    assertEqual(configPayload.defaultSearchEngine, 'duckduckgo', 'configured default search engine');
-    assertEqual(configPayload.allowedSearchEngines.join(','), 'duckduckgo,bing,exa', 'configured allowed search engines');
+    assertEqual(configPayload.defaultSearchEngine, 'hackernews', 'configured default search engine');
+    assertEqual(configPayload.allowedSearchEngines.join(','), 'hackernews,bing,exa', 'configured allowed search engines');
     assertEqual(configPayload.searchMode, 'auto', 'configured search mode');
     assertEqual(configPayload.useProxy, true, 'configured useProxy');
     assertEqual(configPayload.proxyUrl, 'http://127.0.0.1:7890', 'configured proxyUrl');
@@ -489,8 +521,8 @@ function testConfigDrivenEngineSelectionAndMode(): void {
             }, null, 2));
         `,
         {
-            ALLOWED_SEARCH_ENGINES: 'duckduckgo,bing',
-            DEFAULT_SEARCH_ENGINE: 'duckduckgo',
+            ALLOWED_SEARCH_ENGINES: 'hackernews,bing',
+            DEFAULT_SEARCH_ENGINE: 'hackernews',
             // 显式清零 Playwright 参数，确保“参数不足退回请求模式”断言不受宿主环境污染影响。
             PLAYWRIGHT_MODULE_PATH: '',
             PLAYWRIGHT_PACKAGE: '',
@@ -505,7 +537,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
     };
     assert(descriptionPayload.names.includes('search'), 'default search tool should still be registered');
     assert(
-        descriptionPayload.searchDescription.includes('Duckduckgo') &&
+        descriptionPayload.searchDescription.includes('Hacker News') &&
         descriptionPayload.searchDescription.includes('Bing'),
         'search description should reflect allowed engines'
     );
@@ -678,6 +710,7 @@ function testConfigDrivenEngineSelectionAndMode(): void {
 async function main(): Promise<void> {
     await testSearchToolReturnsCompatiblePayload();
     await testSetupToolsUsesRuntimeConfigDefaults();
+    testSearchSchemaSupportsHackerNews();
     await testSearchToolPassesSearchModeOverride();
     await testSearchToolAutoModeUsesRuntimeDefault();
     await testFetchWebToolPassesReadabilityFlags();

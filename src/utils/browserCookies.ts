@@ -5,6 +5,7 @@ import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js
 
 const COOKIE_CACHE_TTL_MS = 10 * 60 * 1000;
 const COOKIE_WARMUP_DELAY_MS = 1200;
+export const MAX_BROWSER_HTML_BYTES = 2 * 1024 * 1024;
 const COOKIE_CONTEXT_OPTIONS = {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
     locale: 'zh-CN',
@@ -57,9 +58,8 @@ export function looksLikeBotChallengePage(html: string): boolean {
     return BOT_KEYWORDS.some((keyword) => normalized.includes(keyword));
 }
 
-// Hostname-level TTL cache used by the subresource guard so a page loading
-// N assets from one CDN costs one DNS lookup, not N. Bounded to keep memory
-// capped; short TTL shrinks the DNS-rebinding window for subresources.
+// Cache only blocked hostname classifications. Public resolutions are checked
+// on every request so DNS rebinding cannot reuse an earlier allow decision.
 const SUBRESOURCE_CLASSIFICATION_TTL_MS = 60 * 1000;
 const SUBRESOURCE_CLASSIFICATION_MAX_ENTRIES = 1024;
 type SubresourceClassification = { allowed: boolean; expiresAt: number };
@@ -77,7 +77,7 @@ function readSubresourceClassification(hostname: string): boolean | undefined {
     return entry.allowed;
 }
 
-function writeSubresourceClassification(hostname: string, allowed: boolean): void {
+function writeBlockedSubresourceClassification(hostname: string): void {
     if (subresourceClassificationCache.size >= SUBRESOURCE_CLASSIFICATION_MAX_ENTRIES) {
         // Map preserves insertion order; drop the oldest.
         const oldestKey = subresourceClassificationCache.keys().next().value;
@@ -86,14 +86,13 @@ function writeSubresourceClassification(hostname: string, allowed: boolean): voi
         }
     }
     subresourceClassificationCache.set(hostname, {
-        allowed,
+        allowed: false,
         expiresAt: Date.now() + SUBRESOURCE_CLASSIFICATION_TTL_MS
     });
 }
 
-// Async variant for sub-resource requests. Uses the TTL cache so that common
-// page-load patterns (dozens of assets from one CDN) don't trigger one DNS
-// lookup per asset, while hostname-to-private resolutions are still caught.
+// Async variant for sub-resource requests. Denials are cached, while allowed
+// hosts are resolved on each request to remain fail-closed under DNS rebinding.
 export async function classifyBrowserSubresourceUrl(targetUrl: string): Promise<void> {
     const parsed = new URL(targetUrl);
     // Protocol + literal-IP private check first (sync, free).
@@ -107,18 +106,14 @@ export async function classifyBrowserSubresourceUrl(targetUrl: string): Promise<
 
     const cacheKey = hostname.toLowerCase();
     const cached = readSubresourceClassification(cacheKey);
-    if (cached === true) {
-        return;
-    }
     if (cached === false) {
         throw new Error('Browser subresource URL points to a private or local network target, which is not allowed');
     }
 
     try {
         await assertPublicHttpUrlResolved(parsed, 'Browser subresource URL');
-        writeSubresourceClassification(cacheKey, true);
     } catch (err) {
-        writeSubresourceClassification(cacheKey, false);
+        writeBlockedSubresourceClassification(cacheKey);
         throw err;
     }
 }
@@ -131,13 +126,17 @@ export function __getBrowserSubresourceClassificationForTests(hostname: string):
     return subresourceClassificationCache.get(hostname.toLowerCase())?.allowed;
 }
 
+export async function __installNavigationGuardForTests(page: any): Promise<void> {
+    await installNavigationGuard(page);
+}
+
 // Intercepts every request the page makes (navigation + sub-resources) and
 // aborts ones whose target is private/loopback at either the literal or
 // DNS-resolved level. Navigation hits DNS fresh every time to keep the
 // rebinding window tight; sub-resources go through a hostname TTL cache.
 async function installNavigationGuard(page: any): Promise<void> {
     if (typeof page.route !== 'function') {
-        return;
+        throw new Error('Browser request interception is unavailable; refusing browser navigation because public-network safety cannot be enforced');
     }
     try {
         await page.route('**/*', async (route: any) => {
@@ -154,9 +153,9 @@ async function installNavigationGuard(page: any): Promise<void> {
                 await route.abort().catch(() => undefined);
             }
         });
-    } catch {
-        // Some connected browsers (e.g., certain CDP setups) may not support route
-        // interception. Pre-navigation validation still gates the initial URL.
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Browser request interception could not be installed; refusing browser navigation because public-network safety cannot be enforced: ${message}`);
     }
 }
 
@@ -166,8 +165,9 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     // 但 connectOverCDP 返回的浏览器通常只有一个默认持久化 context，不支持 newContext()，
     // 所以当 newContext 不可用时回退到默认 context + 手动清理。
     if (typeof browser.newContext === 'function') {
+        let context: any;
         try {
-            const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
+            context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
             const page = await context.newPage();
             return {
                 page,
@@ -176,6 +176,9 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
                 }
             };
         } catch {
+            if (context && typeof context.close === 'function') {
+                await context.close().catch(() => undefined);
+            }
             // newContext 可能在 CDP 连接上抛异常，回退到默认 context
         }
     }
@@ -199,6 +202,10 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     }
 
     throw new Error('Browser does not support creating a page for cookie collection');
+}
+
+export async function __createCookieCollectionPageForTests(browser: any): Promise<{ page: any; close(): Promise<void> }> {
+    return await createCookieCollectionPage(browser);
 }
 
 async function readCookiesFromPage(page: any, url: string): Promise<string> {
@@ -295,6 +302,15 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
 
             if (typeof page.waitForTimeout === 'function') {
                 await page.waitForTimeout(COOKIE_WARMUP_DELAY_MS).catch(() => undefined);
+            }
+
+            if (typeof page.evaluate === 'function') {
+                const estimatedHtmlBytes = await page.evaluate(() => new Blob([
+                    document.documentElement?.outerHTML || ''
+                ]).size);
+                if (Number(estimatedHtmlBytes) > MAX_BROWSER_HTML_BYTES) {
+                    throw new Error(`Response body too large (${estimatedHtmlBytes} bytes). Max allowed is ${MAX_BROWSER_HTML_BYTES} bytes`);
+                }
             }
 
             const html = typeof page.content === 'function' ? await page.content() : '';

@@ -6,7 +6,10 @@ import { config } from '../config.js';
 // URL.hostname preserves the brackets for IPv6 literals (`[::1]`), which
 // break isIP and dns.lookup. Strip them once here.
 function stripIpv6Brackets(host: string): string {
-    return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+    const withoutRootDots = host.replace(/\.+$/, '');
+    return withoutRootDots.startsWith('[') && withoutRootDots.endsWith(']')
+        ? withoutRootDots.slice(1, -1)
+        : withoutRootDots;
 }
 
 type LookupResult = Array<{ address: string }>;

@@ -103,10 +103,9 @@ async function main() {
       exposedHeaders: ['Mcp-Session-Id'],
     };
 
-    // 是否启用跨域
+    // 是否启用跨域（cors 中间件本身会自动应答 OPTIONS 预检；Express 5 / path-to-regexp v8 不再接受 app.options('*', ...)，因此移除了原冗余的通配预检路由，以同时兼容 Express 4/5）
     if (config.enableCors) {
       app.use(cors(mcpCorsOptions));
-      app.options('*', cors(mcpCorsOptions));
     }
 
     // Store transports for each session type

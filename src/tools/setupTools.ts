@@ -55,7 +55,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             ? ' searchMode meanings: request performs plain HTTP scraping, playwright drives a real browser through Playwright, and auto or omitting searchMode lets the server decide (request first, falling back to Playwright when it is blocked). Start with the default auto (or omit searchMode). Only retry the same query with searchMode=playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality, for example anti-bot or verification pages.'
             : '';
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗)) with no API key required.${searchModeDescription}`;
+            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗), Hacker News) with no API key required.${searchModeDescription}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -65,6 +65,8 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                         return 'Startpage';
                     case 'sogou':
                         return 'Sogou(搜狗)';
+                    case 'hackernews':
+                        return 'Hacker News';
                     default:
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
@@ -298,7 +300,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     // 获取通用网页/Markdown 内容工具
     server.tool(
         fetchWebToolName,
-        "Fetch content from a public HTTP(S) URL (supports Markdown files and normal web pages)",
+        "Fetch content from a public HTTP(S) URL. renderMode defaults to auto: request uses HTTP only, auto uses request with browser fallback, and browser renders directly with Playwright and fails clearly when Playwright is unavailable.",
         {
             url: z.string().url().refine(
                 (url) => validatePublicWebUrl(url),
@@ -306,12 +308,13 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             ),
             maxChars: z.number().int().min(1000).max(200000).default(30000),
             readability: z.boolean().optional(),
-            includeLinks: z.boolean().optional()
+            includeLinks: z.boolean().optional(),
+            renderMode: z.enum(['request', 'auto', 'browser']).optional()
         },
-        async ({url, maxChars = 30000, readability, includeLinks}) => {
+        async ({url, maxChars = 30000, readability, includeLinks, renderMode}) => {
             try {
                 console.error(`Fetching web content: ${url}`);
-                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
+                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, renderMode });
 
                 return {
                     content: [{

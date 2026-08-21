@@ -6,7 +6,8 @@ import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/ur
 import {
     fetchPageHtmlWithBrowser,
     getBrowserCookieHeader,
-    looksLikeBotChallengePage
+    looksLikeBotChallengePage,
+    MAX_BROWSER_HTML_BYTES
 } from '../../utils/browserCookies.js';
 
 export interface FetchWebContentResult {
@@ -33,7 +34,10 @@ export type ExtractedLink = {
 export type FetchWebContentOptions = {
     readability?: boolean;
     includeLinks?: boolean;
+    renderMode?: FetchWebRenderMode;
 };
+
+export type FetchWebRenderMode = 'request' | 'auto' | 'browser';
 
 const DEFAULT_TIMEOUT_MS = 20000;
 const DEFAULT_MAX_CHARS = 30000;
@@ -105,6 +109,7 @@ function isMarkdownContentType(contentType: string): boolean {
 }
 
 let browserHtmlFetcher: typeof fetchPageHtmlWithBrowser = fetchPageHtmlWithBrowser;
+let browserCookieHeaderFetcher: typeof getBrowserCookieHeader = getBrowserCookieHeader;
 let readabilityParser: (html: string, finalUrl: string) => Promise<ReadabilityArticle | null> = async (html, finalUrl) => {
     try {
         const moduleName = '@mozilla/readability';
@@ -248,17 +253,26 @@ function shouldTryBrowserHtmlFallback(contentType: string, raw: string, extracti
     return false;
 }
 
-async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string } | undefined> {
-    try {
-        const browserPage = await browserHtmlFetcher(url);
-        assertPublicHttpUrl(browserPage.finalUrl, 'Final URL');
+async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string }> {
+    const browserPage = await browserHtmlFetcher(url);
+    await assertPublicHttpUrlResolved(browserPage.finalUrl, 'Final URL');
 
-        return {
-            contentType: 'text/html; charset=utf-8',
-            finalUrl: browserPage.finalUrl,
-            raw: browserPage.html,
-            title: browserPage.title
-        };
+    const htmlBytes = Buffer.byteLength(browserPage.html, 'utf8');
+    if (htmlBytes > MAX_BROWSER_HTML_BYTES) {
+        throw new Error(`Response body too large (${htmlBytes} bytes). Max allowed is ${MAX_BROWSER_HTML_BYTES} bytes`);
+    }
+
+    return {
+        contentType: 'text/html; charset=utf-8',
+        finalUrl: browserPage.finalUrl,
+        raw: browserPage.html,
+        title: browserPage.title
+    };
+}
+
+async function tryFetchHtmlViaBrowser(url: string): Promise<{ contentType: string; finalUrl: string; raw: string; title: string } | undefined> {
+    try {
+        return await fetchHtmlViaBrowser(url);
     } catch {
         return undefined;
     }
@@ -266,6 +280,10 @@ async function fetchHtmlViaBrowser(url: string): Promise<{ contentType: string; 
 
 export function __setBrowserHtmlFetcherForTests(fetcher?: typeof fetchPageHtmlWithBrowser): void {
     browserHtmlFetcher = fetcher || fetchPageHtmlWithBrowser;
+}
+
+export function __setBrowserCookieHeaderFetcherForTests(fetcher?: typeof getBrowserCookieHeader): void {
+    browserCookieHeaderFetcher = fetcher || getBrowserCookieHeader;
 }
 
 export function __setReadabilityParserForTests(parser?: (html: string, finalUrl: string) => Promise<ReadabilityArticle | null>): void {
@@ -287,7 +305,7 @@ export function __setReadabilityParserForTests(parser?: (html: string, finalUrl:
 async function tryRequestWithBrowserCookies(url: string): Promise<{ response?: any; usedBrowserCookies: boolean }> {
     let cookieHeader: string | undefined;
     try {
-        cookieHeader = await getBrowserCookieHeader(url);
+        cookieHeader = await browserCookieHeaderFetcher(url);
     } catch {
         return { response: undefined, usedBrowserCookies: false };
     }
@@ -316,87 +334,105 @@ export async function fetchWebContent(
 ): Promise<FetchWebContentResult> {
     const parsedUrl = new URL(url);
     await assertPublicHttpUrlResolved(parsedUrl, 'Request URL');
-
-    const requestOptions = buildRequestOptions();
-
-    // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
-    try {
-        const headResponse = await requestWithSafeRedirects('HEAD', parsedUrl.toString(), {
-            ...requestOptions,
-            responseType: 'json',
-            validateStatus: (status: number) => status >= 200 && status < 400
-        }, 'Request URL');
-        const headLength = Number(headResponse.headers['content-length']);
-        if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
-            const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
-            (tooLargeError as any).code = 'ERR_RESPONSE_TOO_LARGE';
-            throw tooLargeError;
-        }
-    } catch (error: any) {
-        if (error?.code === 'ERR_RESPONSE_TOO_LARGE') {
-            throw error;
-        }
-        const status = error?.response?.status;
-        // Some servers don't support HEAD correctly; continue and rely on GET download limits.
-        if (status !== undefined && ![400, 403, 404, 405, 406, 501].includes(status)) {
-            throw error;
-        }
+    const renderMode = options.renderMode ?? 'auto';
+    if (!['request', 'auto', 'browser'].includes(renderMode)) {
+        throw new Error('renderMode must be one of: request, auto, browser');
     }
 
-    let response: any;
-    let usedBrowserCookies = false;
+    let contentType = '';
+    let finalUrl = parsedUrl.toString();
+    let raw = '';
+    let browserTitle = '';
     let retrievalMethod: FetchWebContentResult['retrievalMethod'] = 'request';
 
-    try {
-        response = await requestWithSafeRedirects('GET', parsedUrl.toString(), requestOptions, 'Request URL');
-    } catch (error: any) {
-        const status = error?.response?.status;
-        if (![401, 403, 429].includes(status)) {
-            throw error;
+    if (renderMode === 'browser') {
+        const browserResult = await fetchHtmlViaBrowser(parsedUrl.toString());
+        contentType = browserResult.contentType;
+        finalUrl = browserResult.finalUrl;
+        raw = browserResult.raw;
+        browserTitle = browserResult.title;
+        retrievalMethod = 'browser-html';
+    } else {
+        const requestOptions = buildRequestOptions();
+
+        // Pre-flight check to avoid downloading oversized payloads when Content-Length is present.
+        try {
+            const headResponse = await requestWithSafeRedirects('HEAD', parsedUrl.toString(), {
+                ...requestOptions,
+                responseType: 'json',
+                validateStatus: (status: number) => status >= 200 && status < 400
+            }, 'Request URL');
+            const headLength = Number(headResponse.headers['content-length']);
+            if (Number.isFinite(headLength) && headLength > MAX_DOWNLOAD_BYTES) {
+                const tooLargeError = new Error(`Response body too large (${headLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
+                (tooLargeError as any).code = 'ERR_RESPONSE_TOO_LARGE';
+                throw tooLargeError;
+            }
+        } catch (error: any) {
+            if (error?.code === 'ERR_RESPONSE_TOO_LARGE') {
+                throw error;
+            }
+            const status = error?.response?.status;
+            // Some servers don't support HEAD correctly; continue and rely on GET download limits.
+            if (status !== undefined && ![400, 403, 404, 405, 406, 501].includes(status)) {
+                throw error;
+            }
         }
 
-        const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
-        if (cookieRetry.response) {
-            response = cookieRetry.response;
-            usedBrowserCookies = cookieRetry.usedBrowserCookies;
-            retrievalMethod = 'request-with-browser-cookies';
-        } else {
-            response = {
-                headers: { 'content-type': 'text/html; charset=utf-8' },
-                data: '',
-                request: { res: { responseUrl: parsedUrl.toString() } }
-            };
+        let response: any;
+        let usedBrowserCookies = false;
+
+        try {
+            response = await requestWithSafeRedirects('GET', parsedUrl.toString(), requestOptions, 'Request URL');
+        } catch (error: any) {
+            const status = error?.response?.status;
+            if (renderMode === 'request' || ![401, 403, 429].includes(status)) {
+                throw error;
+            }
+
+            const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
+            if (cookieRetry.response) {
+                response = cookieRetry.response;
+                usedBrowserCookies = cookieRetry.usedBrowserCookies;
+                retrievalMethod = 'request-with-browser-cookies';
+            } else {
+                response = {
+                    headers: { 'content-type': 'text/html; charset=utf-8' },
+                    data: '',
+                    request: { res: { responseUrl: parsedUrl.toString() } }
+                };
+            }
+        }
+
+        contentType = String(response.headers['content-type'] || '').toLowerCase();
+        finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
+        assertPublicHttpUrl(finalUrl, 'Final URL');
+        raw = typeof response.data === 'string'
+            ? response.data
+            : JSON.stringify(response.data, null, 2);
+
+        if (renderMode === 'auto' && !usedBrowserCookies && looksLikeBotChallengePage(raw)) {
+            const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
+            if (cookieRetry.response) {
+                response = cookieRetry.response;
+                usedBrowserCookies = true;
+                retrievalMethod = 'request-with-browser-cookies';
+                contentType = String(response.headers['content-type'] || '').toLowerCase();
+                finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
+                assertPublicHttpUrl(finalUrl, 'Final URL');
+                raw = typeof response.data === 'string'
+                    ? response.data
+                    : JSON.stringify(response.data, null, 2);
+            }
+        }
+
+        const contentLength = Number(response.headers['content-length']);
+        if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
+            throw new Error(`Response body too large (${contentLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
         }
     }
 
-    let contentType = String(response.headers['content-type'] || '').toLowerCase();
-    let finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
-    assertPublicHttpUrl(finalUrl, 'Final URL');
-    let raw = typeof response.data === 'string'
-        ? response.data
-        : JSON.stringify(response.data, null, 2);
-
-    if (!usedBrowserCookies && looksLikeBotChallengePage(raw)) {
-        const cookieRetry = await tryRequestWithBrowserCookies(parsedUrl.toString());
-        if (cookieRetry.response) {
-            response = cookieRetry.response;
-            usedBrowserCookies = true;
-            retrievalMethod = 'request-with-browser-cookies';
-            contentType = String(response.headers['content-type'] || '').toLowerCase();
-            finalUrl = response.request?.res?.responseUrl || parsedUrl.toString();
-            assertPublicHttpUrl(finalUrl, 'Final URL');
-            raw = typeof response.data === 'string'
-                ? response.data
-                : JSON.stringify(response.data, null, 2);
-        }
-    }
-
-    const contentLength = Number(response.headers['content-length']);
-    if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
-        throw new Error(`Response body too large (${contentLength} bytes). Max allowed is ${MAX_DOWNLOAD_BYTES} bytes`);
-    }
-
-    let title = '';
+    let title = browserTitle;
     let extractedContent = '';
     let htmlExtraction: HtmlExtractionResult | undefined;
     let readabilityApplied = false;
@@ -409,11 +445,11 @@ export async function fetchWebContent(
     const finalParsedUrl = new URL(finalUrl);
 
     // Keep raw markdown behavior for the resolved final path.
-    if (isMarkdownPath(finalParsedUrl)) {
+    if (retrievalMethod !== 'browser-html' && isMarkdownPath(finalParsedUrl)) {
         extractedContent = normalizeText(raw);
     } else if (contentType.includes('text/html') || looksLikeHtml(raw)) {
         htmlExtraction = extractMainTextFromHtml(raw);
-        title = htmlExtraction.title;
+        title = htmlExtraction.title || title;
         extractedContent = htmlExtraction.text;
     } else if (isMarkdownContentType(contentType)) {
         extractedContent = normalizeText(raw);
@@ -421,8 +457,8 @@ export async function fetchWebContent(
         extractedContent = normalizeText(raw);
     }
 
-    if (shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
-        const browserResult = await fetchHtmlViaBrowser(parsedUrl.toString());
+    if (renderMode === 'auto' && shouldTryBrowserHtmlFallback(contentType, raw, htmlExtraction)) {
+        const browserResult = await tryFetchHtmlViaBrowser(parsedUrl.toString());
         if (browserResult) {
             contentType = browserResult.contentType;
             finalUrl = browserResult.finalUrl;

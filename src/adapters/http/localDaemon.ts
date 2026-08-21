@@ -4,7 +4,8 @@ import { AppConfig, checkPlaywrightModeConfiguration, getEffectiveSearchMode } f
 import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
-import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
+import { validatePublicWebUrl } from '../../core/validation/targetValidation.js';
+import { isBrowserUnavailableError, shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -146,6 +147,16 @@ function parseBooleanFlag(value: unknown, name: string): boolean | undefined {
     return value;
 }
 
+function parseRenderMode(value: unknown): 'request' | 'auto' | 'browser' | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value !== 'request' && value !== 'auto' && value !== 'browser') {
+        throw new Error('renderMode must be one of: request, auto, browser');
+    }
+    return value;
+}
+
 export async function startLocalDaemon(
     runtime: OpenWebSearchRuntime,
     options: LocalDaemonOptions = {}
@@ -248,17 +259,44 @@ export async function startLocalDaemon(
     });
 
     app.post('/fetch-web', async (req, res) => {
+        let input: {
+            url: string;
+            maxChars: number;
+            readability?: boolean;
+            includeLinks?: boolean;
+            renderMode?: 'request' | 'auto' | 'browser';
+        };
         try {
-            const url = parseUrl(req.body?.url);
-            const maxChars = parseMaxChars(req.body?.maxChars);
-            const readability = parseBooleanFlag(req.body?.readability, 'readability');
-            const includeLinks = parseBooleanFlag(req.body?.includeLinks, 'includeLinks');
-            const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
-            res.json(createSuccessEnvelope(result));
+            input = {
+                url: parseUrl(req.body?.url),
+                maxChars: parseMaxChars(req.body?.maxChars),
+                readability: parseBooleanFlag(req.body?.readability, 'readability'),
+                includeLinks: parseBooleanFlag(req.body?.includeLinks, 'includeLinks'),
+                renderMode: parseRenderMode(req.body?.renderMode)
+            };
+            if (!validatePublicWebUrl(input.url)) {
+                throw new Error('Invalid public HTTP(S) URL');
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             sendError(res, 400, 'validation_failed', message, {
-                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, and pass readability/includeLinks only as booleans.'
+                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, pass readability/includeLinks only as booleans, and use renderMode request, auto, or browser.'
+            });
+            return;
+        }
+
+        try {
+            const result = await runtime.services.fetchWeb.execute(input);
+            res.json(createSuccessEnvelope(result));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            // code 优先（browser_unavailable），消息特征只作未带 code 的历史错误回退。
+            const browserUnavailable = isBrowserUnavailableError(error);
+            sendError(res, browserUnavailable ? 503 : 502, browserUnavailable ? 'browser_unavailable' : 'fetch_failed', message, {
+                retryable: !browserUnavailable,
+                hint: browserUnavailable
+                    ? 'Configure a usable Playwright client and browser target, or retry with renderMode request/auto.'
+                    : 'Verify that the target is reachable and retry. Use renderMode request to avoid browser rendering.'
             });
         }
     });

@@ -151,6 +151,8 @@ Notes:
 - `truncated`
 - `content`
 
+The command accepts `--render-mode request|auto|browser`. Omitted mode is `auto`; `request` forbids browser assistance, while `browser` renders directly with Playwright. The selected mode is forwarded unchanged through daemon and direct-runtime execution.
+
 ### Example: article and README fetch commands
 
 This shape applies to:
@@ -234,6 +236,11 @@ CLI search arguments also support:
 - `--search-mode request|auto|playwright`
   - request-level override
   - currently only affects Bing
+
+CLI fetch arguments also support:
+- `--render-mode request|auto|browser`
+  - defaults to `auto`
+  - `browser` uses a longer daemon action timeout because browser navigation may exceed the request-path timeout
 
 ## Serve and status lifecycle
 
