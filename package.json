@@ -44,7 +44,8 @@
     "test:web-content": "tsc && node build/test/test-web-content.js",
     "test:web-content:live": "tsc && node build/test/test-web-content-live.js",
     "test:bing:live": "tsc && node build/test/test-bing-live.js",
-    "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js"
+    "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js",
+    "test:dialog-capture": "tsc && node build/test/test-dialog-capture.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.2",
@@ -66,6 +67,7 @@
     "@types/express": "^5.0.6",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^20.17.10",
+    "playwright": "^1.61.1",
     "typescript": "^5.3.3"
   }
 }

@@ -1,11 +1,15 @@
-import type { AxiosRequestConfig, AxiosResponse } from 'axios';
+﻿import type { AxiosRequestConfig, AxiosResponse } from 'axios';
+import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
-import { __setBrowserHtmlFetcherForTests, fetchWebContent } from '../engines/web/index.js';
 import {
-    __setBrowserCookieHeaderFetcherForTests,
-    __setReadabilityParserForTests
-} from '../engines/web/fetchWebContent.js';
+    __setBrowserFetcherForTests,
+    __setBrowserHtmlFetcherForTests,
+    __setBrowserSessionOpenerForTests,
+    fetchWebContent
+} from '../engines/web/index.js';
+import { __setReadabilityParserForTests } from '../engines/web/fetchWebContent.js';
 import { __setAxiosRequestForTests } from '../utils/httpRequest.js';
+import { __resetPlaywrightClientForTests } from '../utils/playwrightClient.js';
 import { __setDnsLookupForTests } from '../utils/urlSafety.js';
 
 type TestCase = {
@@ -39,8 +43,7 @@ function installAxiosMock(): void {
     requestAttempts.clear();
     requestConfigs.clear();
 
-    // 修复测试桩覆盖不到 requestWithSafeRedirects 的问题：生产代码现在统一走 axios.request，
-    // 因此测试也必须替换同一层入口，避免误打到真实网络造成 404 和不稳定失败。
+    // 修复测试桩覆盖不到 requestWithSafeRedirects 的问题：生产代码现在统一走 axios.request，因此测试也必须替换同一层入口，避免误打到真实网络造成 404 和不稳定失败。
     __setAxiosRequestForTests(async (config) => {
         const url = String(config.url || '');
         const method = String(config.method || 'GET').toUpperCase();
@@ -159,8 +162,8 @@ function installAxiosMock(): void {
 
 function restoreAxiosMock(): void {
     __setAxiosRequestForTests();
+    __setBrowserFetcherForTests();
     __setBrowserHtmlFetcherForTests();
-    __setBrowserCookieHeaderFetcherForTests();
 }
 
 function assert(condition: unknown, message: string): void {
@@ -180,6 +183,61 @@ async function runCase(testCase: TestCase): Promise<boolean> {
     }
 }
 
+// 假竞速浏览器：只实现竞速层用到的方法面（route/CDP 会话/cookies/goto/content 等），驱动 fetchWithCookiesRaceViaPlaywright 的真实竞速逻辑，无需启动真实浏览器即可断言 HTTP 臂胜出时的返回行为。导航守卫在这里是 no-op：公网 URL 校验已由测试 DNS 桩覆盖的 assertPublicHttpUrlResolved 调用链承担。
+function makeFakeRaceBrowser(): any {
+    let nextTargetSeq = 1;
+
+    const makeSession = (targetId: string) => ({
+        send: async (method: string) => {
+            if (method === 'Target.getTargetInfo') {
+                return { targetInfo: { targetId } };
+            }
+            if (method === 'Browser.getWindowForTarget') {
+                return { windowId: 1 };
+            }
+            if (method === 'Browser.getWindowBounds') {
+                return { bounds: { left: 0, top: 0, width: 800, height: 600, windowState: 'normal' } };
+            }
+            return {};
+        }
+    });
+
+    const makePage = (targetId: string): any => {
+        let currentUrl = '';
+        return {
+            _targetId: targetId,
+            isClosed: () => false,
+            context: () => context,
+            route: async () => undefined,
+            goto: async (targetUrl: string) => { currentUrl = targetUrl; },
+            // 渲染臂刻意带真实延迟：真实浏览器渲染远慢于 HTTP，竞速层因此应由 HTTP 臂先胜出；若渲染臂即时返回，它会无条件抢先胜出而掩盖本用例要验证的 HTTP 臂重定向行为。
+            waitForLoadState: async () => new Promise<void>((resolve) => setTimeout(resolve, 400)),
+            waitForTimeout: async () => undefined,
+            content: async () => '<html><head><title>Fake Race Page</title></head><body>fake race render</body></html>',
+            url: () => currentUrl,
+            title: async () => 'Fake Race Page',
+            evaluate: async () => undefined
+        };
+    };
+
+    const context: any = {
+        pages: () => [],
+        newPage: async () => {
+            const page = makePage(`FAKE-RACE-${nextTargetSeq}`);
+            nextTargetSeq += 1;
+            return page;
+        },
+        newCDPSession: async (page: any) => makeSession(page._targetId),
+        cookies: async () => [{ name: 'race-cookie', value: '1' }]
+    };
+
+    return {
+        contexts: () => [context],
+        newContext: async () => context,
+        close: async () => undefined
+    };
+}
+
 async function main(): Promise<void> {
     const originalFetchWebAllowInsecureTls = config.fetchWebAllowInsecureTls;
     installAxiosMock();
@@ -189,6 +247,9 @@ async function main(): Promise<void> {
         }
         if (hostname === 'private-final.example') {
             return [{ address: '127.0.0.1' }];
+        }
+        if (hostname === 'redirected.example') {
+            return [{ address: '93.184.216.35' }];
         }
         throw new Error(`unexpected hostname: ${hostname}`);
     });
@@ -229,7 +290,7 @@ async function main(): Promise<void> {
         {
             name: 'should fallback to metadata for js-rendered html pages',
             run: async () => {
-                __setBrowserHtmlFetcherForTests(async () => {
+                __setBrowserFetcherForTests(async () => {
                     throw new Error('browser fallback disabled for metadata-only test');
                 });
                 const result = await fetchWebContent('https://example.com/spa', 5000);
@@ -241,8 +302,9 @@ async function main(): Promise<void> {
         {
             name: 'should fallback to browser html when html only contains shell metadata',
             run: async () => {
-                __setBrowserHtmlFetcherForTests(async () => ({
-                    html: `
+                __setBrowserFetcherForTests(async () => ({
+                    contentType: 'text/html; charset=utf-8',
+                    raw: `
                     <html>
                       <head><title>Browser SPA</title></head>
                       <body>
@@ -254,7 +316,8 @@ async function main(): Promise<void> {
                     </html>
                     `,
                     finalUrl: 'https://example.com/browser-spa?rendered=1',
-                    title: 'Browser SPA'
+                    title: 'Browser SPA',
+                    retrievalMethod: 'browser-html' as const
                 }));
 
                 const result = await fetchWebContent('https://example.com/browser-spa', 5000);
@@ -268,7 +331,8 @@ async function main(): Promise<void> {
             name: 'auto mode should keep request metadata when browser fallback fails',
             run: async () => {
                 let browserCalls = 0;
-                __setBrowserHtmlFetcherForTests(async () => {
+                // 合并后的 auto 回退主路径是 Cookie+HTTP/渲染竞速层（browserFetcher），竞速层失败时保留 HTTP 请求的提取结果。
+                __setBrowserFetcherForTests(async () => {
                     browserCalls += 1;
                     throw new Error('browser unavailable');
                 });
@@ -301,11 +365,11 @@ async function main(): Promise<void> {
         {
             name: 'request mode should not use browser assistance for blocked responses',
             run: async () => {
-                let cookieCalled = false;
+                let raceCalled = false;
                 let browserCalled = false;
-                __setBrowserCookieHeaderFetcherForTests(async () => {
-                    cookieCalled = true;
-                    return 'session=unexpected';
+                __setBrowserFetcherForTests(async () => {
+                    raceCalled = true;
+                    throw new Error('request mode must not use the browser race layer');
                 });
                 __setBrowserHtmlFetcherForTests(async () => {
                     browserCalled = true;
@@ -321,7 +385,7 @@ async function main(): Promise<void> {
                     failed = true;
                 }
                 assert(failed, 'request mode should surface the blocked request error');
-                assert(cookieCalled === false, 'request mode should not request browser cookies');
+                assert(raceCalled === false, 'request mode should not invoke the browser race layer');
                 assert(browserCalled === false, 'request mode should not invoke browser html fallback');
             }
         },
@@ -475,8 +539,9 @@ async function main(): Promise<void> {
         {
             name: 'should fallback to browser html after cookie-assisted retry still fails',
             run: async () => {
-                __setBrowserHtmlFetcherForTests(async () => ({
-                    html: `
+                __setBrowserFetcherForTests(async () => ({
+                    contentType: 'text/html; charset=utf-8',
+                    raw: `
                     <html>
                       <head><title>Blocked Browser SPA</title></head>
                       <body>
@@ -488,13 +553,90 @@ async function main(): Promise<void> {
                     </html>
                     `,
                     finalUrl: 'https://example.com/blocked-browser-spa?rendered=1',
-                    title: 'Blocked Browser SPA'
+                    title: 'Blocked Browser SPA',
+                    retrievalMethod: 'browser-html' as const
                 }));
 
                 const result = await fetchWebContent('https://example.com/blocked-browser-spa', 5000);
                 assert(result.retrievalMethod === 'browser-html', 'blocked request should end in browser html fallback');
                 assert((requestAttempts.get('https://example.com/blocked-browser-spa') || 0) >= 1, 'blocked url should attempt request path first');
                 assert(result.content.includes('Recovered after blocked request'), 'browser fallback should recover readable content');
+            }
+        },
+        {
+            name: 'should fallback to browser html when connection times out',
+            run: async () => {
+                __setAxiosRequestForTests(async (config) => {
+                    const url = String(config.url || '');
+                    if (url.endsWith('/timeout-site')) {
+                        const error: any = new Error('connect ETIMEDOUT 34.117.97.190:443');
+                        error.code = 'ETIMEDOUT';
+                        throw error;
+                    }
+                    throw new Error(`Unexpected mocked URL: ${url}`);
+                });
+
+                __setBrowserFetcherForTests(async () => ({
+                    contentType: 'text/html; charset=utf-8',
+                    raw: `
+                    <html>
+                      <head><title>Timeout Site</title></head>
+                      <body>
+                        <main>
+                          <h1>Timeout Site</h1>
+                          <p>${'Content recovered via browser after timeout '.repeat(10)}</p>
+                        </main>
+                      </body>
+                    </html>
+                    `,
+                    finalUrl: 'https://example.com/timeout-site',
+                    title: 'Timeout Site',
+                    retrievalMethod: 'browser-html' as const
+                }));
+
+                const result = await fetchWebContent('https://example.com/timeout-site', 5000);
+                assert(result.retrievalMethod === 'browser-html', 'timeout should trigger browser fallback');
+                assert(result.content.includes('Content recovered via browser after timeout'), 'browser should recover content after transport timeout');
+
+                installAxiosMock();
+            }
+        },
+        {
+            name: 'should fallback to browser html when TLS handshake fails',
+            run: async () => {
+                __setAxiosRequestForTests(async (config) => {
+                    const url = String(config.url || '');
+                    if (url.endsWith('/tls-fail-site')) {
+                        const error: any = new Error('Client network socket disconnected before secure TLS connection was established');
+                        error.code = 'ECONNRESET';
+                        throw error;
+                    }
+                    throw new Error(`Unexpected mocked URL: ${url}`);
+                });
+
+                __setBrowserFetcherForTests(async () => ({
+                    contentType: 'text/html; charset=utf-8',
+                    raw: `
+                    <html>
+                      <head><title>TLS Fail Site</title></head>
+                      <body>
+                        <main>
+                          <h1>TLS Fail Site</h1>
+                          <p>${'Content recovered via browser after TLS failure '.repeat(10)}</p>
+                        </main>
+                      </body>
+                    </html>
+                    `,
+                    finalUrl: 'https://example.com/tls-fail-site',
+                    title: 'TLS Fail Site',
+                    retrievalMethod: 'browser-html' as const
+                }));
+
+                const result = await fetchWebContent('https://example.com/tls-fail-site', 5000);
+                assert(result.retrievalMethod === 'browser-html', 'TLS handshake failure should trigger browser fallback');
+                assert(result.content.includes('Content recovered via browser after TLS failure'), 'browser should recover content after TLS failure');
+
+                installAxiosMock();
             }
         },
         {
@@ -532,6 +674,117 @@ async function main(): Promise<void> {
                 }
                 assert(failed, 'oversized response should be rejected');
             }
+        },
+        {
+            name: 'should not use browser fallback to bypass safety errors',
+            run: async () => {
+                let browserWasCalled = false;
+                __setBrowserFetcherForTests(async () => {
+                    browserWasCalled = true;
+                    return {
+                        contentType: 'text/html; charset=utf-8',
+                        raw: '<html><body><main><p>should never be reached</p></main></body></html>',
+                        finalUrl: 'https://example.com/ssrf-target',
+                        title: 'Should Not Happen',
+                        retrievalMethod: 'browser-html' as const
+                    };
+                });
+
+                __setAxiosRequestForTests(async (config) => {
+                    const url = String(config.url || '');
+                    if (url.endsWith('/ssrf-target')) {
+                        throw new Error('Redirect target points to a private or local network address');
+                    }
+                    throw new Error(`Unexpected mocked URL: ${url}`);
+                });
+
+                let failed = false;
+                try {
+                    await fetchWebContent('https://example.com/ssrf-target', 5000);
+                } catch {
+                    failed = true;
+                }
+
+                assert(failed, 'safety error should stay fatal');
+                assert(browserWasCalled === false, 'browser fallback must not be used to bypass safety errors');
+
+                installAxiosMock();
+            }
+        },
+        {
+            name: 'race layer should follow redirects and keep the final URL when HTTP wins',
+            run: async () => {
+                const previousModulePath = config.playwrightModulePath;
+                const previousProxyEnabled = config.useProxy;
+                config.useProxy = false;
+                config.playwrightModulePath = fileURLToPath(new URL('../../test-assets/fake-playwright-launch-client.cjs', import.meta.url));
+                __resetPlaywrightClientForTests();
+
+                // 重置为真实竞速层：前面的测试可能留下返回固定内容的 __setBrowserFetcherForTests 桩，不重置会被 fetchWebContent 的回退入口直接命中，绕过本用例要验证的真实竞速逻辑。
+                __setBrowserFetcherForTests();
+                __setBrowserSessionOpenerForTests(async () => ({
+                    browser: makeFakeRaceBrowser(),
+                    release: async () => undefined
+                }));
+
+                installAxiosMock();
+                // 主请求（无 Cookie）被模拟成反爬拦截返回 403，强制进入竞速层；竞速层带页面 Cookie 的 GET 则走通重定向链，以此验证 HTTP 臂胜出时 finalUrl 跟随重定向后的地址。
+                __setAxiosRequestForTests(async (requestConfig) => {
+                    const url = String(requestConfig.url || '');
+                    const method = String(requestConfig.method || 'GET').toUpperCase();
+                    const cookie = String((requestConfig.headers as Record<string, unknown> | undefined)?.Cookie || '');
+                    if (method === 'HEAD') {
+                        return makeResponse(requestConfig, { headers: {}, finalUrl: url });
+                    }
+                    if (method === 'GET' && url.endsWith('/race-redirect')) {
+                        if (cookie.includes('race-cookie')) {
+                            return makeResponse(requestConfig, {
+                                status: 301,
+                                headers: { location: 'https://redirected.example/race-landing' },
+                                data: ''
+                            });
+                        }
+                        return makeResponse(requestConfig, {
+                            status: 403,
+                            headers: { 'content-type': 'text/html; charset=utf-8' },
+                            data: '',
+                            finalUrl: url
+                        });
+                    }
+                    if (method === 'GET' && url.endsWith('/race-landing')) {
+                        return makeResponse(requestConfig, {
+                            headers: { 'content-type': 'text/html; charset=utf-8' },
+                            data: `
+                            <html>
+                              <head><title>Race Landing</title></head>
+                              <body>
+                                <main>
+                                  <h1>Race Landing</h1>
+                                  <p>${'Race redirect landed content '.repeat(12)}</p>
+                                </main>
+                              </body>
+                            </html>
+                            `,
+                            finalUrl: url
+                        });
+                    }
+                    throw new Error(`Unexpected mocked URL: ${url}`);
+                });
+
+                try {
+                    const result = await fetchWebContent('https://example.com/race-redirect', 5000);
+                    assert(result.retrievalMethod === 'request-with-browser-cookies', 'race layer HTTP arm should win with browser cookies');
+                    assert(result.finalUrl === 'https://redirected.example/race-landing', 'race HTTP win should keep the redirected final URL');
+                    assert(result.content.includes('Race redirect landed content'), 'redirected content should be extracted');
+                } finally {
+                    config.useProxy = previousProxyEnabled;
+                    config.playwrightModulePath = previousModulePath;
+                    __resetPlaywrightClientForTests();
+                    __setBrowserSessionOpenerForTests();
+                    installAxiosMock();
+                    __setBrowserFetcherForTests();
+                }
+            }
         }
     ];
 
@@ -546,8 +799,10 @@ async function main(): Promise<void> {
     __setDnsLookupForTests();
     config.fetchWebAllowInsecureTls = originalFetchWebAllowInsecureTls;
     __setReadabilityParserForTests();
+    __setBrowserFetcherForTests();
     __setBrowserHtmlFetcherForTests();
-    __setBrowserCookieHeaderFetcherForTests();
+    __setBrowserSessionOpenerForTests();
+    __resetPlaywrightClientForTests();
 
     const total = testCases.length;
     console.log(`\nResult: ${passed}/${total} passed`);
@@ -564,8 +819,10 @@ main().catch((error) => {
     __setDnsLookupForTests();
     config.fetchWebAllowInsecureTls = false;
     __setReadabilityParserForTests();
+    __setBrowserFetcherForTests();
     __setBrowserHtmlFetcherForTests();
-    __setBrowserCookieHeaderFetcherForTests();
+    __setBrowserSessionOpenerForTests();
+    __resetPlaywrightClientForTests();
     console.error('❌ test-web-content failed:', error);
     process.exit(1);
 });

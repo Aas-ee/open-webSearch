@@ -281,6 +281,7 @@ Notes:
 Browser state note (local shared profiles):
 - Local browser mode reuses persistent contexts/pages across fetches and across process restarts. Cookies, storage, cache, and Service Worker state for the same origin therefore persist between browser-mode fetches.
 - This is intentional for single-user, stateful scraping (it keeps anti-bot state warm and avoids repeated browser launches). If you share a daemon between mutually distrusting callers, connect those callers to an isolated browser via `PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT` instead of relying on local shared profiles, or point each caller at its own `OPEN_WEBSEARCH_PROFILE_DIR`.
+- This shared state is service-level and intended only for anonymous access to public web pages: the service itself never logs into sites, so it should never carry personal credentials. Do not rely on it to store logged-in or personalized sessions. Remote endpoints (`PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT`) inherit the connected browser's state, so pointing them at a personal logged-in browser also shares that browser's login and personalization state with this service.
 - To clear profile state, delete the browser profile directories under `OPEN_WEBSEARCH_PROFILE_DIR` (default: `<tmpdir>/open-websearch-browser-profiles`) while no local browser is running.
 
 ### Local Installation

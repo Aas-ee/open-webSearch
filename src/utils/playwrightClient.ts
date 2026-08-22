@@ -2231,6 +2231,16 @@ function emitPlaywrightUnavailableWarning(options?: LoadPlaywrightClientOptions)
     console.warn(playwrightUnavailableMessage);
 }
 
+// 测试接缝：清空客户端模块缓存与相关状态，使下一次 loadPlaywrightClient 按当时环境变量重新探测（例如指向 fake playwright 模块）。
+export function __resetPlaywrightClientForTests(): void {
+    playwrightModulePromise = null;
+    playwrightModuleSource = null;
+    playwrightUnavailableMessage = null;
+    hasEmittedPlaywrightUnavailableWarning = false;
+    cachedLocalBrowserSession = null;
+    cachedLocalBrowserSessionKey = null;
+}
+
 export async function loadPlaywrightClient(options?: LoadPlaywrightClientOptions): Promise<PlaywrightModule | null> {
     if (!playwrightModulePromise) {
         playwrightModulePromise = (async () => {
@@ -2299,6 +2309,10 @@ export function isBrowserUnavailableError(error: unknown): boolean {
     return BROWSER_UNAVAILABLE_MESSAGE_RE.test(message);
 }
 
+/**
+ * 打开浏览器会话。本地模式下所有调用方共享同一个持久化 profile 的浏览器进程（状态共享是有意设计，见 README 的 Browser state note）；
+ * WS/CDP 模式下连接的浏览器状态由所连端点自行决定，若连接的是个人已登录浏览器，其登录态与个性化状态也会被本服务共享。
+ */
 export async function openPlaywrightBrowser(
     options?: { antiBot?: boolean }
 ): Promise<PlaywrightBrowserSession> {
