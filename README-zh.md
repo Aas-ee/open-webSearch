@@ -278,12 +278,12 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Playwright Chromium 是否以无头模式运行 |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 正整数 | Playwright 页面导航和 Bing 结果等待超时时间 |
 | `OPEN_WEBSEARCH_PROFILE_DIR` | `<tmpdir>/open-websearch-browser-profiles` | 任意可写目录 | 本地浏览器持久化 profile 的根目录（见下方“浏览器状态说明”） |
-| `MCP_TOOL_SEARCH_NAME` | `search` | 有效的MCP工具名称 | 搜索工具的自定义名称 |
-| `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | 有效的MCP工具名称 | Linux.do文章获取工具的自定义名称 |
-| `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | 有效的MCP工具名称 | CSDN文章获取工具的自定义名称 |
-| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | 有效的MCP工具名称 | GitHub README获取工具的自定义名称 |
-| `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | 有效的MCP工具名称 | 掘金文章获取工具的自定义名称 |
-| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | 有效的MCP工具名称 | 通用网页/Markdown抓取工具的自定义名称 |
+| `MCP_TOOL_SEARCH_NAME` | `search` | 有效的MCP工具名称 | 搜索工具的自定义名称；设为 `null` 或 `<disabled>` 可禁用该工具 |
+| `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | 有效的MCP工具名称 | Linux.do文章获取工具的自定义名称；设为 `null` 或 `<disabled>` 可禁用该工具 |
+| `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | 有效的MCP工具名称 | CSDN文章获取工具的自定义名称；设为 `null` 或 `<disabled>` 可禁用该工具 |
+| `MCP_TOOL_FETCH_GITHUB_NAME` | `fetchGithubReadme` | 有效的MCP工具名称 | GitHub README获取工具的自定义名称；设为 `null` 或 `<disabled>` 可禁用该工具 |
+| `MCP_TOOL_FETCH_JUEJIN_NAME` | `fetchJuejinArticle` | 有效的MCP工具名称 | 掘金文章获取工具的自定义名称；设为 `null` 或 `<disabled>` 可禁用该工具 |
+| `MCP_TOOL_FETCH_WEB_NAME` | `fetchWebContent` | 有效的MCP工具名称 | 通用网页/Markdown抓取工具的自定义名称；设为 `null` 或 `<disabled>` 可禁用该工具 |
 
 **常用配置示例：**
 ```bash

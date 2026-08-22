@@ -432,8 +432,8 @@ function testCustomToolNamesAndFallbacks(): void {
         }
     );
     const invalidPayload = parseJsonBlock(invalidOutput) as { names: string[] };
-    assert(invalidPayload.names.includes('search'), 'invalid custom search tool name should fall back to default');
-    assert(invalidPayload.names.includes('fetchWebContent'), 'invalid custom web fetch tool name should fall back to default');
+    assert(!invalidPayload.names.includes('search'), 'invalid custom search tool name should disable the tool');
+    assert(!invalidPayload.names.includes('fetchWebContent'), 'invalid custom web fetch tool name should disable the tool');
 
     console.log('✅ MCP tool names respect custom overrides and fallback rules');
 }
