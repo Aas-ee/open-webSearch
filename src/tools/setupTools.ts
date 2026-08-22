@@ -17,13 +17,20 @@ import { AppConfig, checkPlaywrightModeConfiguration } from '../config.js';
 export { normalizeEngineName };
 
 // 获取工具名称，优先使用环境变量，否则使用默认值
-function getToolName(envVarName: string, defaultName: string): string {
-    const configuredName = process.env[envVarName];
+// 获取工具名称，优先使用环境变量，否则使用默认值；返回 null 表示禁用
+function getToolName(envVarName: string, defaultName: string): string | null {
+    const configuredName = process.env[envVarName]?.trim();
     if (configuredName) {
+        const normalized = configuredName.toLowerCase();
+        // Reserved keywords to disable the tool
+        if (normalized === 'null' || normalized === '<disabled>') {
+            console.error(`Tool disabled via environment variable ${envVarName}="${configuredName}"`);
+            return null;
+        }
         // Validate tool name to ensure it follows MCP naming conventions
         if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(configuredName)) {
-            console.warn(`Invalid tool name "${configuredName}" from environment variable ${envVarName}. Using default: "${defaultName}"`);
-            return defaultName;
+            console.warn(`Invalid tool name "${configuredName}" from environment variable ${envVarName}. Tool will be disabled.`);
+            return null;
         }
         console.error(`Using custom tool name "${configuredName}" for ${envVarName}`);
         return configuredName;
@@ -167,204 +174,217 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         }
     };
 
-    if (autoWithPlaywrightAvailable) {
-        server.tool(
-            searchToolName,
-            getSearchDescription(),
-            {...searchBaseSchema, searchMode: searchModeSchema},
-            ({query, limit, searchMode, engines}) => executeSearch({query, limit, searchMode, engines})
-        );
-    } else {
-        server.tool(
-            searchToolName,
-            getSearchDescription(),
-            searchBaseSchema,
-            ({query, limit, engines}) => executeSearch({query, limit, engines})
-        );
+    if (searchToolName) {
+        if (autoWithPlaywrightAvailable) {
+            server.tool(
+                searchToolName,
+                getSearchDescription(),
+                {...searchBaseSchema, searchMode: searchModeSchema},
+                ({query, limit, searchMode, engines}) => executeSearch({query, limit, searchMode, engines})
+            );
+        } else {
+            server.tool(
+                searchToolName,
+                getSearchDescription(),
+                searchBaseSchema,
+                ({query, limit, engines}) => executeSearch({query, limit, engines})
+            );
+        }
     }
 
     // 获取 Linux.do 文章工具
-    server.tool(
-        fetchLinuxDoToolName,
-        "Fetch full article content from a linux.do post URL",
-        {
-            url: z.string().url().refine(
-                (url) => validateArticleUrl(url, 'linuxdo'),
-                "URL must be from linux.do and end with .json"
-            )
-        },
-        async ({url}) => {
-            try {
-                console.error(`Fetching Linux.do article: ${url}`);
-                const result = await runtime.services.fetchLinuxDoArticle.execute({ url });
+    if (fetchLinuxDoToolName) {
+        server.tool(
+            fetchLinuxDoToolName,
+            "Fetch full article content from a linux.do post URL",
+            {
+                url: z.string().url().refine(
+                    (url) => validateArticleUrl(url, 'linuxdo'),
+                    "URL must be from linux.do and end with .json"
+                )
+            },
+            async ({url}) => {
+                try {
+                    console.error(`Fetching Linux.do article: ${url}`);
+                    const result = await runtime.services.fetchLinuxDoArticle.execute({ url });
 
-                return {
-                    content: [{
-                        type: 'text',
-                        text: result.content
-                    }]
-                };
-            } catch (error) {
-                console.error('Failed to fetch Linux.do article:', error);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }],
-                    isError: true
-                };
-            }
-        }
-    );
-
-    // 获取 CSDN 文章工具
-    server.tool(
-        fetchCsdnToolName,
-        "Fetch full article content from a csdn post URL",
-        {
-            url: z.string().url().refine(
-                (url) => validateArticleUrl(url, 'csdn'),
-                "URL must be from blog.csdn.net contains /article/details/ path"
-            )
-        },
-        async ({url}) => {
-            try {
-                console.error(`Fetching CSDN article: ${url}`);
-                const result = await runtime.services.fetchCsdnArticle.execute({ url });
-
-                return {
-                    content: [{
-                        type: 'text',
-                        text: result.content
-                    }]
-                };
-            } catch (error) {
-                console.error('Failed to fetch CSDN article:', error);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }],
-                    isError: true
-                };
-            }
-        }
-    );
-
-    // 获取 GitHub README 工具
-    server.tool(
-        fetchGithubToolName,
-        "Fetch README content from a GitHub repository URL",
-        {
-            url: z.string().min(1).refine(
-                (url) => validateGithubRepositoryUrl(url),
-                "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
-            )
-        },
-        async ({url}) => {
-            try {
-                console.error(`Fetching GitHub README: ${url}`);
-                const result = await runtime.services.fetchGithubReadme.execute({ url });
-
-                if (result) {
                     return {
                         content: [{
                             type: 'text',
-                            text: result
+                            text: result.content
                         }]
                     };
-                } else {
+                } catch (error) {
+                    console.error('Failed to fetch Linux.do article:', error);
                     return {
                         content: [{
                             type: 'text',
-                            text: 'README not found or repository does not exist'
+                            text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
                         }],
                         isError: true
                     };
                 }
-            } catch (error) {
-                console.error('Failed to fetch GitHub README:', error);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }],
-                    isError: true
-                };
             }
-        }
-    );
+        );
+    }
+
+    // 获取 CSDN 文章工具
+    if (fetchCsdnToolName) {
+        server.tool(
+            fetchCsdnToolName,
+            "Fetch full article content from a csdn post URL",
+            {
+                url: z.string().url().refine(
+                    (url) => validateArticleUrl(url, 'csdn'),
+                    "URL must be from blog.csdn.net contains /article/details/ path"
+                )
+            },
+            async ({url}) => {
+                try {
+                    console.error(`Fetching CSDN article: ${url}`);
+                    const result = await runtime.services.fetchCsdnArticle.execute({ url });
+
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: result.content
+                        }]
+                    };
+                } catch (error) {
+                    console.error('Failed to fetch CSDN article:', error);
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        }],
+                        isError: true
+                    };
+                }
+            }
+        );
+    }
+
+    // 获取 GitHub README 工具
+    if (fetchGithubToolName) {
+        server.tool(
+            fetchGithubToolName,
+            "Fetch README content from a GitHub repository URL",
+            {
+                url: z.string().min(1).refine(
+                    (url) => validateGithubRepositoryUrl(url),
+                    "URL must be a valid GitHub repository URL (supports HTTPS, SSH formats)"
+                )
+            },
+            async ({url}) => {
+                try {
+                    console.error(`Fetching GitHub README: ${url}`);
+                    const result = await runtime.services.fetchGithubReadme.execute({ url });
+
+                    if (result) {
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: result
+                            }]
+                        };
+                    } else {
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: 'README not found or repository does not exist'
+                            }],
+                            isError: true
+                        };
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch GitHub README:', error);
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Failed to fetch README: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        }],
+                        isError: true
+                    };
+                }
+            }
+        );
+    }
 
     // 获取通用网页/Markdown 内容工具
-    server.tool(
-        fetchWebToolName,
-        "Fetch content from a public HTTP(S) URL. renderMode defaults to auto: request uses HTTP only, auto uses request with browser fallback, and browser renders directly with Playwright and fails clearly when Playwright is unavailable.",
-        {
-            url: z.string().url().refine(
-                (url) => validatePublicWebUrl(url),
-                "URL must be a public HTTP(S) address (private/local network targets are blocked)"
-            ),
-            maxChars: z.number().int().min(1000).max(200000).default(30000),
-            readability: z.boolean().optional(),
-            includeLinks: z.boolean().optional(),
-            renderMode: z.enum(['request', 'auto', 'browser']).optional()
-        },
-        async ({url, maxChars = 30000, readability, includeLinks, renderMode}) => {
-            try {
-                console.error(`Fetching web content: ${url}`);
-                const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, renderMode });
+    if (fetchWebToolName) {
+        server.tool(
+            fetchWebToolName,
+            "Fetch content from a public HTTP(S) URL. renderMode defaults to auto: request uses HTTP only, auto uses request with browser fallback, and browser renders directly with Playwright and fails clearly when Playwright is unavailable.",
+            {
+                url: z.string().url().refine(
+                    (url) => validatePublicWebUrl(url),
+                    "URL must be a public HTTP(S) address (private/local network targets are blocked)"
+                ),
+                maxChars: z.number().int().min(1000).max(200000).default(30000),
+                readability: z.boolean().optional(),
+                includeLinks: z.boolean().optional(),
+                renderMode: z.enum(['request', 'auto', 'browser']).optional()
+            },
+            async ({url, maxChars = 30000, readability, includeLinks, renderMode}) => {
+                try {
+                    console.error(`Fetching web content: ${url}`);
+                    const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks, renderMode });
 
-                return {
-                    content: [{
-                        type: 'text',
-                        text: JSON.stringify(result, null, 2)
-                    }]
-                };
-            } catch (error) {
-                console.error('Failed to fetch web content:', error);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `Failed to fetch web content: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }],
-                    isError: true
-                };
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2)
+                        }]
+                    };
+                } catch (error) {
+                    console.error('Failed to fetch web content:', error);
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Failed to fetch web content: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        }],
+                        isError: true
+                    };
+                }
             }
-        }
-    );
+        );
+    }
 
     // 获取掘金文章工具
-    server.tool(
-        fetchJuejinToolName,
-        "Fetch full article content from a Juejin(掘金) post URL",
-        {
-            url: z.string().url().refine(
-                (url) => validateArticleUrl(url, 'juejin'),
-                "URL must be from juejin.cn and contain /post/ path"
-            )
-        },
-        async ({url}) => {
-            try {
-                console.error(`Fetching Juejin article: ${url}`);
-                const result = await runtime.services.fetchJuejinArticle.execute({ url });
+    if (fetchJuejinToolName) {
+        server.tool(
+            fetchJuejinToolName,
+            "Fetch full article content from a Juejin(掘金) post URL",
+            {
+                url: z.string().url().refine(
+                    (url) => validateArticleUrl(url, 'juejin'),
+                    "URL must be from juejin.cn and contain /post/ path"
+                )
+            },
+            async ({url}) => {
+                try {
+                    console.error(`Fetching Juejin article: ${url}`);
+                    const result = await runtime.services.fetchJuejinArticle.execute({ url });
 
-                return {
-                    content: [{
-                        type: 'text',
-                        text: result.content
-                    }]
-                };
-            } catch (error) {
-                console.error('Failed to fetch Juejin article:', error);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
-                    }],
-                    isError: true
-                };
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: result.content
+                        }]
+                    };
+                } catch (error) {
+                    console.error('Failed to fetch Juejin article:', error);
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Failed to fetch article: ${error instanceof Error ? error.message : 'Unknown error'}`
+                        }],
+                        isError: true
+                    };
+                }
             }
-        }
-    );
+        );
+    }
+
 };
 
