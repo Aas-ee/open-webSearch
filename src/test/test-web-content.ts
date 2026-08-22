@@ -1,12 +1,15 @@
 ﻿import type { AxiosRequestConfig, AxiosResponse } from 'axios';
+import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import {
     __setBrowserFetcherForTests,
     __setBrowserHtmlFetcherForTests,
+    __setBrowserSessionOpenerForTests,
     fetchWebContent
 } from '../engines/web/index.js';
 import { __setReadabilityParserForTests } from '../engines/web/fetchWebContent.js';
 import { __setAxiosRequestForTests } from '../utils/httpRequest.js';
+import { __resetPlaywrightClientForTests } from '../utils/playwrightClient.js';
 import { __setDnsLookupForTests } from '../utils/urlSafety.js';
 
 type TestCase = {
@@ -180,6 +183,61 @@ async function runCase(testCase: TestCase): Promise<boolean> {
     }
 }
 
+// 假竞速浏览器：只实现竞速层用到的方法面（route/CDP 会话/cookies/goto/content 等），驱动 fetchWithCookiesRaceViaPlaywright 的真实竞速逻辑，无需启动真实浏览器即可断言 HTTP 臂胜出时的返回行为。导航守卫在这里是 no-op：公网 URL 校验已由测试 DNS 桩覆盖的 assertPublicHttpUrlResolved 调用链承担。
+function makeFakeRaceBrowser(): any {
+    let nextTargetSeq = 1;
+
+    const makeSession = (targetId: string) => ({
+        send: async (method: string) => {
+            if (method === 'Target.getTargetInfo') {
+                return { targetInfo: { targetId } };
+            }
+            if (method === 'Browser.getWindowForTarget') {
+                return { windowId: 1 };
+            }
+            if (method === 'Browser.getWindowBounds') {
+                return { bounds: { left: 0, top: 0, width: 800, height: 600, windowState: 'normal' } };
+            }
+            return {};
+        }
+    });
+
+    const makePage = (targetId: string): any => {
+        let currentUrl = '';
+        return {
+            _targetId: targetId,
+            isClosed: () => false,
+            context: () => context,
+            route: async () => undefined,
+            goto: async (targetUrl: string) => { currentUrl = targetUrl; },
+            // 渲染臂刻意带真实延迟：真实浏览器渲染远慢于 HTTP，竞速层因此应由 HTTP 臂先胜出；若渲染臂即时返回，它会无条件抢先胜出而掩盖本用例要验证的 HTTP 臂重定向行为。
+            waitForLoadState: async () => new Promise<void>((resolve) => setTimeout(resolve, 400)),
+            waitForTimeout: async () => undefined,
+            content: async () => '<html><head><title>Fake Race Page</title></head><body>fake race render</body></html>',
+            url: () => currentUrl,
+            title: async () => 'Fake Race Page',
+            evaluate: async () => undefined
+        };
+    };
+
+    const context: any = {
+        pages: () => [],
+        newPage: async () => {
+            const page = makePage(`FAKE-RACE-${nextTargetSeq}`);
+            nextTargetSeq += 1;
+            return page;
+        },
+        newCDPSession: async (page: any) => makeSession(page._targetId),
+        cookies: async () => [{ name: 'race-cookie', value: '1' }]
+    };
+
+    return {
+        contexts: () => [context],
+        newContext: async () => context,
+        close: async () => undefined
+    };
+}
+
 async function main(): Promise<void> {
     const originalFetchWebAllowInsecureTls = config.fetchWebAllowInsecureTls;
     installAxiosMock();
@@ -189,6 +247,9 @@ async function main(): Promise<void> {
         }
         if (hostname === 'private-final.example') {
             return [{ address: '127.0.0.1' }];
+        }
+        if (hostname === 'redirected.example') {
+            return [{ address: '93.184.216.35' }];
         }
         throw new Error(`unexpected hostname: ${hostname}`);
     });
@@ -649,6 +710,81 @@ async function main(): Promise<void> {
 
                 installAxiosMock();
             }
+        },
+        {
+            name: 'race layer should follow redirects and keep the final URL when HTTP wins',
+            run: async () => {
+                const previousModulePath = config.playwrightModulePath;
+                const previousProxyEnabled = config.useProxy;
+                config.useProxy = false;
+                config.playwrightModulePath = fileURLToPath(new URL('../../test-assets/fake-playwright-launch-client.cjs', import.meta.url));
+                __resetPlaywrightClientForTests();
+
+                // 重置为真实竞速层：前面的测试可能留下返回固定内容的 __setBrowserFetcherForTests 桩，不重置会被 fetchWebContent 的回退入口直接命中，绕过本用例要验证的真实竞速逻辑。
+                __setBrowserFetcherForTests();
+                __setBrowserSessionOpenerForTests(async () => ({
+                    browser: makeFakeRaceBrowser(),
+                    release: async () => undefined
+                }));
+
+                installAxiosMock();
+                // 主请求（无 Cookie）被模拟成反爬拦截返回 403，强制进入竞速层；竞速层带页面 Cookie 的 GET 则走通重定向链，以此验证 HTTP 臂胜出时 finalUrl 跟随重定向后的地址。
+                __setAxiosRequestForTests(async (requestConfig) => {
+                    const url = String(requestConfig.url || '');
+                    const method = String(requestConfig.method || 'GET').toUpperCase();
+                    const cookie = String((requestConfig.headers as Record<string, unknown> | undefined)?.Cookie || '');
+                    if (method === 'HEAD') {
+                        return makeResponse(requestConfig, { headers: {}, finalUrl: url });
+                    }
+                    if (method === 'GET' && url.endsWith('/race-redirect')) {
+                        if (cookie.includes('race-cookie')) {
+                            return makeResponse(requestConfig, {
+                                status: 301,
+                                headers: { location: 'https://redirected.example/race-landing' },
+                                data: ''
+                            });
+                        }
+                        return makeResponse(requestConfig, {
+                            status: 403,
+                            headers: { 'content-type': 'text/html; charset=utf-8' },
+                            data: '',
+                            finalUrl: url
+                        });
+                    }
+                    if (method === 'GET' && url.endsWith('/race-landing')) {
+                        return makeResponse(requestConfig, {
+                            headers: { 'content-type': 'text/html; charset=utf-8' },
+                            data: `
+                            <html>
+                              <head><title>Race Landing</title></head>
+                              <body>
+                                <main>
+                                  <h1>Race Landing</h1>
+                                  <p>${'Race redirect landed content '.repeat(12)}</p>
+                                </main>
+                              </body>
+                            </html>
+                            `,
+                            finalUrl: url
+                        });
+                    }
+                    throw new Error(`Unexpected mocked URL: ${url}`);
+                });
+
+                try {
+                    const result = await fetchWebContent('https://example.com/race-redirect', 5000);
+                    assert(result.retrievalMethod === 'request-with-browser-cookies', 'race layer HTTP arm should win with browser cookies');
+                    assert(result.finalUrl === 'https://redirected.example/race-landing', 'race HTTP win should keep the redirected final URL');
+                    assert(result.content.includes('Race redirect landed content'), 'redirected content should be extracted');
+                } finally {
+                    config.useProxy = previousProxyEnabled;
+                    config.playwrightModulePath = previousModulePath;
+                    __resetPlaywrightClientForTests();
+                    __setBrowserSessionOpenerForTests();
+                    installAxiosMock();
+                    __setBrowserFetcherForTests();
+                }
+            }
         }
     ];
 
@@ -665,6 +801,8 @@ async function main(): Promise<void> {
     __setReadabilityParserForTests();
     __setBrowserFetcherForTests();
     __setBrowserHtmlFetcherForTests();
+    __setBrowserSessionOpenerForTests();
+    __resetPlaywrightClientForTests();
 
     const total = testCases.length;
     console.log(`\nResult: ${passed}/${total} passed`);
@@ -683,6 +821,8 @@ main().catch((error) => {
     __setReadabilityParserForTests();
     __setBrowserFetcherForTests();
     __setBrowserHtmlFetcherForTests();
+    __setBrowserSessionOpenerForTests();
+    __resetPlaywrightClientForTests();
     console.error('❌ test-web-content failed:', error);
     process.exit(1);
 });

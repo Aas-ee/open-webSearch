@@ -14,7 +14,8 @@ import {
 import {
     loadPlaywrightClient,
     openPlaywrightBrowser,
-    acquirePooledPlaywrightPage
+    acquirePooledPlaywrightPage,
+    type PlaywrightBrowserSession
 } from '../../utils/playwrightClient.js';
 
 export interface FetchWebContentResult {
@@ -333,7 +334,7 @@ function isUsableHttpRaceResult(raw: string): boolean {
     return raw.length > MIN_RACE_HTTP_HTML_CHARS && !looksLikeBotChallengePage(raw);
 }
 
-type HttpRaceOutcome = { ok: true; contentType: string; raw: string } | { ok: false };
+type HttpRaceOutcome = { ok: true; contentType: string; raw: string; finalUrl: string } | { ok: false };
 type BrowserRaceOutcome = { ok: true; result: BrowserFetchResult } | { ok: false; error: unknown };
 
 // 浏览器导航一次，页面 domcontentloaded 后立即取 Cookie 发起 HTTP 请求，同时浏览器继续渲染。
@@ -346,7 +347,7 @@ async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFe
 
     await assertPublicHttpUrlResolved(url, 'Browser fetch URL');
 
-    const session = await openPlaywrightBrowser();
+    const session = await browserSessionOpener();
 
     // 竞速取消与延迟释放：HTTP 胜出时浏览器臂可能仍在渲染，赢家立即返回结果，page/session 留到浏览器臂收尾完成后于后台释放，避免浏览器臂继续操作已释放的 page。
     let deferRelease = false;
@@ -375,7 +376,9 @@ async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFe
                     .then((resp): HttpRaceOutcome => ({
                         ok: true as const,
                         contentType: String(resp.headers['content-type'] || '').toLowerCase(),
-                        raw: typeof resp.data === 'string' ? resp.data : ''
+                        raw: typeof resp.data === 'string' ? resp.data : '',
+                        // requestWithSafeRedirects 会在最终响应上回填重定向后的 URL（每一跳都经过公网校验），这里保留它作为 finalUrl，避免相对链接解析基于原始请求地址。
+                        finalUrl: resp.request?.res?.responseUrl || url
                     }))
                     .catch((): HttpRaceOutcome => ({ ok: false as const }))
                 : Promise.resolve({ ok: false as const } as HttpRaceOutcome);
@@ -471,7 +474,7 @@ async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFe
                             .catch(() => undefined);
                         return {
                             contentType: httpResolved.contentType,
-                            finalUrl: url,
+                            finalUrl: httpResolved.finalUrl,
                             raw: httpResolved.raw,
                             title: '',
                             retrievalMethod: 'request-with-browser-cookies'
@@ -518,6 +521,13 @@ let browserFetcher: (url: string) => Promise<BrowserFetchResult> = fetchWithCook
 
 export function __setBrowserFetcherForTests(fetcher?: (url: string) => Promise<BrowserFetchResult>): void {
     browserFetcher = fetcher || fetchWithCookiesRaceViaPlaywright;
+}
+
+// 浏览器会话打开器的注入接缝：竞速层依赖它获取 browser 句柄，测试替换为假浏览器后可以真实驱动竞速逻辑。
+let browserSessionOpener: (options?: { antiBot?: boolean }) => Promise<PlaywrightBrowserSession> = openPlaywrightBrowser;
+
+export function __setBrowserSessionOpenerForTests(opener?: (options?: { antiBot?: boolean }) => Promise<PlaywrightBrowserSession>): void {
+    browserSessionOpener = opener || openPlaywrightBrowser;
 }
 
 export async function fetchWebContent(

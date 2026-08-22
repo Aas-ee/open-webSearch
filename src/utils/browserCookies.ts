@@ -312,9 +312,7 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
     const session = await openPlaywrightBrowser();
 
     try {
-        // Copilot review r3524589121: 复用页面池换取无新窗口，但可能在不同 fetch 间泄漏
-        // cookies/storage。当前 fetch 场景以抓取匿名 HTML 为主，不需要完全隔离；
-        // 若需要干净 Cookie 隔离的 fetch 场景，应使用 getBrowserCookieHeader 的独立 context 路径。
+        // 复用页面池换取无新窗口，但页面状态（cookies/storage）会在不同 fetch 间共享。这是服务级共享浏览器状态：仅用于匿名公共网页访问，不应承载用户个人登录信息。详见 README 的“浏览器状态说明（本地共享 profile）”；若调用方连接的是已登录的个人浏览器（WS/CDP 端点），其状态同样会被共享。
         const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
             poolKey: 'fetch-html',
             preparePage: async (p) => { await installNavigationGuard(p); }

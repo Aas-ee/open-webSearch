@@ -369,6 +369,7 @@ npx open-websearch@latest
 浏览器状态说明（本地共享 profile）：
 - 本地浏览器模式会跨 fetch、跨进程重启复用持久化 context/页面。同一 origin 的 cookies、storage、cache 和 Service Worker 状态因此会在多次浏览器路径抓取之间保留。
 - 这对单用户、有状态抓取是有意为之的取舍（保持反爬状态、避免反复启动浏览器）。如果 daemon 会被多个互不信任的调用方共享，请改用 `PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT` 连接各自隔离的浏览器，或为每个调用方指定独立的 `OPEN_WEBSEARCH_PROFILE_DIR`。
+- 此共享状态是服务级的，仅用于匿名访问公共网页：服务本身不会登录任何站点，因此不应承载个人账号密码与登录态，请勿依赖它存放已登录或个性化会话。远程端点（`PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT`）会继承所连浏览器的状态，若将其指向个人已登录浏览器，该浏览器的登录态与个性化状态也会一并被本服务共享。
 - 如需清理 profile 状态：在本地浏览器未运行时，删除 `OPEN_WEBSEARCH_PROFILE_DIR`（默认为 `<tmpdir>/open-websearch-browser-profiles`）下的浏览器 profile 目录即可。
 
 **Windows 用户注意事项：**
