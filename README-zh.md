@@ -547,6 +547,19 @@ docker run -d --name web-search-daemon -p 127.0.0.1:3210:3210 \
 
 生产环境应固定不可变 tag 和 digest，不要依赖漂移的 `latest`。MCP HTTP 当前监听 `0.0.0.0`，且为了向后兼容默认未开启 DNS rebinding 防护。两个原生 HTTP 入口都不提供公网鉴权；跨主机访问必须在网关补充网络隔离、明确的 Host 白名单、TLS、认证和限流。
 
+不使用 GitHub Actions 时，可以在开发机直接构建并推送镜像。先登录目标镜像仓库，再运行仓库内脚本：
+
+```bash
+docker login harbor.example.com
+./scripts/build-and-push-image.sh \
+  --repository harbor.example.com/lingjing/open-websearch \
+  --alias dev
+```
+
+脚本默认使用当前 Git commit 的前 12 位作为不可变 tag，并输出可直接写入部署环境的
+`OPEN_WEBSEARCH_IMAGE=<完整镜像引用>`。默认只构建测试服务器使用的 `linux/amd64`；如需多架构镜像，可显式传入
+`--platform linux/amd64,linux/arm64`。为避免镜像内容与 commit tag 不一致，工作区有未提交改动时脚本默认拒绝执行。
+
 配置环境变量说明：
 
 | 变量名 | 默认值                     | 可选值 | 说明 |
@@ -831,55 +844,16 @@ use_mcp_tool({
 
 ### 贡献者指南
 
-如果您想要fork本仓库并发布自己的Docker镜像，需要进行以下配置：
+如果需要发布自己的 Docker 镜像，先登录目标镜像仓库，再运行仓库内的本地脚本：
 
-#### GitHub Secrets配置
+```bash
+docker login harbor.example.com
+./scripts/build-and-push-image.sh \
+  --repository harbor.example.com/your-project/open-websearch \
+  --alias dev
+```
 
-要启用自动Docker镜像构建和发布功能，请在您的GitHub仓库设置中添加以下secrets（Settings → Secrets and variables → Actions）：
-
-**必需的Secrets:**
-- `GITHUB_TOKEN`: GitHub自动提供（无需设置）
-
-**可选的Secrets（用于阿里云ACR）:**
-- `ACR_REGISTRY`: 您的阿里云容器镜像服务URL（例如：`registry.cn-hangzhou.aliyuncs.com`）
-- `ACR_USERNAME`: 您的阿里云ACR用户名
-- `ACR_PASSWORD`: 您的阿里云ACR密码
-- `ACR_IMAGE_NAME`: 您在ACR中的镜像名称（例如：`your-namespace/open-web-search`）
-
-#### CI/CD工作流程
-
-仓库包含一个GitHub Actions工作流程（`.github/workflows/docker.yml`），会自动：
-
-1. **触发条件**：
-    - 推送到`main`分支
-    - 推送版本标签（`v*`）
-    - 手动触发workflow
-
-2. **构建并推送到**：
-    - GitHub Container Registry (ghcr.io) - 始终启用
-    - 阿里云容器镜像服务 - 仅在配置ACR secrets时启用
-
-3. **镜像标签**：
-    - `ghcr.io/您的用户名/open-web-search:latest`
-    - `您的ACR地址/您的镜像名:latest`（如果配置了ACR）
-
-#### Fork和发布步骤：
-
-1. **Fork仓库**到您的GitHub账户
-2. **配置secrets**（如果需要ACR发布）：
-    - 进入您fork的仓库的Settings → Secrets and variables → Actions
-    - 添加上面列出的ACR相关secrets
-3. **推送更改**到`main`分支或创建版本标签
-4. **GitHub Actions将自动构建并推送**您的Docker镜像
-5. **使用您的镜像**，更新Docker命令：
-   ```bash
-   docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/您的用户名/open-web-search:latest
-   ```
-
-#### 注意事项：
-- 如果您不配置ACR secrets，工作流程将只发布到GitHub Container Registry
-- 确保您的GitHub仓库已启用Actions功能
-- 工作流程会使用您的GitHub用户名（转换为小写）作为GHCR镜像名称
+脚本默认使用当前 Git commit 的前 12 位作为不可变镜像标签。建议只从干净工作区发布，确保镜像内容与版本一致。
 
 <div align="center">
 

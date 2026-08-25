@@ -731,55 +731,16 @@ Welcome to submit issue reports and feature improvement suggestions!
 
 ### Contributor Guide
 
-If you want to fork this repository and publish your own Docker image, you need to make the following configurations:
+To publish your own Docker image without GitHub Actions, log in to the target registry and run the repository-local script:
 
-#### GitHub Secrets Configuration
+```bash
+docker login harbor.example.com
+./scripts/build-and-push-image.sh \
+  --repository harbor.example.com/your-project/open-websearch \
+  --alias dev
+```
 
-To enable automatic Docker image building and publishing, please add the following secrets in your GitHub repository settings (Settings → Secrets and variables → Actions):
-
-**Required Secrets:**
-- `GITHUB_TOKEN`: Automatically provided by GitHub (no setup needed)
-
-**Optional Secrets (for Alibaba Cloud ACR):**
-- `ACR_REGISTRY`: Your Alibaba Cloud Container Registry URL (e.g., `registry.cn-hangzhou.aliyuncs.com`)
-- `ACR_USERNAME`: Your Alibaba Cloud ACR username
-- `ACR_PASSWORD`: Your Alibaba Cloud ACR password
-- `ACR_IMAGE_NAME`: Your image name in ACR (e.g., `your-namespace/open-web-search`)
-
-#### CI/CD Workflow
-
-The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml`) that automatically:
-
-1. **Trigger Conditions**:
-    - Push to `main` branch
-    - Push version tags (`v*`)
-    - Manual workflow trigger
-
-2. **Build and Push to**:
-    - GitHub Container Registry (ghcr.io) - always enabled
-    - Alibaba Cloud Container Registry - only enabled when ACR secrets are configured
-
-3. **Image Tags**:
-    - `ghcr.io/your-username/open-web-search:latest`
-    - `your-acr-address/your-image-name:latest` (if ACR is configured)
-
-#### Fork and Publish Steps:
-
-1. **Fork the repository** to your GitHub account
-2. **Configure secrets** (if you need ACR publishing):
-    - Go to Settings → Secrets and variables → Actions in your forked repository
-    - Add the ACR-related secrets listed above
-3. **Push changes** to the `main` branch or create version tags
-4. **GitHub Actions will automatically build and push** your Docker image
-5. **Use your image**, update the Docker command:
-   ```bash
-   docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/your-username/open-web-search:latest
-   ```
-
-#### Notes:
-- If you don't configure ACR secrets, the workflow will only publish to GitHub Container Registry
-- Make sure your GitHub repository has Actions enabled
-- The workflow will use your GitHub username (converted to lowercase) as the GHCR image name
+The script uses the first 12 characters of the current Git commit as the immutable image tag by default. Run it from a clean worktree so the image content matches that revision.
 
 <div align="center">
 
