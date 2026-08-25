@@ -52,7 +52,7 @@ function createStubRuntime() {
                 bing: async (query, limit, context) => [{
                     title: 'Result',
                     url: 'https://example.com',
-                    description: `${query}:${limit}:${context?.searchMode ?? 'none'}`,
+                    description: `${query}:${limit}:${context?.searchMode ?? 'none'}:${context?.vertical ?? 'none'}`,
                     source: 'example.com',
                     dateText: '6 天之前',
                     engine: 'bing'
@@ -195,6 +195,7 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
             limit: 3,
             engines: ['Bing', 'startpage'],
             searchMode: 'playwright',
+            vertical: 'news',
             aggregationMode: 'deep',
             perEngineLimit: 4,
             ranking: 'rrf',
@@ -209,9 +210,9 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         assertEqual(searchResult.payload.data.query, 'Open WebSearch', 'daemon /search query');
         assertEqual(searchResult.payload.data.retrievedAt, '2026-08-18T10:05:32.120Z', 'daemon /search retrievedAt');
         assertEqual(searchResult.payload.data.totalResults, 2, 'daemon /search totalResults');
-        assert(searchResult.payload.data.results.some((item) => item.description === 'Open WebSearch:4:playwright'), 'daemon /search result content');
+        assert(searchResult.payload.data.results.some((item) => item.description === 'Open WebSearch:4:playwright:news'), 'daemon /search result content');
         assert(searchResult.payload.data.results.every((item) => typeof item.sourceDomain === 'string'), 'daemon /search sourceDomain');
-        const bingResult = searchResult.payload.data.results.find((item) => item.description === 'Open WebSearch:4:playwright');
+        const bingResult = searchResult.payload.data.results.find((item) => item.description === 'Open WebSearch:4:playwright:news');
         assert(bingResult, 'daemon /search should include Bing result');
         assertEqual(bingResult.dateText, '6 天之前', 'daemon /search dateText');
         assertEqual(bingResult.publishedAt, '2026-08-12T10:05:32.120Z', 'daemon /search publishedAt');
@@ -329,6 +330,16 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
         assertEqual(invalidSearchResult.response.status, 400, 'daemon /search invalid http status');
         assertEqual(invalidSearchResult.payload.status, 'error', 'daemon /search invalid payload status');
         assertEqual(invalidSearchResult.payload.error.code, 'invalid_request', 'daemon /search invalid error code');
+
+        const invalidVerticalResult = await postJson<{
+            status: string;
+            error: { code: string; message: string };
+        }>(daemon.baseUrl, '/search', {
+            query: 'news',
+            vertical: 'images'
+        });
+        assertEqual(invalidVerticalResult.response.status, 400, 'daemon /search invalid vertical http status');
+        assertEqual(invalidVerticalResult.payload.error.code, 'invalid_request', 'daemon /search invalid vertical error code');
 
         console.log('✅ local daemon operation routes');
     } finally {

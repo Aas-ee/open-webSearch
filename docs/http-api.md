@@ -144,6 +144,7 @@ Request body:
   "query": "open web search",
   "limit": 5,
   "engines": ["startpage", "bing", "sogou", "hackernews"],
+  "vertical": "news",
   "searchMode": "playwright",
   "aggregationMode": "deep",
   "perEngineLimit": 5,
@@ -163,6 +164,8 @@ Notes:
 - `engines` is optional
 - `searchMode` is optional: `request`, `auto`, or `playwright`
 - `searchMode` currently only affects Bing; other engines ignore it
+- `vertical` is optional: `web` (default) or `news`
+  - `news` asks Bing's news vertical for recent, date-sorted article results; other engines currently ignore it
 - `aggregationMode` is optional: `fast`, `balanced`, or `deep`
   - `fast` preserves the previous distributed candidate budget
   - `balanced` asks each engine for a slightly wider candidate pool

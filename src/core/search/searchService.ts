@@ -1,4 +1,4 @@
-import { SearchResult } from '../../types.js';
+import type { SearchResult, SearchVertical } from '../../types.js';
 import { AppConfig } from '../../config.js';
 import {
     resolvePerEngineLimits,
@@ -9,6 +9,7 @@ import { normalizePublicationMetadata } from './publicationMetadata.js';
 
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
+    vertical?: SearchVertical;
 };
 
 export type SearchEngineExecutor = (query: string, limit: number, context?: SearchExecutionContext) => Promise<SearchResult[]>;
@@ -38,6 +39,7 @@ export type SearchExecutionInput = {
     engines: string[];
     limit: number;
     searchMode?: AppConfig['searchMode'];
+    vertical?: SearchVertical;
     aggregationMode?: SearchAggregationMode;
     perEngineLimit?: number;
     ranking?: SearchRankingMode;
@@ -288,6 +290,7 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, options:
             engines,
             limit,
             searchMode,
+            vertical = 'web',
             aggregationMode = 'fast',
             perEngineLimit,
             ranking,
@@ -317,7 +320,10 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, options:
                 }
 
                 try {
-                    return await executor(cleanQuery, engineLimit, { searchMode: effectiveSearchMode });
+                    return await executor(cleanQuery, engineLimit, {
+                        searchMode: effectiveSearchMode,
+                        vertical
+                    });
                 } catch (error) {
                     // 强制 Playwright 而配置无效属于明确的配置错误，直接上抛，由各入口以 browser_unavailable 错误响应。
                     if ((error as { code?: unknown })?.code === 'browser_unavailable') {

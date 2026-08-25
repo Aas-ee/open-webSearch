@@ -1,12 +1,14 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { AppConfig, config, getEffectiveSearchMode, checkPlaywrightModeConfiguration } from '../../config.js';
-import { SearchResult } from '../../types.js';
+import type { SearchResult, SearchVertical } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
+import { parseBingNewsResults } from './newsParser.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser, retryOnBrowserCrash } from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 const BING_BASE_URL = 'https://cn.bing.com/search';
+const BING_NEWS_URL = 'https://www.bing.com/news/search';
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const SEARCH_INPUT_SELECTORS = [
@@ -79,6 +81,19 @@ function buildBingSearchUrl(query: string, pageNumber: number): string {
     return url.toString();
 }
 
+function buildBingNewsUrl(query: string): string {
+    const url = new URL(BING_NEWS_URL);
+    url.searchParams.set('q', query);
+    url.searchParams.set('setlang', 'en-US');
+    url.searchParams.set('form', 'QBNH');
+    url.searchParams.set('qft', 'sortbydate="1"');
+    return url.toString();
+}
+
+export function __buildBingNewsUrlForTests(query: string): string {
+    return buildBingNewsUrl(query);
+}
+
 function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
     const normalized = html.toLowerCase();
     const $ = cheerio.load(html);
@@ -120,6 +135,17 @@ function buildBingAxiosRequestOptions(): any {
     return buildSharedAxiosRequestOptions({
         trustedStaticHost: true,
         headers: FALLBACK_HEADERS,
+        timeout: config.playwrightNavigationTimeoutMs
+    });
+}
+
+function buildBingNewsAxiosRequestOptions(): any {
+    return buildSharedAxiosRequestOptions({
+        trustedStaticHost: true,
+        headers: {
+            ...FALLBACK_HEADERS,
+            'Accept-Language': 'en-US,en;q=0.9'
+        },
         timeout: config.playwrightNavigationTimeoutMs
     });
 }
@@ -623,6 +649,19 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
     return allResults.slice(0, limit);
 }
 
+async function searchBingNewsWithHttp(query: string, limit: number): Promise<SearchResult[]> {
+    const response = await axios.get(
+        buildBingNewsUrl(query),
+        buildBingNewsAxiosRequestOptions()
+    );
+    const html = String(response.data || '');
+    const results = parseBingNewsResults(html, limit);
+    if (results.length === 0) {
+        console.error('⚠️ No Bing News results from HTTP mode.');
+    }
+    return results;
+}
+
 async function searchBingWithPlaywright(query: string, limit: number): Promise<SearchResult[]> {
     return retryOnBrowserCrash(() => searchBingWithPlaywrightOnce(query, limit));
 }
@@ -709,8 +748,12 @@ async function searchBingWithPlaywrightOnce(query: string, limit: number): Promi
 export async function searchBing(
     query: string,
     limit: number,
-    options?: { searchMode?: AppConfig['searchMode'] }
+    options?: { searchMode?: AppConfig['searchMode']; vertical?: SearchVertical }
 ): Promise<SearchResult[]> {
+    if (options?.vertical === 'news') {
+        return searchBingNewsWithHttp(query, limit);
+    }
+
     // 请求级未显式覆盖时使用服务端模式：强制 request/playwright 原样采用，SEARCH_MODE=auto 但 Playwright 必需参数未配置时退回强制请求模式。
     const effectiveSearchMode = options?.searchMode ?? getEffectiveSearchMode(config);
 

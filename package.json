@@ -45,6 +45,7 @@
     "test:web-content": "tsc && node build/test/test-web-content.js",
     "test:web-content:live": "tsc && node build/test/test-web-content-live.js",
     "test:bing:live": "tsc && node build/test/test-bing-live.js",
+    "test:bing-news-parser": "tsc && node build/test/test-bing-news-parser.js",
     "test:article-fetch:live": "tsc && node build/test/test-article-fetch-live.js",
     "test:dialog-capture": "tsc && node build/test/test-dialog-capture.js"
   },

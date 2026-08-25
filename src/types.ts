@@ -10,3 +10,5 @@ export interface SearchResult {
     engines?: string[];
     score?: number;
 }
+
+export type SearchVertical = 'web' | 'news';

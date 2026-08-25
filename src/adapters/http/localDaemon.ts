@@ -13,6 +13,7 @@ import {
 import { validatePublicWebUrl } from '../../core/validation/targetValidation.js';
 import { isBrowserUnavailableError, shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { OPEN_WEBSEARCH_VERSION } from '../../version.js';
+import type { SearchVertical } from '../../types.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -122,6 +123,18 @@ function parseSearchMode(searchMode: unknown): AppConfig['searchMode'] | undefin
     }
 
     return searchMode;
+}
+
+function parseSearchVertical(vertical: unknown): SearchVertical | undefined {
+    if (vertical === undefined) {
+        return undefined;
+    }
+
+    if (vertical !== 'web' && vertical !== 'news') {
+        throw new Error('vertical must be one of: web, news');
+    }
+
+    return vertical;
 }
 
 function parseAggregationMode(aggregationMode: unknown): SearchAggregationMode | undefined {
@@ -282,6 +295,7 @@ export async function startLocalDaemon(
             const limit = parseLimit(req.body?.limit);
             const engines = parseRequestedEngines(runtime, req.body?.engines);
             const searchMode = parseSearchMode(req.body?.searchMode);
+            const vertical = parseSearchVertical(req.body?.vertical);
             const aggregationMode = parseAggregationMode(req.body?.aggregationMode);
             const perEngineLimit = parsePerEngineLimit(req.body?.perEngineLimit);
             const ranking = parseRankingMode(req.body?.ranking);
@@ -292,6 +306,7 @@ export async function startLocalDaemon(
                 limit,
                 engines,
                 searchMode,
+                vertical,
                 aggregationMode,
                 perEngineLimit,
                 ranking,
@@ -323,7 +338,7 @@ export async function startLocalDaemon(
                 message,
                 {
                     hint: statusCode === 400
-                        ? 'Use a non-empty query, valid engine names, limit/perEngineLimit between 1 and 50, searchMode request/auto/playwright, aggregationMode fast/balanced/deep, ranking engine-order/rrf, boolean dedupe, and positive engineWeights.'
+                        ? 'Use a non-empty query, valid engine names, limit/perEngineLimit between 1 and 50, searchMode request/auto/playwright, vertical web/news, aggregationMode fast/balanced/deep, ranking engine-order/rrf, boolean dedupe, and positive engineWeights.'
                         : 'Retry with a different engine or inspect daemon/runtime configuration.'
                 }
             );

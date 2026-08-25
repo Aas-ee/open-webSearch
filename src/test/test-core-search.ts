@@ -99,14 +99,14 @@ function testResolveRequestedEngines(): void {
 }
 
 async function testSearchServiceExecution(): Promise<void> {
-    const seenCalls: Array<{ engine: string; query: string; limit: number; searchMode?: string }> = [];
+    const seenCalls: Array<{ engine: string; query: string; limit: number; searchMode?: string; vertical?: string }> = [];
     const engineMap: SearchEngineExecutorMap = {
         bing: async (query, limit, context) => {
-            seenCalls.push({ engine: 'bing', query, limit, searchMode: context?.searchMode });
+            seenCalls.push({ engine: 'bing', query, limit, searchMode: context?.searchMode, vertical: context?.vertical });
             return Array.from({ length: limit }, (_, index) => createResult('bing', index + 1));
         },
         startpage: async (query, limit, context) => {
-            seenCalls.push({ engine: 'startpage', query, limit, searchMode: context?.searchMode });
+            seenCalls.push({ engine: 'startpage', query, limit, searchMode: context?.searchMode, vertical: context?.vertical });
             throw new Error(`blocked for ${query} (${limit})`);
         }
     };
@@ -116,7 +116,8 @@ async function testSearchServiceExecution(): Promise<void> {
         query: '  open web search  ',
         engines: ['bing', 'startpage'],
         limit: 3,
-        searchMode: 'playwright'
+        searchMode: 'playwright',
+        vertical: 'news'
     });
 
     assertEqual(result.query, 'open web search', 'trims query');
@@ -125,9 +126,9 @@ async function testSearchServiceExecution(): Promise<void> {
     assertEqual(result.partialFailures[0].engine, 'startpage', 'records failed engine');
     assertEqual(result.partialFailures[0].code, 'engine_error', 'uses stable partial failure code');
     assertEqualArray(
-        seenCalls.map(call => `${call.engine}:${call.query}:${call.limit}:${call.searchMode ?? 'none'}`),
-        ['bing:open web search:2:playwright', 'startpage:open web search:1:playwright'],
-        'passes trimmed query, distributed limits, and request-level search mode'
+        seenCalls.map(call => `${call.engine}:${call.query}:${call.limit}:${call.searchMode ?? 'none'}:${call.vertical ?? 'none'}`),
+        ['bing:open web search:2:playwright:news', 'startpage:open web search:1:playwright:news'],
+        'passes trimmed query, distributed limits, request-level search mode, and vertical'
     );
 
     console.log('✅ search service executes with partial failures');

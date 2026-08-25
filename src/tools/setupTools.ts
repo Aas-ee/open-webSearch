@@ -16,6 +16,7 @@ import {
 } from '../core/validation/targetValidation.js';
 import { OpenWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { AppConfig, checkPlaywrightModeConfiguration } from '../config.js';
+import { SearchVertical } from '../types.js';
 export { normalizeEngineName };
 
 // 获取工具名称，优先使用环境变量，否则使用默认值
@@ -56,9 +57,10 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         const searchModeDescription = autoWithPlaywrightAvailable
             ? ' searchMode meanings: request performs plain HTTP scraping, playwright drives a real browser through Playwright, and auto or omitting searchMode lets the server decide (request first, falling back to Playwright when it is blocked). Start with the default auto (or omit searchMode). Only retry the same query with searchMode=playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality, for example anti-bot or verification pages.'
             : '';
+        const verticalDescription = ' Set vertical=news for recent news results (currently optimized for Bing).';
         const aggregationDescription = ' Aggregation options: aggregationMode fast/balanced/deep, ranking engine-order/rrf, perEngineLimit for each engine candidate pool, engineWeights for RRF weighting, and dedupe for URL normalization merging.';
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗), Hacker News) with no API key required.${searchModeDescription}${aggregationDescription}`;
+            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗), Hacker News) with no API key required.${searchModeDescription}${verticalDescription}${aggregationDescription}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -74,7 +76,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${aggregationDescription}`;
+            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${verticalDescription}${aggregationDescription}`;
         }
     };
 
@@ -113,6 +115,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     const searchBaseSchema = {
         query: z.string().min(1, "Search query must not be empty"),
         limit: z.number().min(1).max(50).default(10),
+        vertical: z.enum(['web', 'news']).optional(),
         aggregationMode: z.enum(['fast', 'balanced', 'deep']).optional(),
         perEngineLimit: z.number().int().min(1).max(50).optional(),
         ranking: z.enum(['engine-order', 'rrf']).optional(),
@@ -125,6 +128,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         query: string;
         limit: number;
         searchMode?: AppConfig['searchMode'];
+        vertical?: SearchVertical;
         aggregationMode?: SearchAggregationMode;
         perEngineLimit?: number;
         ranking?: SearchRankingMode;
@@ -137,6 +141,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         query,
         limit,
         searchMode,
+        vertical,
         aggregationMode,
         perEngineLimit,
         ranking,
@@ -158,6 +163,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 engines: resolvedEngines,
                 limit,
                 searchMode,
+                vertical,
                 aggregationMode,
                 perEngineLimit,
                 ranking,
