@@ -99,7 +99,7 @@ async function main() {
     const mcpCorsOptions: CorsOptions = {
       origin: config.corsOrigin || '*',
       methods: ['GET', 'POST', 'DELETE'],
-      allowedHeaders: ['Content-Type', 'Mcp-Session-Id'],
+      allowedHeaders: ['Content-Type', 'Mcp-Session-Id', 'Mcp-Protocol-Version'],
       exposedHeaders: ['Mcp-Session-Id'],
     };
 
