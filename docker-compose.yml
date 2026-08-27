@@ -1,27 +1,26 @@
-version: "3.8"
-
 services:
   web-search:
 #    image: registry.cn-hangzhou.aliyuncs.com/aasee-share/open-web-search:latest # 国内
     image: ghcr.io/aas-ee/open-web-search:latest
-    container_name: web-search
+    container_name: open-websearch
     working_dir: /app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3210:3210"
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
     environment:
       NODE_ENV: production
       MODE: http
-      # DEFAULT_SEARCH_ENGINE: "duckduckgo" # Optional: 'bing' | 'duckduckgo' | 'exa' | 'brave', default bing (optional)
+      DEFAULT_SEARCH_ENGINE: "duckduckgo"
+      ALLOWED_SEARCH_ENGINES: "duckduckgo,bing,startpage,baidu,sogou"
+      SEARCH_MODE: "request"
       # USE_PROXY: true # Using a proxy (optional)
       # PROXY_URL: "http://host.docker.internal:7890"  #  Using a proxy (optional)
-      ENABLE_CORS: "true"
-      CORS_ORIGIN: "*"  # Multiple values can be separated by commas and parsed accordingly | 可以多个值逗号分隔，自行解析
-    command: ["node", "build/index.js"]
+      ENABLE_CORS: "false"
+    command: ["node", "build/index.js", "serve", "--host", "0.0.0.0", "--port", "3210"]
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
