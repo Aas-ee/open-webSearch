@@ -123,6 +123,31 @@ function testParseSearchArgs(): void {
     );
     assertEqual(parsedWithSearchMode.searchMode, 'playwright', 'parsed search mode');
 
+    const parsedWithAggregation = parseSearchArgs(
+        [
+            'Open',
+            'WebSearch',
+            '--aggregation-mode',
+            'deep',
+            '--per-engine-limit',
+            '4',
+            '--ranking',
+            'rrf',
+            '--engine-weight',
+            'Bing=2.5',
+            '--engine-weight',
+            'startpage=0.75',
+            '--no-dedupe'
+        ],
+        createStubRuntime()
+    );
+    assertEqual(parsedWithAggregation.aggregationMode, 'deep', 'parsed aggregation mode');
+    assertEqual(parsedWithAggregation.perEngineLimit, 4, 'parsed per-engine limit');
+    assertEqual(parsedWithAggregation.ranking, 'rrf', 'parsed ranking mode');
+    assertEqual(parsedWithAggregation.engineWeights?.bing, 2.5, 'parsed normalized Bing weight');
+    assertEqual(parsedWithAggregation.engineWeights?.startpage, 0.75, 'parsed Startpage weight');
+    assertEqual(parsedWithAggregation.dedupe, false, 'parsed no-dedupe flag');
+
     const parsedSogouAlias = parseSearchArgs(
         ['Open', 'WebSearch', '--engine', 'sou-gou'],
         createStubRuntime({
@@ -142,6 +167,51 @@ function testParseSearchArgs(): void {
     assertEqual(parsedHackerNewsAlias.engines.join(','), 'hackernews', 'parsed Hacker News alias');
 
     console.log('✅ CLI parseSearchArgs');
+}
+
+async function testRunCliAggregationOptions(): Promise<void> {
+    const runtime = createStubRuntime();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(
+        [
+            'search',
+            'Open WebSearch',
+            '--engine',
+            'bing',
+            '--limit',
+            '2',
+            '--per-engine-limit',
+            '4',
+            '--aggregation-mode',
+            'deep',
+            '--ranking',
+            'rrf',
+            '--engine-weight',
+            'bing=2',
+            '--json'
+        ],
+        runtime,
+        {
+            stdout: (text) => stdout.push(text),
+            stderr: (text) => stderr.push(text)
+        }
+    );
+
+    assertEqual(exitCode, 0, 'CLI aggregation options exit code');
+    assertEqual(stderr.length, 0, 'CLI aggregation options stderr');
+    const payload = JSON.parse(stdout[0]) as {
+        status: string;
+        data: {
+            results: Array<{ description: string; engines?: string[]; score?: number }>;
+        };
+    };
+    assertEqual(payload.status, 'ok', 'CLI aggregation options status');
+    assertEqual(payload.data.results[0].description, 'Open WebSearch:4', 'CLI passes per-engine limit to runtime');
+    assertEqual(payload.data.results[0].engines?.join(','), 'bing', 'CLI aggregation output includes engines');
+    assert(typeof payload.data.results[0].score === 'number', 'CLI aggregation output includes score');
+
+    console.log('✅ CLI runCli aggregation options');
 }
 
 function testParseFetchArgs(): void {
@@ -199,14 +269,17 @@ async function testRunCliJsonSuccess(): Promise<void> {
         status: string;
         data: {
             query: string;
+            retrievedAt: string;
             totalResults: number;
-            results: Array<{ description: string }>;
+            results: Array<{ description: string; sourceDomain?: string }>;
         };
     };
     assertEqual(payload.status, 'ok', 'CLI json status');
     assertEqual(payload.data.query, 'Open WebSearch', 'CLI json query');
+    assert(!Number.isNaN(Date.parse(payload.data.retrievedAt)), 'CLI json retrievedAt');
     assertEqual(payload.data.totalResults, 1, 'CLI json totalResults');
     assertEqual(payload.data.results[0].description, 'Open WebSearch:2', 'CLI json description');
+    assertEqual(payload.data.results[0].sourceDomain, 'example.com', 'CLI json sourceDomain');
 
     console.log('✅ CLI runCli json success');
 }
@@ -1105,6 +1178,7 @@ async function testRunCliNoArgsFallsThrough(): Promise<void> {
 
 async function main(): Promise<void> {
     testParseSearchArgs();
+    await testRunCliAggregationOptions();
     testParseFetchArgs();
     await withEnv('OPEN_WEBSEARCH_DAEMON_PORT', '65530', async () => {
         await withEnv('OPEN_WEBSEARCH_DAEMON_URL', undefined, async () => {

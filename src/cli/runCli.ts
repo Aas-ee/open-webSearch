@@ -1,4 +1,10 @@
-import { SupportedSearchEngine, normalizeEngineName, resolveRequestedEngines } from '../core/search/searchEngines.js';
+import {
+    SearchAggregationMode,
+    SearchRankingMode,
+    SupportedSearchEngine,
+    normalizeEngineName,
+    resolveRequestedEngines
+} from '../core/search/searchEngines.js';
 import { OpenWebSearchRuntime } from '../runtime/runtimeTypes.js';
 import { CliEnvelope, createErrorEnvelope, createSuccessEnvelope } from './protocol.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
@@ -52,8 +58,8 @@ function formatCliHelp(): string {
         '    Check daemon status. `status` uses --base-url, not --daemon-url.',
         '',
         'One-shot action commands:',
-        '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--daemon-url URL] [--spawn] [--json]',
-        '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing.',
+        '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--aggregation-mode MODE] [--per-engine-limit N] [--ranking MODE] [--engine-weight NAME=WEIGHT] [--no-dedupe] [--daemon-url URL] [--spawn] [--json]',
+        '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing. Aggregation mode is fast|balanced|deep; ranking is engine-order|rrf.',
         '  open-websearch fetch-web <url> [--max-chars N] [--render-mode MODE] [--readability] [--include-links] [--daemon-url URL] [--spawn] [--json]',
         '    Fetch readable page content. `--render-mode` is request|auto|browser; browser renders directly with Playwright. `--readability` enables Mozilla Readability extraction; `--include-links` preserves article links.',
         '  open-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
@@ -87,6 +93,11 @@ export type ParsedSearchArgs = {
     limit: number;
     engines: SupportedSearchEngine[];
     searchMode?: AppConfig['searchMode'];
+    aggregationMode?: SearchAggregationMode;
+    perEngineLimit?: number;
+    ranking?: SearchRankingMode;
+    engineWeights?: Record<string, number>;
+    dedupe?: boolean;
     json: boolean;
 };
 
@@ -202,8 +213,13 @@ function extractDaemonTransportArgs(argv: string[]): DaemonTransportArgs {
 export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): ParsedSearchArgs {
     const positional: string[] = [];
     const requestedEngines: string[] = [];
+    const engineWeights: Record<string, number> = {};
     let limit = 10;
     let searchMode: AppConfig['searchMode'] | undefined;
+    let aggregationMode: SearchAggregationMode | undefined;
+    let perEngineLimit: number | undefined;
+    let ranking: SearchRankingMode | undefined;
+    let dedupe: boolean | undefined;
     let json = false;
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -257,6 +273,67 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
             continue;
         }
 
+        if (arg === '--aggregation-mode') {
+            const next = argv[index + 1];
+            if (!next || isFlag(next)) {
+                throw new Error('Missing value for --aggregation-mode');
+            }
+            if (next !== 'fast' && next !== 'balanced' && next !== 'deep') {
+                throw new Error('aggregation mode must be one of: fast, balanced, deep');
+            }
+            aggregationMode = next;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--per-engine-limit') {
+            const next = argv[index + 1];
+            if (!next || isFlag(next)) {
+                throw new Error('Missing value for --per-engine-limit');
+            }
+            perEngineLimit = Number(next);
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--ranking') {
+            const next = argv[index + 1];
+            if (!next || isFlag(next)) {
+                throw new Error('Missing value for --ranking');
+            }
+            if (next !== 'engine-order' && next !== 'rrf') {
+                throw new Error('ranking must be one of: engine-order, rrf');
+            }
+            ranking = next;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--engine-weight') {
+            const next = argv[index + 1];
+            if (!next || isFlag(next)) {
+                throw new Error('Missing value for --engine-weight');
+            }
+
+            const [engineName, weightText] = next.split('=');
+            if (!engineName || !weightText) {
+                throw new Error('engine weight must use engine=weight format');
+            }
+            const normalizedEngine = normalizeEngineName(engineName);
+            const weight = Number(weightText);
+            if (!Number.isFinite(weight) || weight <= 0) {
+                throw new Error('engine weight must be a positive number');
+            }
+            engineWeights[normalizedEngine] = weight;
+            index += 1;
+            continue;
+        }
+
+        if (arg === '--no-dedupe') {
+            dedupe = false;
+            continue;
+        }
+
         if (isFlag(arg)) {
             throw new Error(`Unknown argument: ${arg}`);
         }
@@ -270,6 +347,9 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
     }
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
         throw new Error('Limit must be an integer between 1 and 50');
+    }
+    if (perEngineLimit !== undefined && (!Number.isInteger(perEngineLimit) || perEngineLimit < 1 || perEngineLimit > 50)) {
+        throw new Error('per-engine limit must be an integer between 1 and 50');
     }
 
     const normalizedRequestedEngines = requestedEngines.length > 0
@@ -286,6 +366,11 @@ export function parseSearchArgs(argv: string[], runtime: OpenWebSearchRuntime): 
         limit,
         engines: resolvedEngines,
         searchMode,
+        aggregationMode,
+        perEngineLimit,
+        ranking,
+        engineWeights: Object.keys(engineWeights).length > 0 ? engineWeights : undefined,
+        dedupe,
         json
     };
 }
@@ -894,7 +979,12 @@ export async function runCli(
                     query: parsed.query,
                     engines: parsed.engines,
                     limit: parsed.limit,
-                    searchMode: parsed.searchMode
+                    searchMode: parsed.searchMode,
+                    aggregationMode: parsed.aggregationMode,
+                    perEngineLimit: parsed.perEngineLimit,
+                    ranking: parsed.ranking,
+                    engineWeights: parsed.engineWeights,
+                    dedupe: parsed.dedupe
                 },
                 options
             );
@@ -916,7 +1006,12 @@ export async function runCli(
                 query: parsed.query,
                 engines: parsed.engines,
                 limit: parsed.limit,
-                searchMode: parsed.searchMode
+                searchMode: parsed.searchMode,
+                aggregationMode: parsed.aggregationMode,
+                perEngineLimit: parsed.perEngineLimit,
+                ranking: parsed.ranking,
+                engineWeights: parsed.engineWeights,
+                dedupe: parsed.dedupe
             });
 
             if (parsed.json) {

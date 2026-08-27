@@ -107,15 +107,18 @@ async function testSearchToolReturnsCompatiblePayload(): Promise<void> {
     const payload = JSON.parse(response.content[0].text) as {
         query: string;
         engines: string[];
+        retrievedAt: string;
         totalResults: number;
-        results: Array<{ title: string; url: string; description: string; source: string; engine: string }>;
+        results: Array<{ title: string; url: string; description: string; source: string; sourceDomain?: string; engine: string }>;
         partialFailures: Array<{ engine: string; code: string; message: string }>;
     };
 
     assertEqual(payload.query, 'Open WebSearch', 'search payload query');
     assertEqual(payload.engines[0], 'bing', 'search payload engine');
+    assert(!Number.isNaN(Date.parse(payload.retrievedAt)), 'search payload should expose a valid retrievedAt');
     assertEqual(payload.totalResults, 1, 'search payload totalResults');
     assertEqual(payload.results[0].description, 'Open WebSearch:3', 'search payload result description');
+    assertEqual(payload.results[0].sourceDomain, 'example.com', 'search payload result sourceDomain');
     assert(Array.isArray(payload.partialFailures), 'search payload should expose partialFailures');
     assertEqual(payload.partialFailures.length, 0, 'search payload partialFailures length');
 
@@ -264,13 +267,22 @@ async function testSearchToolPassesSearchModeOverride(): Promise<void> {
         query: 'Open WebSearch',
         limit: 2,
         searchMode: 'playwright',
+        aggregationMode: 'deep',
+        perEngineLimit: 4,
+        ranking: 'rrf',
+        engineWeights: {
+            bing: 2
+        },
+        dedupe: true,
         engines: ['bing']
     });
     const payload = JSON.parse(response.content[0].text) as {
-        results: Array<{ description: string }>;
+        results: Array<{ description: string; engines?: string[]; score?: number }>;
     };
 
-    assertEqual(payload.results[0].description, 'Open WebSearch:2:playwright', 'MCP search should pass request-level search mode');
+    assertEqual(payload.results[0].description, 'Open WebSearch:4:playwright', 'MCP search should pass aggregation options and search mode');
+    assertEqual(payload.results[0].engines?.join(','), 'bing', 'MCP search aggregation output should include engines');
+    assert(typeof payload.results[0].score === 'number', 'MCP search aggregation output should include score');
     assertEqual(seenCalls[0].searchMode, 'playwright', 'MCP handler should forward search mode');
 
     console.log('✅ MCP search tool passes search-mode override');
@@ -549,6 +561,11 @@ function testConfigDrivenEngineSelectionAndMode(): void {
     assert(
         !descriptionPayload.searchDescription.includes('Prefer searchMode=playwright'),
         'search description must not recommend Playwright when it is unavailable'
+    );
+    assert(
+        descriptionPayload.searchDescription.includes('aggregationMode fast/balanced/deep') &&
+        descriptionPayload.searchDescription.includes('ranking engine-order/rrf'),
+        'search description should explain aggregation options independently of Playwright availability'
     );
 
     // 配置了远端端点且客户端可真实加载后，auto 保持 auto：暴露 searchMode，提示 Agent 默认保持 auto、仅在 request 结果失败或异常时切换 playwright。

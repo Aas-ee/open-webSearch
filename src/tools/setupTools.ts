@@ -4,6 +4,8 @@ import { z } from 'zod';
 import {
     normalizeEngineName,
     resolveRequestedEngines,
+    SearchAggregationMode,
+    SearchRankingMode,
     SUPPORTED_SEARCH_ENGINES,
     SupportedSearchEngine
 } from '../core/search/searchEngines.js';
@@ -54,8 +56,9 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         const searchModeDescription = autoWithPlaywrightAvailable
             ? ' searchMode meanings: request performs plain HTTP scraping, playwright drives a real browser through Playwright, and auto or omitting searchMode lets the server decide (request first, falling back to Playwright when it is blocked). Start with the default auto (or omit searchMode). Only retry the same query with searchMode=playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality, for example anti-bot or verification pages.'
             : '';
+        const aggregationDescription = ' Aggregation options: aggregationMode fast/balanced/deep, ranking engine-order/rrf, perEngineLimit for each engine candidate pool, engineWeights for RRF weighting, and dedupe for URL normalization merging.';
         if (runtime.config.allowedSearchEngines.length === 0) {
-            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗), Hacker News) with no API key required.${searchModeDescription}`;
+            return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗), Hacker News) with no API key required.${searchModeDescription}${aggregationDescription}`;
         } else {
             const enginesText = runtime.config.allowedSearchEngines.map(e => {
                 switch (e) {
@@ -71,7 +74,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }
             }).join(', ');
-            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}`;
+            return `Search the web using these engines: ${enginesText} (no API key required).${searchModeDescription}${aggregationDescription}`;
         }
     };
 
@@ -110,6 +113,11 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
     const searchBaseSchema = {
         query: z.string().min(1, "Search query must not be empty"),
         limit: z.number().min(1).max(50).default(10),
+        aggregationMode: z.enum(['fast', 'balanced', 'deep']).optional(),
+        perEngineLimit: z.number().int().min(1).max(50).optional(),
+        ranking: z.enum(['engine-order', 'rrf']).optional(),
+        engineWeights: z.record(z.number().positive()).optional(),
+        dedupe: z.boolean().optional(),
         engines: enginesInputSchema
     };
 
@@ -117,10 +125,25 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         query: string;
         limit: number;
         searchMode?: AppConfig['searchMode'];
+        aggregationMode?: SearchAggregationMode;
+        perEngineLimit?: number;
+        ranking?: SearchRankingMode;
+        engineWeights?: Record<string, number>;
+        dedupe?: boolean;
         engines: [SupportedSearchEngine, ...SupportedSearchEngine[]];
     };
 
-    const executeSearch = async ({query, limit, searchMode, engines}: SearchToolInput) => {
+    const executeSearch = async ({
+        query,
+        limit,
+        searchMode,
+        aggregationMode,
+        perEngineLimit,
+        ranking,
+        engineWeights,
+        dedupe,
+        engines
+    }: SearchToolInput) => {
         try {
             const resolvedEngines = resolveRequestedEngines(
                 engines ?? [runtime.config.defaultSearchEngine],
@@ -134,7 +157,12 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                 query,
                 engines: resolvedEngines,
                 limit,
-                searchMode
+                searchMode,
+                aggregationMode,
+                perEngineLimit,
+                ranking,
+                engineWeights,
+                dedupe
             });
             for (const failure of searchResult.partialFailures) {
                 console.error(`Search failed for engine ${failure.engine}:`, failure.message);
@@ -146,6 +174,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                     text: JSON.stringify({
                         query: searchResult.query,
                         engines: searchResult.engines,
+                        retrievedAt: searchResult.retrievedAt,
                         totalResults: searchResult.totalResults,
                         results: searchResult.results,
                         partialFailures: searchResult.partialFailures
@@ -174,14 +203,14 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
             searchToolName,
             getSearchDescription(),
             {...searchBaseSchema, searchMode: searchModeSchema},
-            ({query, limit, searchMode, engines}) => executeSearch({query, limit, searchMode, engines})
+            (input) => executeSearch(input)
         );
     } else {
         server.tool(
             searchToolName,
             getSearchDescription(),
             searchBaseSchema,
-            ({query, limit, engines}) => executeSearch({query, limit, engines})
+            (input) => executeSearch(input)
         );
     }
 
@@ -369,4 +398,3 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         }
     );
 };
-

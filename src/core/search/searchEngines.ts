@@ -58,6 +58,36 @@ export function distributeLimit(totalLimit: number, engineCount: number): number
     );
 }
 
+export type SearchAggregationMode = 'fast' | 'balanced' | 'deep';
+
+export type SearchRankingMode = 'engine-order' | 'rrf';
+
+export function resolvePerEngineLimits(
+    totalLimit: number,
+    engineCount: number,
+    aggregationMode: SearchAggregationMode = 'fast',
+    perEngineLimit?: number
+): number[] {
+    if (engineCount <= 0) {
+        return [];
+    }
+
+    if (perEngineLimit !== undefined) {
+        return Array.from({ length: engineCount }, () => perEngineLimit);
+    }
+
+    if (aggregationMode === 'deep') {
+        return Array.from({ length: engineCount }, () => totalLimit);
+    }
+
+    if (aggregationMode === 'balanced') {
+        const balancedLimit = Math.min(50, Math.max(1, Math.ceil(totalLimit / engineCount) + 2));
+        return Array.from({ length: engineCount }, () => balancedLimit);
+    }
+
+    return distributeLimit(totalLimit, engineCount);
+}
+
 export function resolveRequestedEngines(
     requestedEngines: string[],
     allowedSearchEngines: string[],

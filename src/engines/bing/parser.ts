@@ -150,6 +150,49 @@ function extractSource(element: any, url: string): string {
     }
 }
 
+function parsePublishedAt(value?: string): string | undefined {
+    const candidate = value?.trim();
+    if (!candidate) {
+        return undefined;
+    }
+
+    const isZonedDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(candidate);
+    if (!isZonedDateTime) {
+        return undefined;
+    }
+
+    const [year, month, day] = candidate.slice(0, 10).split('-').map(Number);
+    const calendarDate = new Date(Date.UTC(year, month - 1, day));
+    if (
+        calendarDate.getUTCFullYear() !== year ||
+        calendarDate.getUTCMonth() !== month - 1 ||
+        calendarDate.getUTCDate() !== day
+    ) {
+        return undefined;
+    }
+
+    const parsed = new Date(candidate);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+function extractDescriptionDatePrefix(description: string): string | undefined {
+    const match = /^(\d{4}年\d{1,2}月\d{1,2}日|\d{4}-\d{2}-\d{2}|\d{1,4}\s*(?:分钟|小时|天)\s*(?:之前|前)|\d{1,4}\s*(?:minutes?|hours?|days?)\s+ago)\s*[·•]\s*/i.exec(description);
+    return match?.[1]?.trim();
+}
+
+function extractDateMetadata(element: any, description: string): Pick<SearchResult, 'dateText' | 'publishedAt'> {
+    const visibleDateElement = element.find('.news_dt, .b_age, time[datetime]').first();
+    const structuredDateText = normalizeWhitespace(visibleDateElement.text());
+    const dateText = structuredDateText || extractDescriptionDatePrefix(description);
+    const machineDate = element.find('time[datetime]').first().attr('datetime');
+    const publishedAt = parsePublishedAt(machineDate);
+
+    return {
+        ...(dateText ? { dateText: dateText.slice(0, 100) } : {}),
+        ...(publishedAt ? { publishedAt } : {})
+    };
+}
+
 function collectFallbackLinks($: any, limit: number, seenUrls: Set<string>, results: SearchResult[]): void {
     const linkContainers = $('#b_results a[href], #b_topw a[href], .b_algo a[href], .b_ans a[href]');
 
@@ -174,6 +217,7 @@ function collectFallbackLinks($: any, limit: number, seenUrls: Set<string>, resu
             url,
             description,
             source: extractSource(container, url),
+            ...extractDateMetadata(container, description),
             engine: 'bing'
         });
     });
@@ -213,6 +257,7 @@ export function parseBingSearchResults(htmlContent: string, limit: number): Sear
                 url,
                 description,
                 source: extractSource(element, url),
+                ...extractDateMetadata(element, description),
                 engine: 'bing'
             });
         });

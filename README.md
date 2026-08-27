@@ -59,6 +59,15 @@
 - `Skill`
   - Best as an agent-facing guidance layer for setup and usage. A skill does not replace MCP, CLI, or the local daemon; it typically works together with the CLI and/or local daemon to help an agent discover, activate, and use the smallest working path.
 
+The two HTTP processes intentionally expose different APIs:
+
+| Start command | Purpose | Endpoints |
+|---|---|---|
+| `MODE=http node build/index.js` | MCP HTTP transport | `GET /health`, `/mcp`, `/sse`, `/messages` |
+| `node build/index.js serve` | Local application daemon | `GET /health`, `GET /status`, `POST /search`, `POST /fetch-*` |
+
+The MCP process does not expose `POST /search`; use an MCP client with `/mcp`, or explicitly start the daemon for ordinary HTTP integrations.
+
 ## Use with a Skill
 
 Install the `open-websearch` skill for your agent first:
@@ -128,9 +137,23 @@ Run a one-shot local CLI search:
 npm run search:cli -- "open web search" --json
 ```
 
+Run a multi-engine aggregated search:
+
+```bash
+npm run search:cli -- "open web search" \
+  --engines duckduckgo,bing,startpage \
+  --limit 5 \
+  --aggregation-mode deep \
+  --per-engine-limit 5 \
+  --ranking rrf \
+  --engine-weight bing=1.2 \
+  --json
+```
+
 Notes:
 - Bare `open-websearch` is the MCP server compatibility entrypoint, not the recommended daemon start command for agent automation.
 - For content extraction, prefer searching first and then fetching a more specific result page. Some homepages and JS-heavy landing pages may not expose readable article text through `fetch-web`.
+- Multi-engine aggregation accepts `aggregationMode` / `--aggregation-mode` as `fast`, `balanced`, or `deep`. `limit` caps the final returned results; `perEngineLimit` / `--per-engine-limit` controls each engine's candidate pool. `ranking=rrf` / `--ranking rrf` uses Reciprocal Rank Fusion, `engineWeights` / `--engine-weight engine=weight` adjusts RRF scoring, and `dedupe` / `--no-dedupe` controls URL normalization merging.
 
 For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`), see [docs/http-api.md](docs/http-api.md).
 
@@ -426,8 +449,23 @@ docker-compose up -d
 
 Or use Docker directly:
 ```bash
-docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/aas-ee/open-web-search:latest
+docker run -d --name web-search -p 3000:3000 \
+  -e MODE=http -e ENABLE_CORS=true -e CORS_ORIGIN=* \
+  --health-cmd="node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"" \
+  ghcr.io/aas-ee/open-web-search:latest
 ```
+
+This starts the MCP HTTP service. Its semantic health endpoint is `GET /health`; MCP clients connect to `/mcp` or `/sse`.
+
+To start the separate daemon for ordinary HTTP calls such as `POST /search`, bind it to loopback unless it is protected by a private network or authenticated gateway:
+
+```bash
+docker run -d --name web-search-daemon -p 127.0.0.1:3210:3210 \
+  ghcr.io/aas-ee/open-web-search:latest \
+  node build/index.js serve --host 0.0.0.0 --port 3210
+```
+
+For production deployments, pin an immutable image tag and digest instead of relying on the moving `latest` tag. MCP HTTP currently listens on `0.0.0.0`, and DNS-rebinding protection remains disabled by default for backward compatibility. Neither raw HTTP entrypoint provides public-internet authentication; apply network isolation, an explicit host allowlist at the gateway, TLS, authentication, and rate limits when remote access is required.
 
 Environment variable configuration:
 
@@ -719,55 +757,16 @@ Welcome to submit issue reports and feature improvement suggestions!
 
 ### Contributor Guide
 
-If you want to fork this repository and publish your own Docker image, you need to make the following configurations:
+To publish your own Docker image without GitHub Actions, log in to the target registry and run the repository-local script:
 
-#### GitHub Secrets Configuration
+```bash
+docker login harbor.example.com
+./scripts/build-and-push-image.sh \
+  --repository harbor.example.com/your-project/open-websearch \
+  --alias dev
+```
 
-To enable automatic Docker image building and publishing, please add the following secrets in your GitHub repository settings (Settings → Secrets and variables → Actions):
-
-**Required Secrets:**
-- `GITHUB_TOKEN`: Automatically provided by GitHub (no setup needed)
-
-**Optional Secrets (for Alibaba Cloud ACR):**
-- `ACR_REGISTRY`: Your Alibaba Cloud Container Registry URL (e.g., `registry.cn-hangzhou.aliyuncs.com`)
-- `ACR_USERNAME`: Your Alibaba Cloud ACR username
-- `ACR_PASSWORD`: Your Alibaba Cloud ACR password
-- `ACR_IMAGE_NAME`: Your image name in ACR (e.g., `your-namespace/open-web-search`)
-
-#### CI/CD Workflow
-
-The repository includes a GitHub Actions workflow (`.github/workflows/docker.yml`) that automatically:
-
-1. **Trigger Conditions**:
-    - Push to `main` branch
-    - Push version tags (`v*`)
-    - Manual workflow trigger
-
-2. **Build and Push to**:
-    - GitHub Container Registry (ghcr.io) - always enabled
-    - Alibaba Cloud Container Registry - only enabled when ACR secrets are configured
-
-3. **Image Tags**:
-    - `ghcr.io/your-username/open-web-search:latest`
-    - `your-acr-address/your-image-name:latest` (if ACR is configured)
-
-#### Fork and Publish Steps:
-
-1. **Fork the repository** to your GitHub account
-2. **Configure secrets** (if you need ACR publishing):
-    - Go to Settings → Secrets and variables → Actions in your forked repository
-    - Add the ACR-related secrets listed above
-3. **Push changes** to the `main` branch or create version tags
-4. **GitHub Actions will automatically build and push** your Docker image
-5. **Use your image**, update the Docker command:
-   ```bash
-   docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=* ghcr.io/your-username/open-web-search:latest
-   ```
-
-#### Notes:
-- If you don't configure ACR secrets, the workflow will only publish to GitHub Container Registry
-- Make sure your GitHub repository has Actions enabled
-- The workflow will use your GitHub username (converted to lowercase) as the GHCR image name
+The script uses the first 12 characters of the current Git commit as the immutable image tag by default. Run it from a clean worktree so the image content matches that revision.
 
 <div align="center">
 

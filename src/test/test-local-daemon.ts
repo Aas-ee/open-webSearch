@@ -4,6 +4,7 @@ import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
+import { OPEN_WEBSEARCH_VERSION } from '../version.js';
 
 function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -43,6 +44,9 @@ function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 function createStubRuntime() {
     return createOpenWebSearchRuntime({
         config: createTestConfig(),
+        searchServiceOptions: {
+            now: () => new Date('2026-08-18T10:05:32.120Z')
+        },
         dependencies: {
             searchExecutors: {
                 bing: async (query, limit, context) => [{
@@ -50,6 +54,7 @@ function createStubRuntime() {
                     url: 'https://example.com',
                     description: `${query}:${limit}:${context?.searchMode ?? 'none'}`,
                     source: 'example.com',
+                    dateText: '6 天之前',
                     engine: 'bing'
                 }],
                 startpage: async (query, limit) => [{
@@ -174,22 +179,46 @@ async function testLocalDaemonOperationRoutes(): Promise<void> {
             status: string;
             data: {
                 query: string;
+                retrievedAt: string;
                 totalResults: number;
                 engines: string[];
-                results: Array<{ description: string }>;
+                results: Array<{
+                    description: string;
+                    sourceDomain?: string;
+                    dateText?: string;
+                    publishedAt?: string;
+                }>;
                 partialFailures: Array<{ engine: string; code: string; message: string }>;
             };
         }>(daemon.baseUrl, '/search', {
             query: 'Open WebSearch',
             limit: 3,
             engines: ['Bing', 'startpage'],
-            searchMode: 'playwright'
+            searchMode: 'playwright',
+            aggregationMode: 'deep',
+            perEngineLimit: 4,
+            ranking: 'rrf',
+            engineWeights: {
+                bing: 2,
+                startpage: 1
+            },
+            dedupe: true
         });
         assertEqual(searchResult.response.status, 200, 'daemon /search http status');
         assertEqual(searchResult.payload.status, 'ok', 'daemon /search payload status');
         assertEqual(searchResult.payload.data.query, 'Open WebSearch', 'daemon /search query');
+        assertEqual(searchResult.payload.data.retrievedAt, '2026-08-18T10:05:32.120Z', 'daemon /search retrievedAt');
         assertEqual(searchResult.payload.data.totalResults, 2, 'daemon /search totalResults');
-        assert(searchResult.payload.data.results.some((item) => item.description === 'Open WebSearch:2:playwright'), 'daemon /search result content');
+        assert(searchResult.payload.data.results.some((item) => item.description === 'Open WebSearch:4:playwright'), 'daemon /search result content');
+        assert(searchResult.payload.data.results.every((item) => typeof item.sourceDomain === 'string'), 'daemon /search sourceDomain');
+        const bingResult = searchResult.payload.data.results.find((item) => item.description === 'Open WebSearch:4:playwright');
+        assert(bingResult, 'daemon /search should include Bing result');
+        assertEqual(bingResult.dateText, '6 天之前', 'daemon /search dateText');
+        assertEqual(bingResult.publishedAt, '2026-08-12T10:05:32.120Z', 'daemon /search publishedAt');
+        const startpageResult = searchResult.payload.data.results.find((item) => item.description === 'Open WebSearch:4');
+        assert(startpageResult, 'daemon /search should include Startpage result');
+        assertEqual(startpageResult.dateText, undefined, 'daemon /search omits absent dateText');
+        assertEqual(startpageResult.publishedAt, undefined, 'daemon /search omits absent publishedAt');
 
         const fetchWebResult = await postJson<{
             status: string;
@@ -461,9 +490,10 @@ async function testCliServeWaitsForSignal(): Promise<void> {
     const baseUrl = match[1];
 
     const statusResponse = await fetch(`${baseUrl}/status`);
-    const statusPayload = await statusResponse.json() as { status: string; data: { daemon: string } };
+    const statusPayload = await statusResponse.json() as { status: string; data: { daemon: string; version: string } };
     assertEqual(statusPayload.status, 'ok', 'CLI serve should keep daemon alive until signal');
     assertEqual(statusPayload.data.daemon, 'running', 'CLI serve daemon state before signal');
+    assertEqual(statusPayload.data.version, OPEN_WEBSEARCH_VERSION, 'CLI serve reports package version');
 
     signals.emit('SIGINT');
     const exitCode = await runPromise;

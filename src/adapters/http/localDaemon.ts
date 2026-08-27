@@ -3,9 +3,16 @@ import http from 'node:http';
 import { AppConfig, checkPlaywrightModeConfiguration, getEffectiveSearchMode } from '../../config.js';
 import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
-import { normalizeEngineName, resolveRequestedEngines, SupportedSearchEngine } from '../../core/search/searchEngines.js';
+import {
+    normalizeEngineName,
+    resolveRequestedEngines,
+    SearchAggregationMode,
+    SearchRankingMode,
+    SupportedSearchEngine
+} from '../../core/search/searchEngines.js';
 import { validatePublicWebUrl } from '../../core/validation/targetValidation.js';
 import { isBrowserUnavailableError, shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
+import { OPEN_WEBSEARCH_VERSION } from '../../version.js';
 
 export type LocalDaemonOptions = {
     host?: string;
@@ -117,6 +124,62 @@ function parseSearchMode(searchMode: unknown): AppConfig['searchMode'] | undefin
     return searchMode;
 }
 
+function parseAggregationMode(aggregationMode: unknown): SearchAggregationMode | undefined {
+    if (aggregationMode === undefined) {
+        return undefined;
+    }
+
+    if (aggregationMode !== 'fast' && aggregationMode !== 'balanced' && aggregationMode !== 'deep') {
+        throw new Error('aggregationMode must be one of: fast, balanced, deep');
+    }
+
+    return aggregationMode;
+}
+
+function parseRankingMode(ranking: unknown): SearchRankingMode | undefined {
+    if (ranking === undefined) {
+        return undefined;
+    }
+
+    if (ranking !== 'engine-order' && ranking !== 'rrf') {
+        throw new Error('ranking must be one of: engine-order, rrf');
+    }
+
+    return ranking;
+}
+
+function parsePerEngineLimit(perEngineLimit: unknown): number | undefined {
+    if (perEngineLimit === undefined) {
+        return undefined;
+    }
+
+    if (typeof perEngineLimit !== 'number' || !Number.isInteger(perEngineLimit) || perEngineLimit < 1 || perEngineLimit > 50) {
+        throw new Error('perEngineLimit must be an integer between 1 and 50');
+    }
+
+    return perEngineLimit;
+}
+
+function parseEngineWeights(engineWeights: unknown): Record<string, number> | undefined {
+    if (engineWeights === undefined) {
+        return undefined;
+    }
+
+    if (!engineWeights || typeof engineWeights !== 'object' || Array.isArray(engineWeights)) {
+        throw new Error('engineWeights must be an object mapping engine names to positive numbers');
+    }
+
+    const parsed: Record<string, number> = {};
+    for (const [engine, weight] of Object.entries(engineWeights)) {
+        if (typeof weight !== 'number' || !Number.isFinite(weight) || weight <= 0) {
+            throw new Error('engineWeights values must be positive numbers');
+        }
+        parsed[normalizeEngineName(engine)] = weight;
+    }
+
+    return parsed;
+}
+
 function parseUrl(url: unknown): string {
     if (typeof url !== 'string' || !url.trim()) {
         throw new Error('url must be a non-empty string');
@@ -163,7 +226,7 @@ export async function startLocalDaemon(
 ): Promise<LocalDaemonHandle> {
     const host = options.host ?? DEFAULT_HOST;
     const requestedPort = options.port ?? Number(process.env.OPEN_WEBSEARCH_DAEMON_PORT || DEFAULT_PORT);
-    const version = options.version ?? 'unknown';
+    const version = options.version ?? OPEN_WEBSEARCH_VERSION;
 
     const app = express();
     app.use(express.json());
@@ -219,12 +282,21 @@ export async function startLocalDaemon(
             const limit = parseLimit(req.body?.limit);
             const engines = parseRequestedEngines(runtime, req.body?.engines);
             const searchMode = parseSearchMode(req.body?.searchMode);
-
+            const aggregationMode = parseAggregationMode(req.body?.aggregationMode);
+            const perEngineLimit = parsePerEngineLimit(req.body?.perEngineLimit);
+            const ranking = parseRankingMode(req.body?.ranking);
+            const engineWeights = parseEngineWeights(req.body?.engineWeights);
+            const dedupe = parseBooleanFlag(req.body?.dedupe, 'dedupe');
             const result = await runtime.services.search.execute({
                 query,
                 limit,
                 engines,
-                searchMode
+                searchMode,
+                aggregationMode,
+                perEngineLimit,
+                ranking,
+                engineWeights,
+                dedupe
             });
             res.json(createSuccessEnvelope(result));
         } catch (error) {
@@ -251,7 +323,7 @@ export async function startLocalDaemon(
                 message,
                 {
                     hint: statusCode === 400
-                        ? 'Use a non-empty query, a limit between 1 and 50, valid engine names, and an optional searchMode of request/auto/playwright.'
+                        ? 'Use a non-empty query, valid engine names, limit/perEngineLimit between 1 and 50, searchMode request/auto/playwright, aggregationMode fast/balanced/deep, ranking engine-order/rrf, boolean dedupe, and positive engineWeights.'
                         : 'Retry with a different engine or inspect daemon/runtime configuration.'
                 }
             );
