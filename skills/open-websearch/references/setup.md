@@ -111,7 +111,7 @@ Use when:
 Stage script:
 1. Collect prerequisites.
    - First distinguish ordinary search/fetch setup from browser-assisted setup.
-   - Do not suggest Playwright installation for ordinary search, `fetchWebContent`, or `fetchGithubReadme` unless browser assistance is actually needed.
+   - Do not suggest Playwright installation for ordinary search, request-mode `fetchWebContent`, or `fetchGithubReadme` unless browser assistance is actually needed. Explicit `renderMode=browser` requires a usable Playwright client and browser target.
    - Confirm whether the user already has a Playwright client, a browser binary, or a remote browser endpoint.
 2. Confirm risky actions.
    - Ask before installing Playwright packages, downloading browser binaries, or changing browser endpoint configuration.

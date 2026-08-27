@@ -14,6 +14,16 @@
 
 `open-websearch` 现已同时提供 MCP server、CLI 和本地 daemon，也可以配合 skill 引导的 agent 工作流一起使用，用于联网搜索与内容抓取，无需 API 密钥。
 
+## 赞助商
+
+<div align="center">
+  <a href="https://www.swiftproxy.net/?ref=openwebSearch" rel="sponsored">
+    <img src="./docs/assets/sponsors/fa4f0f8f08b622d8487fdb485077d2dd.png" alt="Swiftproxy" width="600">
+  </a>
+</div>
+
+> [**Swiftproxy**](https://www.swiftproxy.net/?ref=openwebSearch) 提供高质量静态住宅代理，支持稳定 IP、多账号管理、防关联运营和数据采集，帮助用户打造更安全可靠的自动化环境。静态代理流量有效期 30 天内不限使用，使用优惠码 **`PROXY90`** 可享 **9 折优惠**。
+
 
 <details>
   <summary><strong style="color: #95cfe4">点击展开查看简单示例效果(deepseek-v3)</strong></summary>
@@ -116,6 +126,7 @@ MCP工具支持：
     - juejin
     - startpage
     - sogou
+    - hackernews
 - 支持HTTP代理配置，轻松解决网络访问限制
 - 无需API密钥或身份验证
 - 返回带标题、URL和描述的结构化结果
@@ -222,7 +233,7 @@ npm run search:cli -- "open web search" --json
 本地 daemon HTTP API（`serve`、`status`、`GET /health`、`POST /search`、`POST /fetch-*`）请参考 [docs/http-api.md](docs/http-api.md)。
 
 ## TODO
-- 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,~~Sogou~~（已支持）,Google等搜索引擎
+- 支持~~Bing~~（已支持）,~~DuckDuckGo~~（已支持）,~~Exa~~（已支持）,~~Brave~~（已支持）,~~Sogou~~（已支持）,~~Hacker News~~（已支持）,Google等搜索引擎
 - 支持更多博客论坛、社交软件
 - 优化文章内容提取功能，增加更多站点支持
 - ~~支持GitHub README获取~~（已支持）
@@ -260,14 +271,14 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 |--------|-------------------------|--------|--------------------------------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS                               |
 | `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置                             |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎                               |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | 默认搜索引擎                               |
 | `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理                             |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL                             |
-| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 关闭 TLS 证书校验。只建议在目标站点证书链异常时临时使用 |
+| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 的请求路径关闭 TLS 校验，不影响 Playwright 浏览器导航。只建议在证书链异常时临时使用 |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
-| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | 搜索策略，当前仅对 Bing 生效：仅请求、请求失败后回退 Playwright、或强制 Playwright |
+| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | 搜索策略，当前仅对 Bing 生效：强制 HTTP 请求模式（`request`）、强制 Playwright 模式（`playwright`）、或允许 Agent 选择模式（`auto`，默认）。强制模式不向 Agent 暴露 `searchMode` 参数。`auto` 模式下服务端会检查 Playwright 是否真实可用（客户端模块可真实加载，本地启动时还需浏览器二进制真实存在：显式 `PLAYWRIGHT_EXECUTABLE_PATH`、捆绑浏览器或系统 Chrome/Edge）；可用时搜索工具暴露 `searchMode` 参数，并引导 Agent 保持默认 `auto`、仅在 request 结果失败或异常时再重试 `playwright`，不可用时按强制请求模式处理。强制 `playwright` 但不可用时，搜索返回 `browser_unavailable` 错误 |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | 启用浏览器模式时优先解析哪种 Playwright 客户端包 |
 | `PLAYWRIGHT_MODULE_PATH` | 空 | 绝对路径或相对项目根目录路径 | 复用当前项目外部已经存在的 Playwright 客户端包 |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | 空 | 任意有效浏览器二进制路径 | 使用现有 Chromium/Chrome 可执行文件启动浏览器 |
@@ -275,6 +286,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 有效的 Chromium CDP 地址 | 通过 CDP 连接现有 Chromium 实例 |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Playwright Chromium 是否以无头模式运行 |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 正整数 | Playwright 页面导航和 Bing 结果等待超时时间 |
+| `OPEN_WEBSEARCH_PROFILE_DIR` | `<tmpdir>/open-websearch-browser-profiles` | 任意可写目录 | 本地浏览器持久化 profile 的根目录（见下方“浏览器状态说明”） |
 | `MCP_TOOL_SEARCH_NAME` | `search` | 有效的MCP工具名称 | 搜索工具的自定义名称 |
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | 有效的MCP工具名称 | Linux.do文章获取工具的自定义名称 |
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | 有效的MCP工具名称 | CSDN文章获取工具的自定义名称 |
@@ -372,9 +384,9 @@ npx open-websearch@latest
 ```
 
 模式说明：
-- `request`：只使用请求方式抓 Bing
-- `auto`：先走请求，只有请求失败且手动可访问的 Playwright 客户端和浏览器可用时才回退到 Playwright
-- `playwright`：强制使用 Playwright；如果配置的 Playwright 客户端或浏览器目标不可用，会直接报错
+- `request`：只使用请求方式抓 Bing；搜索工具不暴露 `searchMode` 参数、不生成模式提示语
+- `playwright`：强制使用 Playwright；搜索工具不暴露 `searchMode` 参数、不生成模式提示语。启动时检查 Playwright 可用性并在配置无效时告警；搜索时返回清晰的 `browser_unavailable` 错误
+- `auto`：检查 Playwright 是否真实可用（客户端模块可真实加载；本地启动还需浏览器二进制真实存在）。可用时搜索工具暴露 `searchMode` 参数（request / auto / playwright），并引导 Agent 保持默认 `auto`，仅在 request 结果失败、为空或明显被拦截时再用 `playwright` 重试；不可用时按请求模式处理
 
 补充说明：
 - `PLAYWRIGHT_MODULE_PATH` 优先级高于 `PLAYWRIGHT_PACKAGE`
@@ -382,6 +394,12 @@ npx open-websearch@latest
 - 使用远端端点时，会忽略 `PLAYWRIGHT_EXECUTABLE_PATH` 和本地启动代理参数
 - 当 Playwright 可用时，CSDN/知乎文章抓取以及通用网页抓取在遇到拦截页时也会尝试复用浏览器拿到的 cookie 进行重试
 - 没有 Playwright 时，`fetchWebContent` 会停留在纯请求路径。公开页面通常仍可抓取，但依赖浏览器 cookie 或浏览器渲染 HTML 的页面可能失败。
+
+浏览器状态说明（本地共享 profile）：
+- 本地浏览器模式会跨 fetch、跨进程重启复用持久化 context/页面。同一 origin 的 cookies、storage、cache 和 Service Worker 状态因此会在多次浏览器路径抓取之间保留。
+- 这对单用户、有状态抓取是有意为之的取舍（保持反爬状态、避免反复启动浏览器）。如果 daemon 会被多个互不信任的调用方共享，请改用 `PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT` 连接各自隔离的浏览器，或为每个调用方指定独立的 `OPEN_WEBSEARCH_PROFILE_DIR`。
+- 此共享状态是服务级的，仅用于匿名访问公共网页：服务本身不会登录任何站点，因此不应承载个人账号密码与登录态，请勿依赖它存放已登录或个性化会话。远程端点（`PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT`）会继承所连浏览器的状态，若将其指向个人已登录浏览器，该浏览器的登录态与个性化状态也会一并被本服务共享。
+- 如需清理 profile 状态：在本地浏览器未运行时，删除 `OPEN_WEBSEARCH_PROFILE_DIR`（默认为 `<tmpdir>/open-websearch-browser-profiles`）下的浏览器 profile 目录即可。
 
 **Windows 用户注意事项：**
 - 在 PowerShell 中使用 `$env:VAR="value"; ` 语法
@@ -445,7 +463,7 @@ Windows 下的 NPX 配置：
 - 如果 `PROXY_URL` 指向固定上游代理或固定出口，百度、CSDN、掘金、Linux.do、GitHub 这类对地区较敏感的站点表现可能会和之前不同。
 - 如果系统里已经设置了 `HTTP_PROXY` 或 `HTTPS_PROXY`，它们不再覆盖服务器内部请求行为。
 - Windows 上如果站点缺少中间证书，优先建议配置 `NODE_EXTRA_CA_CERTS`。
-- `FETCH_WEB_INSECURE_TLS=true` 只建议作为 `fetchWebContent` 的兜底方案使用，因为它会降低 TLS 校验强度。
+- `FETCH_WEB_INSECURE_TLS=true` 只建议作为 `fetchWebContent` 请求路径的兜底方案；它会降低 TLS 校验强度，且不影响 Playwright 浏览器导航。
 
 **VSCode版(Claude开发扩展):**
 ```json
@@ -566,7 +584,7 @@ docker login harbor.example.com
 |--------|-------------------------|--------|------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS |
 | `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置 |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | 默认搜索引擎 |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | 默认搜索引擎 |
 | `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理 |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口 |
@@ -607,7 +625,7 @@ docker login harbor.example.com
 {
   "query": string,        // 搜索查询词
   "limit": number,        // 可选：返回结果数量（默认：10）
-  "engines": string[],    // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) 默认使用当前运行配置
+  "engines": string[],    // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou,hackernews) 默认使用当前运行配置
   "searchMode": string    // 可选：request、auto 或 playwright（当前仅对 Bing 生效）
 }
 ```
@@ -739,14 +757,21 @@ use_mcp_tool({
 
 ### fetchWebContent工具使用说明
 
-用于直接抓取公开可访问的 HTTP(S) 链接内容，支持 Markdown 文件（`.md`）和普通网页。
+用于直接抓取公开可访问的 HTTP(S) 链接内容，支持 Markdown 文件（`.md`）、普通网页，以及配置 Playwright 后的 JavaScript 渲染页面。
 
 ```typescript
 {
-  "url": string,         // 公开可访问的 HTTP(S) URL
-  "maxChars": number     // 可选：最大返回字符数（1000-200000，默认30000）
+  "url": string,          // 公开可访问的 HTTP(S) URL
+  "maxChars": number,     // 可选：最大返回字符数（1000-200000，默认30000）
+  "renderMode": string,   // 可选：request、auto（默认）或 browser
+  "readability": boolean, // 可选：对 HTML 使用 Mozilla Readability
+  "includeLinks": boolean // 可选：保留 Readability 输出中的链接
 }
 ```
+
+`request` 不会启动浏览器或使用浏览器 Cookie；`auto` 保持现有的请求优先行为，仅在必要时使用浏览器辅助；`browser` 直接渲染页面，当 Playwright 或浏览器目标不可用时返回明确错误。初始 URL 和最终 URL 仍会经过公网安全校验。
+
+浏览器请求会在继续前重新校验，但该进程不会把 DNS 结果绑定到 Chromium 最终建立的 Socket。远程 Playwright/CDP 端点仍必须使用可信的 DNS 与出站网络策略。
 
 使用示例：
 ```typescript
@@ -755,7 +780,8 @@ use_mcp_tool({
   tool_name: "fetchWebContent",
   arguments: {
     url: "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
-    maxChars: 12000
+    maxChars: 12000,
+    renderMode: "auto"
   }
 })
 ```
@@ -767,6 +793,7 @@ use_mcp_tool({
   "finalUrl": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
   "contentType": "text/plain; charset=utf-8",
   "title": "",
+  "retrievalMethod": "request",
   "truncated": false,
   "content": "# Open-WebSearch MCP Server ..."
 }
@@ -830,7 +857,7 @@ use_mcp_tool({
 
 4. **搜索引擎配置**：
    - 可通过环境变量`DEFAULT_SEARCH_ENGINE`设置默认搜索引擎
-   - 支持的引擎有：bing, duckduckgo, exa, brave, baidu, csdn, juejin, startpage, sogou
+   - 支持的引擎有：bing, duckduckgo, exa, brave, baidu, csdn, linuxdo, juejin, startpage, sogou, hackernews
    - 当搜索特定网站内容时，会自动使用默认搜索引擎
 
 5. **代理服务配置**：
@@ -860,6 +887,6 @@ docker login harbor.example.com
 ## Star History
 如果项目对你有帮助，请考虑给个⭐ Star！
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Aas-ee/open-webSearch&type=Date)](https://star-history.dera.page/#Aas-ee/open-webSearch&Date)
 
 </div>

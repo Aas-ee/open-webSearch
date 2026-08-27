@@ -16,7 +16,7 @@ export type SearchEngineExecutorMap = Partial<Record<string, SearchEngineExecuto
 
 export type SearchExecutionFailure = {
     engine: string;
-    code: 'engine_error' | 'unsupported_engine';
+    code: 'engine_error' | 'unsupported_engine' | 'browser_unavailable';
     message: string;
 };
 
@@ -274,6 +274,11 @@ function aggregateSearchResults(
     });
 }
 
+function classifyEngineError(error: unknown): SearchExecutionFailure['code'] {
+    // 引擎抛出的带 code 的错误（如 browser_unavailable）原样保留 code，其余都归入通用的 engine_error。
+    return (typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code as SearchExecutionFailure['code'] : 'engine_error');
+}
+
 export function createSearchService(engineMap: SearchEngineExecutorMap, options: SearchServiceOptions = {}) {
     const now = options.now ?? (() => new Date());
 
@@ -314,9 +319,13 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, options:
                 try {
                     return await executor(cleanQuery, engineLimit, { searchMode: effectiveSearchMode });
                 } catch (error) {
+                    // 强制 Playwright 而配置无效属于明确的配置错误，直接上抛，由各入口以 browser_unavailable 错误响应。
+                    if ((error as { code?: unknown })?.code === 'browser_unavailable') {
+                        throw error;
+                    }
                     partialFailures.push({
                         engine,
-                        code: 'engine_error',
+                        code: classifyEngineError(error),
                         message: error instanceof Error ? error.message : String(error)
                     });
                     return [];

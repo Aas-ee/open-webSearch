@@ -5,3 +5,4 @@ build/
 .vscode
 .github/copilot-instructions.md
 .github/prompts
+release

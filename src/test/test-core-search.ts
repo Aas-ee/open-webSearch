@@ -47,6 +47,8 @@ function testNormalizeEngineName(): void {
     assertEqual(normalizeEngineName('StartPage'), 'startpage', 'normalizes StartPage');
     assertEqual(normalizeEngineName('sou-gou'), 'sogou', 'normalizes sou-gou alias');
     assertEqual(normalizeEngineName('搜狗'), 'sogou', 'normalizes Chinese Sogou alias');
+    assertEqual(normalizeEngineName('Hacker News'), 'hackernews', 'normalizes Hacker News alias');
+    assertEqual(normalizeEngineName('hn'), 'hackernews', 'normalizes HN alias');
     assertEqualArray([...SUPPORTED_SEARCH_ENGINES], [
         'baidu',
         'bing',
@@ -57,7 +59,8 @@ function testNormalizeEngineName(): void {
         'brave',
         'juejin',
         'startpage',
-        'sogou'
+        'sogou',
+        'hackernews'
     ], 'supported engines list');
     console.log('✅ normalizeEngineName and supported engines');
 }

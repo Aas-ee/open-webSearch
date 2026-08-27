@@ -123,6 +123,9 @@ Example response:
       "defaultSearchEngine": "bing",
       "allowedSearchEngines": [],
       "searchMode": "request",
+      "effectiveSearchMode": "request",
+      "playwrightAvailable": false,
+      "playwrightUnavailableReason": "Playwright client cannot be loaded (attempts: playwright: Cannot find module 'playwright')",
       "useProxy": false,
       "fetchWebAllowInsecureTls": false
     }
@@ -140,7 +143,7 @@ Request body:
 {
   "query": "open web search",
   "limit": 5,
-  "engines": ["startpage", "bing", "sogou"],
+  "engines": ["startpage", "bing", "sogou", "hackernews"],
   "searchMode": "playwright",
   "aggregationMode": "deep",
   "perEngineLimit": 5,
@@ -169,6 +172,7 @@ Notes:
 - `engineWeights` is optional, object mapping engine names to positive numbers; weights affect RRF scoring
 - `dedupe` is optional, boolean, default `true`; when enabled, URLs are normalized and duplicate pages are merged
 - if `engines` is omitted, the daemon uses its configured default engine
+- when the effective mode is `playwright` but the Playwright configuration is invalid, the daemon returns `status: "error"` with `error.code: "browser_unavailable"`
 - every successful search response includes `retrievedAt`, the UTC ISO-8601 time when aggregation completed
 - every valid HTTP(S) result URL receives a normalized `sourceDomain`; the legacy `source` field is preserved unchanged
 - parsers may include the source page's `dateText`; `publishedAt` is included only when machine-readable date evidence can be normalized confidently, and is otherwise omitted
@@ -226,13 +230,19 @@ Request body:
 ```json
 {
   "url": "https://awiki.ai",
-  "maxChars": 30000
+  "maxChars": 30000,
+  "renderMode": "auto",
+  "readability": false,
+  "includeLinks": false
 }
 ```
 
 Notes:
 - `url` is required
 - `maxChars` is optional, integer `1000-200000`, default `30000`
+- `renderMode` is optional: `request` uses HTTP only, `auto` (default) uses request with browser fallback, and `browser` renders directly with Playwright
+- `readability` and `includeLinks` are optional booleans; `includeLinks` applies to successful Readability output
+- `browser` returns a clear error if Playwright or its configured browser target is unavailable
 - returns the full structured web-fetch payload
 
 Example:
@@ -240,7 +250,7 @@ Example:
 ```bash
 curl --noproxy '*' -X POST http://127.0.0.1:3210/fetch-web \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://awiki.ai","maxChars":3000}'
+  -d '{"url":"https://awiki.ai","maxChars":3000,"renderMode":"browser"}'
 ```
 
 ### `POST /fetch-github-readme`

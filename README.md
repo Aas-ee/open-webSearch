@@ -3,7 +3,6 @@
 # Open-WebSearch
 
 [![ModelScope](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Aas-ee/3af09e0f4c7821fb2e9acb96483a5ff0/raw/badge.json&color=%23de5a16)](https://www.modelscope.cn/mcp/servers/Aasee1/open-webSearch)
-[![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Aas-ee/open-webSearch)](https://archestra.ai/mcp-catalog/aas-ee__open-websearch)
 [![smithery badge](https://smithery.ai/badge/@Aas-ee/open-websearch)](https://smithery.ai/server/@Aas-ee/open-websearch)
 ![Version](https://img.shields.io/github/v/release/Aas-ee/open-websearch)
 ![License](https://img.shields.io/github/license/Aas-ee/open-websearch)
@@ -14,6 +13,16 @@
 </div>
 
 `open-websearch` provides an MCP server, CLI, and local daemon, and can also be paired with skill-guided agent workflows for live web search and content retrieval without API keys.
+
+## Sponsor
+
+<div align="center">
+  <a href="https://www.swiftproxy.net/?ref=openwebSearch" rel="sponsored">
+    <img src="./docs/assets/sponsors/a69c410018edd7c45bffd4864629e25b.png" alt="Swiftproxy" width="600">
+  </a>
+</div>
+
+> [**Swiftproxy**](https://www.swiftproxy.net/?ref=openwebSearch) provides high-quality static residential proxies with stable IPs for multi-account management, automation, web scraping, and secure online operations. Protect your accounts with clean IPs and reliable proxy infrastructure. Static proxy traffic is valid for 30 days with unlimited usage. Get **10% off** with code **`PROXY90`**.
 
 ## Features
 
@@ -28,6 +37,7 @@
     - juejin
     - startpage
     - sogou
+    - hackernews
 - HTTP proxy configuration support for accessing restricted resources
 - No API keys or authentication required
 - Returns structured results with titles, URLs, and descriptions
@@ -148,7 +158,7 @@ Notes:
 For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`, `POST /fetch-*`), see [docs/http-api.md](docs/http-api.md).
 
 ## TODO
-- Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), ~~Sogou~~ (already supported), Google and other search engines
+- Support for ~~Bing~~ (already supported), ~~DuckDuckGo~~ (already supported), ~~Exa~~ (already supported), ~~Brave~~ (already supported), ~~Sogou~~ (already supported), ~~Hacker News~~ (already supported), Google and other search engines
 - Support for more blogs, forums, and social platforms
 - Optimize article content extraction, add support for more sites
 - ~~Support for GitHub README fetching~~ (already supported)
@@ -185,15 +195,15 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 |----------|-------------------------|---------|-------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
-| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS certificate verification for `fetchWebContent` only. Use only when a target site has a broken certificate chain |
+| `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | Disable TLS verification only for the request leg of `fetchWebContent`; it does not affect Playwright browser navigation. Use only for broken certificate chains |
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
-| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: request only, request then Playwright fallback, or force Playwright |
+| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: force HTTP request mode (`request`), force Playwright mode (`playwright`), or let the agent choose (`auto`, default). Forced modes never expose a `searchMode` override to the agent. In `auto` mode the server checks whether Playwright is really usable (the client module can actually be loaded, and for local launches a real browser binary exists: explicit `PLAYWRIGHT_EXECUTABLE_PATH`, bundled browser, or system Chrome/Edge); if available, the search tool exposes a `searchMode` parameter and directs the agent to stay on the default `auto` and only retry with `playwright` when request results fail, return empty, or look blocked; otherwise it behaves as forced request mode. If `playwright` is forced but not usable, searches fail with a `browser_unavailable` error |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |
 | `PLAYWRIGHT_MODULE_PATH` | empty | Absolute path or project-relative path | Reuse an existing Playwright client package outside this project |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | empty | Any valid browser binary path | Launch an existing Chromium/Chrome executable without installing bundled browsers |
@@ -201,6 +211,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `PLAYWRIGHT_CDP_ENDPOINT` | empty | Valid Chromium CDP endpoint | Connect to an existing Chromium instance over CDP |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Whether Playwright Chromium runs in headless mode |
 | `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing result waits |
+| `OPEN_WEBSEARCH_PROFILE_DIR` | `<tmpdir>/open-websearch-browser-profiles` | Any writable directory | Base directory for persistent local browser profiles (see browser state note below) |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool |
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | Valid MCP tool name | Custom name for the Linux.do article fetch tool |
 | `MCP_TOOL_FETCH_CSDN_NAME` | `fetchCsdnArticle` | Valid MCP tool name | Custom name for the CSDN article fetch tool |
@@ -279,9 +290,9 @@ npx open-websearch@latest
 ```
 
 Mode behavior:
-- `request`: only uses request-based Bing scraping
-- `auto`: tries request first, and only falls back to Playwright when request fails and a manually accessible Playwright client + browser are available
-- `playwright`: forces Playwright and errors if the configured Playwright client or browser target is unavailable
+- `request`: only uses request-based Bing scraping; the search tool exposes no `searchMode` parameter and no mode guidance
+- `playwright`: forces Playwright; the search tool exposes no `searchMode` parameter and no mode guidance. Playwright availability is checked at startup and an invalid configuration logs a warning; searches then fail with a clear `browser_unavailable` error
+- `auto`: checks whether Playwright is really usable (the client module actually loads; for local launches a real browser binary must exist). If available, the search tool exposes a `searchMode` parameter (request / auto / playwright) and directs the agent to stay on the default `auto`, retrying with `playwright` only when request results fail, return empty, or look blocked; otherwise the server behaves as request mode
 
 Notes:
 - `PLAYWRIGHT_MODULE_PATH` takes precedence over `PLAYWRIGHT_PACKAGE`
@@ -289,6 +300,12 @@ Notes:
 - Remote endpoints ignore `PLAYWRIGHT_EXECUTABLE_PATH` and local proxy launch flags
 - When Playwright is available, blocked CSDN/Zhihu article fetches and generic web fetches can also retry with browser-acquired cookies
 - Without Playwright, `fetchWebContent` stays on the request-only path. Public pages can still work, but pages that require browser cookies or browser-rendered HTML may fail.
+
+Browser state note (local shared profiles):
+- Local browser mode reuses persistent contexts/pages across fetches and across process restarts. Cookies, storage, cache, and Service Worker state for the same origin therefore persist between browser-mode fetches.
+- This is intentional for single-user, stateful scraping (it keeps anti-bot state warm and avoids repeated browser launches). If you share a daemon between mutually distrusting callers, connect those callers to an isolated browser via `PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT` instead of relying on local shared profiles, or point each caller at its own `OPEN_WEBSEARCH_PROFILE_DIR`.
+- This shared state is service-level and intended only for anonymous access to public web pages: the service itself never logs into sites, so it should never carry personal credentials. Do not rely on it to store logged-in or personalized sessions. Remote endpoints (`PLAYWRIGHT_WS_ENDPOINT`/`PLAYWRIGHT_CDP_ENDPOINT`) inherit the connected browser's state, so pointing them at a personal logged-in browser also shares that browser's login and personalization state with this service.
+- To clear profile state, delete the browser profile directories under `OPEN_WEBSEARCH_PROFILE_DIR` (default: `<tmpdir>/open-websearch-browser-profiles`) while no local browser is running.
 
 ### Local Installation
 
@@ -403,7 +420,7 @@ Proxy and TLS notes:
 - If `PROXY_URL` points to a fixed upstream proxy or overseas egress, region-sensitive sites such as Baidu, CSDN, Juejin, Linux.do, or GitHub may behave differently than before.
 - If your host machine already sets `HTTP_PROXY` or `HTTPS_PROXY`, they will no longer override the server's internal request behavior.
 - Prefer configuring `NODE_EXTRA_CA_CERTS` on Windows when a site has a missing intermediate CA.
-- Use `FETCH_WEB_INSECURE_TLS=true` only as a last resort for `fetchWebContent`, since it weakens TLS verification.
+- Use `FETCH_WEB_INSECURE_TLS=true` only as a last resort for the request leg of `fetchWebContent`; it weakens TLS verification and does not affect Playwright browser navigation.
 
 **Local STDIO Configuration for Cherry Studio (Windows):**
 ```json
@@ -456,7 +473,7 @@ Environment variable configuration:
 |----------|-------------------------|---------|-------------|
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
-| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `juejin`, `startpage`, `sogou` | Default search engine |
+| `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | Default search engine |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
@@ -498,7 +515,7 @@ For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`,
 {
   "query": string,        // Search query
   "limit": number,        // Optional: Number of results to return (default: 10)
-  "engines": string[],    // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou) default runtime-configured engine
+  "engines": string[],    // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou,hackernews) default runtime-configured engine
   "searchMode": string    // Optional: request, auto, or playwright (currently only affects Bing)
 }
 ```
@@ -627,14 +644,21 @@ Response example:
 
 ### fetchWebContent Tool Usage
 
-Fetch content directly from public HTTP(S) links, including Markdown files (`.md`) and ordinary web pages.
+Fetch content directly from public HTTP(S) links, including Markdown files (`.md`), ordinary pages, and JavaScript-rendered pages when Playwright is configured.
 
 ```typescript
 {
-  "url": string,         // Public HTTP(S) URL
-  "maxChars": number     // Optional: max returned content length (1000-200000, default 30000)
+  "url": string,          // Public HTTP(S) URL
+  "maxChars": number,     // Optional: max returned content length (1000-200000, default 30000)
+  "renderMode": string,   // Optional: request, auto (default), or browser
+  "readability": boolean, // Optional: use Mozilla Readability for HTML
+  "includeLinks": boolean // Optional: preserve links from Readability output
 }
 ```
+
+`request` never starts a browser or uses browser cookies. `auto` preserves the existing request-first behavior and uses browser assistance only when needed. `browser` renders the page directly and returns a clear error if Playwright or its browser target is unavailable. Initial and final URLs remain subject to public-network safety checks.
+
+Browser requests are revalidated before continuation, but this process does not pin DNS answers to Chromium's eventual socket. Remote Playwright/CDP endpoints must therefore enforce their own trusted DNS and egress policy.
 
 Usage example:
 ```typescript
@@ -643,7 +667,8 @@ use_mcp_tool({
   tool_name: "fetchWebContent",
   arguments: {
     url: "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
-    maxChars: 12000
+    maxChars: 12000,
+    renderMode: "auto"
   }
 })
 ```
@@ -655,6 +680,7 @@ Response example:
   "finalUrl": "https://raw.githubusercontent.com/Aas-ee/open-webSearch/main/README.md",
   "contentType": "text/plain; charset=utf-8",
   "title": "",
+  "retrievalMethod": "request",
   "truncated": false,
   "content": "# Open-WebSearch MCP Server ..."
 }
@@ -716,7 +742,7 @@ Since this tool works by scraping multi-engine search results, please note the f
 
 4. **Search Engine Configuration**:
    - Default search engine can be set via the `DEFAULT_SEARCH_ENGINE` environment variable
-   - Supported engines: bing, duckduckgo, exa, brave, baidu, csdn, juejin, startpage, sogou
+   - Supported engines: bing, duckduckgo, exa, brave, baidu, csdn, linuxdo, juejin, startpage, sogou, hackernews
    - The default engine is used when searching specific websites
 
 5. **Proxy Configuration**:
@@ -747,6 +773,6 @@ The script uses the first 12 characters of the current Git commit as the immutab
 ## Star History
 If you find this project helpful, please consider giving it a ⭐ Star!
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Aas-ee/open-webSearch&type=Date)](https://www.star-history.com/#Aas-ee/open-webSearch&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Aas-ee/open-webSearch&type=Date)](https://star-history.dera.page/#Aas-ee/open-webSearch&Date)
 
 </div>

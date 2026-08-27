@@ -1,6 +1,6 @@
 import express from 'express';
 import http from 'node:http';
-import { AppConfig } from '../../config.js';
+import { AppConfig, checkPlaywrightModeConfiguration, getEffectiveSearchMode } from '../../config.js';
 import { OpenWebSearchRuntime } from '../../runtime/runtimeTypes.js';
 import { createErrorEnvelope, createSuccessEnvelope } from '../../cli/protocol.js';
 import {
@@ -10,7 +10,8 @@ import {
     SearchRankingMode,
     SupportedSearchEngine
 } from '../../core/search/searchEngines.js';
-import { shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
+import { validatePublicWebUrl } from '../../core/validation/targetValidation.js';
+import { isBrowserUnavailableError, shutdownLocalPlaywrightBrowserSessions } from '../../utils/playwrightClient.js';
 import { OPEN_WEBSEARCH_VERSION } from '../../version.js';
 
 export type LocalDaemonOptions = {
@@ -30,6 +31,9 @@ export type LocalDaemonStatus = {
         defaultSearchEngine: string;
         allowedSearchEngines: string[];
         searchMode: string;
+        effectiveSearchMode: string;
+        playwrightAvailable: boolean;
+        playwrightUnavailableReason: string | null;
         useProxy: boolean;
         fetchWebAllowInsecureTls: boolean;
     };
@@ -206,6 +210,16 @@ function parseBooleanFlag(value: unknown, name: string): boolean | undefined {
     return value;
 }
 
+function parseRenderMode(value: unknown): 'request' | 'auto' | 'browser' | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value !== 'request' && value !== 'auto' && value !== 'browser') {
+        throw new Error('renderMode must be one of: request, auto, browser');
+    }
+    return value;
+}
+
 export async function startLocalDaemon(
     runtime: OpenWebSearchRuntime,
     options: LocalDaemonOptions = {}
@@ -219,21 +233,27 @@ export async function startLocalDaemon(
 
     let baseUrl = '';
 
-    const getStatus = (): LocalDaemonStatus => ({
-        daemon: 'running',
-        runtime: 'ready',
-        activation: 'active',
-        version,
-        capabilities: getCapabilities(),
-        baseUrl,
-        configSummary: {
-            defaultSearchEngine: runtime.config.defaultSearchEngine,
-            allowedSearchEngines: runtime.config.allowedSearchEngines,
-            searchMode: runtime.config.searchMode,
-            useProxy: runtime.config.useProxy,
-            fetchWebAllowInsecureTls: runtime.config.fetchWebAllowInsecureTls
-        }
-    });
+    const getStatus = (): LocalDaemonStatus => {
+        const playwrightAvailability = checkPlaywrightModeConfiguration(runtime.config);
+        return {
+            daemon: 'running',
+            runtime: 'ready',
+            activation: 'active',
+            version,
+            capabilities: getCapabilities(),
+            baseUrl,
+            configSummary: {
+                defaultSearchEngine: runtime.config.defaultSearchEngine,
+                allowedSearchEngines: runtime.config.allowedSearchEngines,
+                searchMode: runtime.config.searchMode,
+                effectiveSearchMode: getEffectiveSearchMode(runtime.config),
+                playwrightAvailable: playwrightAvailability.available,
+                playwrightUnavailableReason: playwrightAvailability.reason,
+                useProxy: runtime.config.useProxy,
+                fetchWebAllowInsecureTls: runtime.config.fetchWebAllowInsecureTls
+            }
+        };
+    };
 
     app.get('/health', (_req, res) => {
         res.json(createSuccessEnvelope({
@@ -281,6 +301,20 @@ export async function startLocalDaemon(
             res.json(createSuccessEnvelope(result));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            const errorCode = (error as { code?: unknown })?.code;
+
+            // 强制 Playwright 而配置无效：返回清晰的配置错误信封。
+            if (errorCode === 'browser_unavailable') {
+                sendError(
+                    res,
+                    500,
+                    'browser_unavailable',
+                    message,
+                    { hint: 'Fix the Playwright configuration (install a client package, set PLAYWRIGHT_MODULE_PATH or a remote endpoint, provide a browser binary), or retry with searchMode=request.' }
+                );
+                return;
+            }
+
             const statusCode = message.includes('must') || message.includes('empty') ? 400 : 500;
             sendError(
                 res,
@@ -297,17 +331,44 @@ export async function startLocalDaemon(
     });
 
     app.post('/fetch-web', async (req, res) => {
+        let input: {
+            url: string;
+            maxChars: number;
+            readability?: boolean;
+            includeLinks?: boolean;
+            renderMode?: 'request' | 'auto' | 'browser';
+        };
         try {
-            const url = parseUrl(req.body?.url);
-            const maxChars = parseMaxChars(req.body?.maxChars);
-            const readability = parseBooleanFlag(req.body?.readability, 'readability');
-            const includeLinks = parseBooleanFlag(req.body?.includeLinks, 'includeLinks');
-            const result = await runtime.services.fetchWeb.execute({ url, maxChars, readability, includeLinks });
-            res.json(createSuccessEnvelope(result));
+            input = {
+                url: parseUrl(req.body?.url),
+                maxChars: parseMaxChars(req.body?.maxChars),
+                readability: parseBooleanFlag(req.body?.readability, 'readability'),
+                includeLinks: parseBooleanFlag(req.body?.includeLinks, 'includeLinks'),
+                renderMode: parseRenderMode(req.body?.renderMode)
+            };
+            if (!validatePublicWebUrl(input.url)) {
+                throw new Error('Invalid public HTTP(S) URL');
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             sendError(res, 400, 'validation_failed', message, {
-                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, and pass readability/includeLinks only as booleans.'
+                hint: 'Use a public HTTP(S) URL, keep maxChars within the supported range, pass readability/includeLinks only as booleans, and use renderMode request, auto, or browser.'
+            });
+            return;
+        }
+
+        try {
+            const result = await runtime.services.fetchWeb.execute(input);
+            res.json(createSuccessEnvelope(result));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            // code 优先（browser_unavailable），消息特征只作未带 code 的历史错误回退。
+            const browserUnavailable = isBrowserUnavailableError(error);
+            sendError(res, browserUnavailable ? 503 : 502, browserUnavailable ? 'browser_unavailable' : 'fetch_failed', message, {
+                retryable: !browserUnavailable,
+                hint: browserUnavailable
+                    ? 'Configure a usable Playwright client and browser target, or retry with renderMode request/auto.'
+                    : 'Verify that the target is reachable and retry. Use renderMode request to avoid browser rendering.'
             });
         }
     });

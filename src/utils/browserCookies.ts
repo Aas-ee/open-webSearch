@@ -1,10 +1,11 @@
 import { isIP } from 'node:net';
 import { config, getProxyUrl } from '../config.js';
-import { openPlaywrightBrowser, loadPlaywrightClient } from './playwrightClient.js';
+import { openPlaywrightBrowser, loadPlaywrightClient, acquirePooledPlaywrightPage } from './playwrightClient.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from './urlSafety.js';
 
 const COOKIE_CACHE_TTL_MS = 10 * 60 * 1000;
 const COOKIE_WARMUP_DELAY_MS = 1200;
+export const MAX_BROWSER_HTML_BYTES = 2 * 1024 * 1024;
 const COOKIE_CONTEXT_OPTIONS = {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
     locale: 'zh-CN',
@@ -57,9 +58,39 @@ export function looksLikeBotChallengePage(html: string): boolean {
     return BOT_KEYWORDS.some((keyword) => normalized.includes(keyword));
 }
 
-// Hostname-level TTL cache used by the subresource guard so a page loading
-// N assets from one CDN costs one DNS lookup, not N. Bounded to keep memory
-// capped; short TTL shrinks the DNS-rebinding window for subresources.
+// 页面侧脚本：检测视口中心的顶层悬浮浮层文本，用于捕获非语义化 <dialog> 的模态框，例如放在 Shadow DOM 内的 Salesforce SLDS 模态。
+// 注意：本函数作为 page.evaluate 的参数传入，被序列化后在页面上下文执行，因此函数体必须自包含，不得引用外部模块变量。
+export function detectFloatingOverlayPageScript(): string[] | undefined {
+    function isVisuallyFloating(el: Element): boolean {
+        const style = window.getComputedStyle(el);
+        const pos = style.position;
+        if (pos !== 'fixed' && pos !== 'absolute') return false;
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const z = parseInt(style.zIndex || '0', 10);
+        return !isNaN(z) && z > 0;
+    }
+    function findFloatingInTree(el: Element): string | undefined {
+        if (isVisuallyFloating(el)) return el.textContent?.trim();
+        if (el.shadowRoot) {
+            const all = el.shadowRoot.querySelectorAll('*');
+            for (const desc of all) {
+                if (isVisuallyFloating(desc)) return desc.textContent?.trim();
+            }
+        }
+        return undefined;
+    }
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const topEl = document.elementFromPoint(cx, cy);
+    if (topEl) {
+        const text = findFloatingInTree(topEl);
+        if (text) return [text];
+    }
+    return undefined;
+}
+
+// Cache only blocked hostname classifications. Public resolutions are checked
+// on every request so DNS rebinding cannot reuse an earlier allow decision.
 const SUBRESOURCE_CLASSIFICATION_TTL_MS = 60 * 1000;
 const SUBRESOURCE_CLASSIFICATION_MAX_ENTRIES = 1024;
 type SubresourceClassification = { allowed: boolean; expiresAt: number };
@@ -77,7 +108,7 @@ function readSubresourceClassification(hostname: string): boolean | undefined {
     return entry.allowed;
 }
 
-function writeSubresourceClassification(hostname: string, allowed: boolean): void {
+function writeBlockedSubresourceClassification(hostname: string): void {
     if (subresourceClassificationCache.size >= SUBRESOURCE_CLASSIFICATION_MAX_ENTRIES) {
         // Map preserves insertion order; drop the oldest.
         const oldestKey = subresourceClassificationCache.keys().next().value;
@@ -86,14 +117,13 @@ function writeSubresourceClassification(hostname: string, allowed: boolean): voi
         }
     }
     subresourceClassificationCache.set(hostname, {
-        allowed,
+        allowed: false,
         expiresAt: Date.now() + SUBRESOURCE_CLASSIFICATION_TTL_MS
     });
 }
 
-// Async variant for sub-resource requests. Uses the TTL cache so that common
-// page-load patterns (dozens of assets from one CDN) don't trigger one DNS
-// lookup per asset, while hostname-to-private resolutions are still caught.
+// Async variant for sub-resource requests. Denials are cached, while allowed
+// hosts are resolved on each request to remain fail-closed under DNS rebinding.
 export async function classifyBrowserSubresourceUrl(targetUrl: string): Promise<void> {
     const parsed = new URL(targetUrl);
     // Protocol + literal-IP private check first (sync, free).
@@ -107,18 +137,14 @@ export async function classifyBrowserSubresourceUrl(targetUrl: string): Promise<
 
     const cacheKey = hostname.toLowerCase();
     const cached = readSubresourceClassification(cacheKey);
-    if (cached === true) {
-        return;
-    }
     if (cached === false) {
         throw new Error('Browser subresource URL points to a private or local network target, which is not allowed');
     }
 
     try {
         await assertPublicHttpUrlResolved(parsed, 'Browser subresource URL');
-        writeSubresourceClassification(cacheKey, true);
     } catch (err) {
-        writeSubresourceClassification(cacheKey, false);
+        writeBlockedSubresourceClassification(cacheKey);
         throw err;
     }
 }
@@ -131,13 +157,18 @@ export function __getBrowserSubresourceClassificationForTests(hostname: string):
     return subresourceClassificationCache.get(hostname.toLowerCase())?.allowed;
 }
 
+export async function __installNavigationGuardForTests(page: any): Promise<void> {
+    await installNavigationGuard(page);
+}
+
 // Intercepts every request the page makes (navigation + sub-resources) and
 // aborts ones whose target is private/loopback at either the literal or
 // DNS-resolved level. Navigation hits DNS fresh every time to keep the
 // rebinding window tight; sub-resources go through a hostname TTL cache.
-async function installNavigationGuard(page: any): Promise<void> {
+// 安装本身是 fail-closed：route 不可用或安装失败都会抛出，调用方必须拒绝无守卫的导航。
+export async function installNavigationGuard(page: any): Promise<void> {
     if (typeof page.route !== 'function') {
-        return;
+        throw new Error('Browser request interception is unavailable; refusing browser navigation because public-network safety cannot be enforced');
     }
     try {
         await page.route('**/*', async (route: any) => {
@@ -154,9 +185,9 @@ async function installNavigationGuard(page: any): Promise<void> {
                 await route.abort().catch(() => undefined);
             }
         });
-    } catch {
-        // Some connected browsers (e.g., certain CDP setups) may not support route
-        // interception. Pre-navigation validation still gates the initial URL.
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Browser request interception could not be installed; refusing browser navigation because public-network safety cannot be enforced: ${message}`);
     }
 }
 
@@ -166,8 +197,9 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     // 但 connectOverCDP 返回的浏览器通常只有一个默认持久化 context，不支持 newContext()，
     // 所以当 newContext 不可用时回退到默认 context + 手动清理。
     if (typeof browser.newContext === 'function') {
+        let context: any;
         try {
-            const context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
+            context = await browser.newContext(COOKIE_CONTEXT_OPTIONS);
             const page = await context.newPage();
             return {
                 page,
@@ -176,6 +208,9 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
                 }
             };
         } catch {
+            if (context && typeof context.close === 'function') {
+                await context.close().catch(() => undefined);
+            }
             // newContext 可能在 CDP 连接上抛异常，回退到默认 context
         }
     }
@@ -201,7 +236,11 @@ async function createCookieCollectionPage(browser: any): Promise<{ page: any; cl
     throw new Error('Browser does not support creating a page for cookie collection');
 }
 
-async function readCookiesFromPage(page: any, url: string): Promise<string> {
+export async function __createCookieCollectionPageForTests(browser: any): Promise<{ page: any; close(): Promise<void> }> {
+    return await createCookieCollectionPage(browser);
+}
+
+export async function readCookiesFromPage(page: any, url: string): Promise<string> {
     if (typeof page.context === 'function') {
         const context = page.context();
         if (context && typeof context.cookies === 'function') {
@@ -228,7 +267,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
         return undefined;
     }
 
-    const session = await openPlaywrightBrowser(true);
+    const session = await openPlaywrightBrowser();
 
     try {
         const { page, close } = await createCookieCollectionPage(session.browser);
@@ -262,7 +301,7 @@ export async function getBrowserCookieHeader(urlInput: string, forceRefresh: boo
     }
 }
 
-export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string }> {
+export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html: string; finalUrl: string; title: string; dialogTexts?: string[] }> {
     await assertPublicHttpUrlResolved(urlInput, 'Browser fetch URL');
 
     const playwright = await loadPlaywrightClient({ silent: true });
@@ -270,13 +309,63 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
         throw new Error('Playwright client is not available for browser HTML fetch');
     }
 
-    const session = await openPlaywrightBrowser(true);
+    const session = await openPlaywrightBrowser();
 
     try {
-        const { page, close } = await createCookieCollectionPage(session.browser);
+        // 复用页面池换取无新窗口，但页面状态（cookies/storage）会在不同 fetch 间共享。这是服务级共享浏览器状态：仅用于匿名公共网页访问，不应承载用户个人登录信息。详见 README 的“浏览器状态说明（本地共享 profile）”；若调用方连接的是已登录的个人浏览器（WS/CDP 端点），其状态同样会被共享。
+        const { page, releasePage } = await acquirePooledPlaywrightPage(session.browser, {
+            poolKey: 'fetch-html',
+            preparePage: async (p) => { await installNavigationGuard(p); }
+        });
 
         try {
-            await installNavigationGuard(page);
+            // 在页面 JS 自动关闭弹层之前抢先捕获 <dialog> 悬浮层文本：<dialog> 是"悬浮于内容之上"的语义化 HTML 元素。通过 addInitScript 注入 MutationObserver，使其先于任何页面脚本运行，待页面稳定后再取回捕获到的文本。
+            if (typeof page.addInitScript === 'function') {
+                await page.addInitScript(() => {
+                    (window as any).__mcpCapturedDialogs = [];
+
+                    function startDialogObserver() {
+                        const root = document.documentElement;
+                        // 使用 document.open() 的页面会让 documentElement 暂时为 null，等 DOMContentLoaded 或下一轮任务再重试。
+                        if (!root) {
+                            if (document.readyState === 'loading') {
+                                document.addEventListener('DOMContentLoaded', startDialogObserver, { once: true });
+                            } else {
+                                setTimeout(startDialogObserver, 0);
+                            }
+                            return;
+                        }
+
+                        const observer = new MutationObserver((mutations: MutationRecord[]) => {
+                            for (const m of mutations) {
+                                for (const node of m.addedNodes) {
+                                    if (node instanceof Element) {
+                                        if (node.tagName === 'DIALOG' && (node as HTMLDialogElement).open) {
+                                            const text = node.textContent?.trim();
+                                            if (text) {
+                                                (window as any).__mcpCapturedDialogs.push(text);
+                                            }
+                                        }
+                                        const nested = node.querySelectorAll?.('dialog[open]');
+                                        if (nested) {
+                                            for (const d of nested) {
+                                                const text = d.textContent?.trim();
+                                                if (text) {
+                                                    (window as any).__mcpCapturedDialogs.push(text);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        observer.observe(root, { childList: true, subtree: true });
+                    }
+
+                    startDialogObserver();
+                }).catch(() => undefined);
+            }
+
             await page.goto(urlInput, {
                 waitUntil: 'domcontentloaded',
                 timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
@@ -292,17 +381,53 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
                 await page.waitForTimeout(COOKIE_WARMUP_DELAY_MS).catch(() => undefined);
             }
 
+            if (typeof page.evaluate === 'function') {
+                const estimatedHtmlBytes = await page.evaluate(() => new Blob([
+                    document.documentElement?.outerHTML || ''
+                ]).size);
+                if (Number(estimatedHtmlBytes) > MAX_BROWSER_HTML_BYTES) {
+                    throw new Error(`Response body too large (${estimatedHtmlBytes} bytes). Max allowed is ${MAX_BROWSER_HTML_BYTES} bytes`);
+                }
+            }
+
             const html = typeof page.content === 'function' ? await page.content() : '';
             const finalUrl = typeof page.url === 'function' ? page.url() : urlInput;
             const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';
 
+            // 取回捕获到的 dialog 文本，同时补查此刻仍处于打开状态的 dialog（以防它们在 MutationObserver 停止响应后才出现或被漏掉）。
+            // 若仍为空，回退到视口中心悬浮层检测，因为真实站点的模态框经常不是语义化 <dialog>（例如 Salesforce SLDS 模态 SECTION.slds-modal 位于 Shadow DOM 内），只能靠 fixed/absolute + z-index 的视觉悬浮判定捕获。
+            let dialogTexts: string[] | undefined;
+            if (typeof page.evaluate === 'function') {
+                const collected = await page.evaluate(() => {
+                    const captured: string[] = (window as any).__mcpCapturedDialogs || [];
+                    for (const d of document.querySelectorAll('dialog[open]')) {
+                        const text = d.textContent?.trim();
+                        if (text && !captured.includes(text)) {
+                            captured.push(text);
+                        }
+                    }
+                    return captured;
+                }).catch(() => [] as string[]);
+
+                if (collected && collected.length > 0) {
+                    dialogTexts = collected;
+                } else {
+                    dialogTexts = await page.evaluate(detectFloatingOverlayPageScript).catch(() => undefined) ?? undefined;
+                }
+
+                if (dialogTexts && dialogTexts.length > 1) {
+                    dialogTexts = Array.from(new Set(dialogTexts));
+                }
+            }
+
             return {
                 html: String(html || ''),
                 finalUrl: String(finalUrl || urlInput),
-                title: String(title || '')
+                title: String(title || ''),
+                ...(dialogTexts ? { dialogTexts } : {})
             };
         } finally {
-            await close();
+            await releasePage();
         }
     } finally {
         await session.release();

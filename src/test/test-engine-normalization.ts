@@ -11,7 +11,8 @@ const SUPPORTED_ENGINES = [
     'brave',
     'juejin',
     'startpage',
-    'sogou'
+    'sogou',
+    'hackernews'
 ] as const;
 
 const engineSchema = z.array(
@@ -41,7 +42,10 @@ const successCases: SuccessCase[] = [
     { input: ['StartPage'], expected: ['startpage'] },
     { input: ['SouGou'], expected: ['sogou'] },
     { input: ['sou-gou'], expected: ['sogou'] },
-    { input: ['搜狗'], expected: ['sogou'] }
+    { input: ['搜狗'], expected: ['sogou'] },
+    { input: ['Hacker News'], expected: ['hackernews'] },
+    { input: ['hacker-news'], expected: ['hackernews'] },
+    { input: ['hn'], expected: ['hackernews'] }
 ];
 
 const failureCases: FailureCase[] = [

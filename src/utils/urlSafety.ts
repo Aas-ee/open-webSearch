@@ -6,7 +6,10 @@ import { config } from '../config.js';
 // URL.hostname preserves the brackets for IPv6 literals (`[::1]`), which
 // break isIP and dns.lookup. Strip them once here.
 function stripIpv6Brackets(host: string): string {
-    return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+    const withoutRootDots = host.replace(/\.+$/, '');
+    return withoutRootDots.startsWith('[') && withoutRootDots.endsWith(']')
+        ? withoutRootDots.slice(1, -1)
+        : withoutRootDots;
 }
 
 type LookupResult = Array<{ address: string }>;
@@ -65,7 +68,9 @@ export function assertPublicHttpUrl(url: string | URL, label: string = 'URL'): v
         throw new Error(`${label} must use HTTP or HTTPS`);
     }
     if (isPrivateOrLocalHostname(parsed.hostname)) {
-        throw new Error(`${label} points to a private or local network target, which is not allowed`);
+        // Literal private targets are blocked unconditionally. FAKE_IP_CIDRS
+        // only exempts DNS-resolved answers, so no hint is shown here.
+        throw new Error(`${label} points to a private or local network target (${parsed.hostname}), which is not allowed`);
     }
 }
 
@@ -86,7 +91,11 @@ export async function assertPublicHttpUrlResolved(url: string | URL, label: stri
     } catch {
         throw new Error(`${label} could not be resolved`);
     }
-    if (resolved.some((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address))) {
-        throw new Error(`${label} resolves to a private or local network target, which is not allowed`);
+    const blockedIps = resolved
+        .filter((entry) => isPrivateOrLocalHostname(entry.address) && !isAllowedFakeIp(entry.address))
+        .map((entry) => entry.address);
+    if (blockedIps.length > 0) {
+        const ipList = blockedIps.join(', ');
+        throw new Error(`${label} (${parsed.hostname}) resolves to private IP(s) (${ipList}), which is not allowed. If these are synthetic fake-IP DNS results, set FAKE_IP_CIDRS to the CIDR configured by your proxy (for example 198.18.0.0/15)`);
     }
 }

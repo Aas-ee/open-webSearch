@@ -120,6 +120,7 @@ Example:
 Notes:
 - default engine resolution follows runtime/config defaults
 - `searchMode` may be provided per request and currently only affects Bing
+- if the effective mode is `playwright` but the Playwright configuration is invalid, the search fails with an error envelope whose `error.code` is `browser_unavailable`
 - if a local daemon is reachable, CLI may satisfy the request through daemon HTTP
 - if the daemon is unavailable and no explicit daemon target was requested, CLI may fall back to direct runtime execution
 
@@ -149,6 +150,8 @@ Notes:
 - `retrievalMethod`
 - `truncated`
 - `content`
+
+The command accepts `--render-mode request|auto|browser`. Omitted mode is `auto`; `request` forbids browser assistance, while `browser` renders directly with Playwright. The selected mode is forwarded unchanged through daemon and direct-runtime execution.
 
 ### Example: article and README fetch commands
 
@@ -233,6 +236,11 @@ CLI search arguments also support:
 - `--search-mode request|auto|playwright`
   - request-level override
   - currently only affects Bing
+
+CLI fetch arguments also support:
+- `--render-mode request|auto|browser`
+  - defaults to `auto`
+  - `browser` uses a longer daemon action timeout because browser navigation may exceed the request-path timeout
 
 ## Serve and status lifecycle
 
