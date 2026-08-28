@@ -1,4 +1,4 @@
-import { __buildBingNewsUrlForTests } from '../engines/bing/bing.js';
+import { __buildBingNewsFallbackUrlForTests, __buildBingNewsUrlForTests } from '../engines/bing/bing.js';
 import { parseBingNewsResults } from '../engines/bing/newsParser.js';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -19,6 +19,16 @@ function testNewsUrlUsesFreshnessSorting(): void {
     assertEqual(url.searchParams.get('q'), 'art design exhibition', 'news query');
     assertEqual(url.searchParams.get('qft'), 'sortbydate="1"', 'freshness sort');
     console.log('✅ Bing News URL uses the news vertical and freshness sorting');
+}
+
+function testNewsFallbackUsesRecentWebResults(): void {
+    const url = new URL(__buildBingNewsFallbackUrlForTests('art design exhibition'));
+    assertEqual(url.origin + url.pathname, 'https://cn.bing.com/search', 'fallback endpoint');
+    assertEqual(url.searchParams.get('q'), 'art design exhibition', 'fallback query');
+    assertEqual(url.searchParams.get('setlang'), 'en-US', 'fallback language');
+    assertEqual(url.searchParams.get('ensearch'), '1', 'fallback English search mode');
+    assertEqual(url.searchParams.get('filters'), 'ex1:"ez2"', 'fallback freshness filter');
+    console.log('✅ Bing News fallback uses freshness-filtered web results');
 }
 
 function testNewsParserExtractsDirectArticles(): void {
@@ -44,4 +54,5 @@ function testNewsParserExtractsDirectArticles(): void {
 }
 
 testNewsUrlUsesFreshnessSorting();
+testNewsFallbackUsesRecentWebResults();
 testNewsParserExtractsDirectArticles();
