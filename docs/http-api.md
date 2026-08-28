@@ -165,7 +165,9 @@ Notes:
 - `searchMode` is optional: `request`, `auto`, or `playwright`
 - `searchMode` currently only affects Bing; other engines ignore it
 - `vertical` is optional: `web` (default) or `news`
-  - `news` asks Bing's news vertical for recent, date-sorted article results; other engines currently ignore it
+  - `news` returns only results with a plausible article URL and normalized publication time
+  - if the requested engines do not produce enough qualified news, the runtime may try an allowed fallback engine; the response reports every engine actually used
+  - generic homepages, category pages, dictionary/definition pages, and results without reliable publication evidence are rejected instead of being returned as news
 - `aggregationMode` is optional: `fast`, `balanced`, or `deep`
   - `fast` preserves the previous distributed candidate budget
   - `balanced` asks each engine for a slightly wider candidate pool
@@ -179,7 +181,9 @@ Notes:
 - every successful search response includes `retrievedAt`, the UTC ISO-8601 time when aggregation completed
 - every valid HTTP(S) result URL receives a normalized `sourceDomain`; the legacy `source` field is preserved unchanged
 - parsers may include the source page's `dateText`; `publishedAt` is included only when machine-readable date evidence can be normalized confidently, and is otherwise omitted
+- fallback engines may derive `dateText` and `publishedAt` from a relative timestamp only when it appears at the beginning of the result description, for example `2 hours ago · ...`
 - aggregated results preserve the original result fields and may include `engines` plus `score`
+- `retrievalMode` is `web`, `news`, or `news_fallback`; news responses also include `newsDiagnostics.rejectedResults` and the fallback engines used
 
 For Bing's `zh-CN` result page, publication metadata follows these conservative rules:
 
@@ -196,8 +200,13 @@ Response excerpt:
   "status": "ok",
   "data": {
     "query": "open web search",
-    "engines": ["bing"],
+    "engines": ["bing", "startpage"],
     "retrievedAt": "2026-08-18T08:30:00.000Z",
+    "retrievalMode": "news_fallback",
+    "newsDiagnostics": {
+      "rejectedResults": 3,
+      "fallbackEngines": ["startpage"]
+    },
     "totalResults": 1,
     "results": [
       {
@@ -208,7 +217,7 @@ Response excerpt:
         "sourceDomain": "www.example.com",
         "dateText": "2026-08-18",
         "publishedAt": "2026-08-18T00:00:00.000Z",
-        "engine": "bing"
+        "engine": "startpage"
       }
     ],
     "partialFailures": []

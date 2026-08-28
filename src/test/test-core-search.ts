@@ -103,7 +103,11 @@ async function testSearchServiceExecution(): Promise<void> {
     const engineMap: SearchEngineExecutorMap = {
         bing: async (query, limit, context) => {
             seenCalls.push({ engine: 'bing', query, limit, searchMode: context?.searchMode, vertical: context?.vertical });
-            return Array.from({ length: limit }, (_, index) => createResult('bing', index + 1));
+            return Array.from({ length: limit }, (_, index) => ({
+                ...createResult('bing', index + 1),
+                url: `https://bing.example.com/2026/08/18/news-story-${index + 1}`,
+                publishedAt: '2026-08-18T00:00:00.000Z'
+            }));
         },
         startpage: async (query, limit, context) => {
             seenCalls.push({ engine: 'startpage', query, limit, searchMode: context?.searchMode, vertical: context?.vertical });
@@ -132,6 +136,99 @@ async function testSearchServiceExecution(): Promise<void> {
     );
 
     console.log('✅ search service executes with partial failures');
+}
+
+async function testNewsVerticalRejectsWebResultsAndUsesFallback(): Promise<void> {
+    const retrievedAt = new Date('2026-08-18T10:05:32.120Z');
+    const seenCalls: string[] = [];
+    const service = createSearchService({
+        bing: async (_query, limit, context) => {
+            seenCalls.push(`bing:${limit}:${context?.vertical ?? 'none'}`);
+            return [
+                {
+                    title: 'ARTIFICIAL Definition & Meaning',
+                    url: 'https://dictionary.example.com/dictionary/artificial',
+                    description: '1 hour ago · dictionary entry',
+                    source: 'dictionary.example.com',
+                    engine: 'bing'
+                },
+                {
+                    title: 'Technology News Homepage',
+                    url: 'https://example.com/news',
+                    description: '20 minutes ago · homepage',
+                    source: 'example.com',
+                    engine: 'bing'
+                }
+            ];
+        },
+        startpage: async (_query, limit, context) => {
+            seenCalls.push(`startpage:${limit}:${context?.vertical ?? 'none'}`);
+            return [{
+                title: 'Major companies announce a new AI security initiative',
+                url: 'https://www.reuters.com/technology/major-companies-announce-ai-security-initiative-2026-08-18/',
+                description: '2 hours ago · The initiative brings together more than 100 companies.',
+                source: 'www.reuters.com',
+                engine: 'startpage'
+            }];
+        }
+    }, {
+        now: () => retrievedAt,
+        newsFallbackEngines: ['startpage']
+    });
+
+    const result = await service.execute({
+        query: 'artificial intelligence industry news',
+        engines: ['bing'],
+        limit: 3,
+        vertical: 'news'
+    });
+
+    assertEqualArray(seenCalls, ['bing:3:news', 'startpage:3:news'], 'news fallback runs after unqualified primary results');
+    assertEqualArray(result.engines, ['bing', 'startpage'], 'news response reports the fallback engine');
+    assertEqual(result.retrievalMode, 'news_fallback', 'news response reports fallback retrieval');
+    assertEqual(result.totalResults, 1, 'only qualified news survives');
+    assertEqual(result.results[0].engine, 'startpage', 'qualified fallback result is returned');
+    assertEqual(result.results[0].dateText, '2 hours ago', 'relative time is extracted from fallback description');
+    assertEqual(result.results[0].publishedAt, '2026-08-18T08:05:32.120Z', 'fallback relative time becomes structured publication time');
+    assertEqual(result.newsDiagnostics?.rejectedResults, 2, 'news diagnostics count rejected web pages');
+    assertEqual(result.newsDiagnostics?.fallbackEngines.join(','), 'startpage', 'news diagnostics name fallback engines');
+
+    console.log('✅ news vertical rejects generic web pages and uses a qualified fallback');
+}
+
+async function testNewsVerticalSkipsFallbackWhenPrimaryIsQualified(): Promise<void> {
+    let fallbackCalls = 0;
+    const service = createSearchService({
+        bing: async () => [{
+            title: '芯片企业发布新一代处理器',
+            url: 'https://news.example.com/2026/08/18/new-processor-announcement',
+            description: '30 分钟前 · 企业今天发布了新产品。',
+            source: 'news.example.com',
+            engine: 'bing'
+        }],
+        startpage: async () => {
+            fallbackCalls += 1;
+            return [];
+        }
+    }, {
+        now: () => new Date('2026-08-18T10:05:32.120Z'),
+        newsFallbackEngines: ['startpage']
+    });
+
+    const result = await service.execute({
+        query: '芯片行业新闻',
+        engines: ['bing'],
+        limit: 1,
+        vertical: 'news'
+    });
+
+    assertEqual(fallbackCalls, 0, 'qualified primary news does not trigger a fallback');
+    assertEqual(result.retrievalMode, 'news', 'qualified primary news keeps the direct retrieval mode');
+    assertEqual(result.totalResults, 1, 'qualified primary news is returned');
+    assertEqual(result.results[0].dateText, '30 分钟前', 'Chinese leading relative time is extracted');
+    assertEqual(result.results[0].publishedAt, '2026-08-18T09:35:32.120Z', 'Chinese relative time is normalized');
+
+    console.log('✅ news vertical skips fallback when primary results are qualified');
 }
 
 async function testSearchMetadataEnrichment(): Promise<void> {
@@ -240,7 +337,7 @@ async function testPublicationMetadataDerivation(): Promise<void> {
     assertEqual(byTitle.get('timezone-less-structured')?.publishedAt, undefined, 'timezone-less structured timestamp is rejected');
     assertEqual(byTitle.get('missing')?.dateText, undefined, 'missing dateText remains absent');
     assertEqual(byTitle.get('missing')?.publishedAt, undefined, 'missing publishedAt remains absent');
-    assertEqual(byTitle.get('other-engine')?.publishedAt, undefined, 'Bing-specific relative rules do not affect other engines');
+    assertEqual(byTitle.get('other-engine')?.publishedAt, '2026-08-12T10:05:32.120Z', 'relative publication evidence is normalized for fallback engines');
 
     console.log('✅ publication metadata is derived conservatively from a fixed retrieval clock');
 }
@@ -425,6 +522,8 @@ async function main(): Promise<void> {
     testResolvePerEngineLimits();
     testResolveRequestedEngines();
     await testSearchServiceExecution();
+    await testNewsVerticalRejectsWebResultsAndUsesFallback();
+    await testNewsVerticalSkipsFallbackWhenPrimaryIsQualified();
     await testSearchMetadataEnrichment();
     await testPublicationMetadataDerivation();
     await testSearchServiceAutoModeUsesRuntimeDefault();

@@ -107,14 +107,26 @@ function parseBingDateText(dateText: string | undefined, retrievedAt: Date): str
         parseRelativeDateText(candidate, retrievedAt);
 }
 
+function extractLeadingRelativeDateText(description: string | undefined): string | undefined {
+    const candidate = description?.trim();
+    if (!candidate) {
+        return undefined;
+    }
+    const match = /^(\d{1,4}\s*(?:(?:minutes?|hours?|days?)\s+ago\b|(?:分钟|小时|天)\s*(?:之前|前)))(?=\s|[·•|,，。;；:：-]|$)/i.exec(candidate);
+    return match?.[1]?.trim();
+}
+
 export function normalizePublicationMetadata(result: SearchResult, retrievedAt: Date): SearchResult {
     const { publishedAt: untrustedPublishedAt, ...resultWithoutPublishedAt } = result;
     const timezoneOffsetMinutes = result.engine === 'bing' ? BING_ZH_CN_OFFSET_MINUTES : 0;
+    const dateText = result.dateText?.trim() || extractLeadingRelativeDateText(result.description);
     const publishedAt = parseExistingPublishedAt(untrustedPublishedAt, retrievedAt, timezoneOffsetMinutes) ??
-        (result.engine === 'bing' ? parseBingDateText(result.dateText, retrievedAt) : undefined);
+        (dateText ? parseAbsoluteDateText(dateText, retrievedAt, timezoneOffsetMinutes) ??
+            parseRelativeDateText(dateText, retrievedAt) : undefined);
 
     return {
         ...resultWithoutPublishedAt,
+        ...(dateText ? { dateText } : {}),
         ...(publishedAt ? { publishedAt } : {})
     };
 }
