@@ -8,7 +8,7 @@ import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightC
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 const BING_BASE_URL = 'https://cn.bing.com/search';
-const BING_NEWS_URL = 'https://www.bing.com/news/search';
+const BING_NEWS_URL = 'https://cn.bing.com/news/search';
 const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const SEARCH_INPUT_SELECTORS = [

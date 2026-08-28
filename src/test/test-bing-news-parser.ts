@@ -15,7 +15,7 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 function testNewsUrlUsesFreshnessSorting(): void {
     const url = new URL(__buildBingNewsUrlForTests('art design exhibition'));
-    assertEqual(url.origin + url.pathname, 'https://www.bing.com/news/search', 'news endpoint');
+    assertEqual(url.origin + url.pathname, 'https://cn.bing.com/news/search', 'news endpoint');
     assertEqual(url.searchParams.get('q'), 'art design exhibition', 'news query');
     assertEqual(url.searchParams.get('qft'), 'sortbydate="1"', 'freshness sort');
     console.log('✅ Bing News URL uses the news vertical and freshness sorting');
