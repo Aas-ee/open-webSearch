@@ -63,7 +63,7 @@ export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOp
     const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors();
     const engineAllowed = (engine: string) => runtimeConfig.allowedSearchEngines.length === 0 ||
         runtimeConfig.allowedSearchEngines.includes(engine);
-    const newsFallbackEngines = ['startpage', 'bing'].filter(engine => engineAllowed(engine));
+    const newsFallbackEngines = ['hackernews'].filter(engine => engineAllowed(engine));
 
     return {
         config: runtimeConfig,
