@@ -1,6 +1,7 @@
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import {
     __setHackerNewsHttpGetForTests,
+    normalizeHackerNewsNewsQuery,
     parseHackerNewsSearchResponse,
     searchHackerNews
 } from '../engines/hackernews/index.js';
@@ -78,6 +79,7 @@ async function testSearchRequestAndMapping(): Promise<void> {
     assertEqual(results[0].url, 'https://www.anthropic.com/news/model-context-protocol', 'external story URL');
     assertEqual(results[0].source, 'www.anthropic.com', 'external story source');
     assertEqual(results[0].engine, 'hackernews', 'engine name');
+    assertEqual(results[0].publishedAt, '2024-11-25T16:14:22.000Z', 'story publication evidence');
     assertEqual(results[0].description, 'By benocodes | 872 points | 258 comments | 2024-11-25', 'story metadata');
     assertEqual(results[1].url, 'https://news.ycombinator.com/item?id=12345', 'self-post discussion fallback');
     assertEqual(results[1].source, 'news.ycombinator.com', 'self-post source');
@@ -88,6 +90,34 @@ async function testSearchRequestAndMapping(): Promise<void> {
     );
 
     console.log('✓ Hacker News request and result mapping');
+}
+
+async function testNewsSearchRequest(): Promise<void> {
+    let requestedUrl = '';
+    let requestedOptions: AxiosRequestConfig | undefined;
+    const beforeCutoff = Math.floor((Date.now() - 72 * 60 * 60 * 1000) / 1000);
+    __setHackerNewsHttpGetForTests(async (url, options) => {
+        requestedUrl = url;
+        requestedOptions = options;
+        return response({ hits: [] });
+    });
+
+    await searchHackerNews('Artificial intelligence industry news 2026-08-27', 5, { vertical: 'news' });
+
+    const afterCutoff = Math.floor((Date.now() - 72 * 60 * 60 * 1000) / 1000);
+    assertEqual(requestedUrl, 'https://hn.algolia.com/api/v1/search_by_date', 'date-sorted HN endpoint');
+    assertEqual(requestedOptions?.params?.query, 'Artificial intelligence', 'topic-only news query');
+    const numericFilter = String(requestedOptions?.params?.numericFilters ?? '');
+    const cutoff = Number(numericFilter.replace('created_at_i>', ''));
+    assert(numericFilter.startsWith('created_at_i>'), 'news request should carry a recent-time filter');
+    assert(cutoff >= beforeCutoff && cutoff <= afterCutoff, 'news time filter should cover the latest 72 hours');
+    assertEqual(
+        normalizeHackerNewsNewsQuery('Technology innovation news 2026-08-27'),
+        'Technology innovation',
+        'generic news words and date are removed'
+    );
+
+    console.log('✓ Hacker News recent-news request');
 }
 
 function testFallbacksAndMalformedHits(): void {
@@ -233,13 +263,52 @@ async function testDefaultRuntimeRegistration(): Promise<void> {
     console.log('✓ Hacker News default runtime registration');
 }
 
+async function testDefaultNewsFallbackOrder(): Promise<void> {
+    const now = new Date('2026-08-28T10:30:00.000Z');
+    const runtime = createOpenWebSearchRuntime({
+        dependencies: {
+            searchExecutors: {
+                bing: async () => [],
+                hackernews: async () => [{
+                    title: 'Artificial intelligence research reaches production',
+                    url: 'https://example.com/2026/08/28/artificial-intelligence-production',
+                    description: 'A recent report',
+                    source: 'example.com',
+                    engine: 'hackernews',
+                    publishedAt: '2026-08-28T10:00:00.000Z'
+                }],
+                startpage: async () => {
+                    throw new Error('later fallback must not run');
+                }
+            }
+        },
+        searchServiceOptions: { now: () => now }
+    });
+
+    const result = await runtime.services.search.execute({
+        query: 'Artificial intelligence industry news 2026-08-27',
+        engines: ['bing'],
+        limit: 1,
+        vertical: 'news'
+    });
+
+    assertEqual(result.totalResults, 1, 'default news fallback result count');
+    assertEqual(result.results[0].engine, 'hackernews', 'Hacker News is the first usable fallback');
+    assertEqual(result.newsDiagnostics?.fallbackEngines.join(','), 'hackernews', 'later fallbacks are skipped');
+    assertEqual(result.partialFailures.length, 0, 'unused fallback produces no failure');
+
+    console.log('✓ Hacker News default news fallback order');
+}
+
 async function main(): Promise<void> {
     try {
         await testSearchRequestAndMapping();
+        await testNewsSearchRequest();
         testFallbacksAndMalformedHits();
         testInvalidResponses();
         await testLimitAndErrorBehavior();
         await testDefaultRuntimeRegistration();
+        await testDefaultNewsFallbackOrder();
         console.log('\nHacker News tests passed.');
     } finally {
         __setHackerNewsHttpGetForTests();

@@ -61,11 +61,17 @@ export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOp
     const runtimeConfig = options.config ?? config;
     const dependencies = options.dependencies ?? {};
     const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors();
+    const engineAllowed = (engine: string) => runtimeConfig.allowedSearchEngines.length === 0 ||
+        runtimeConfig.allowedSearchEngines.includes(engine);
+    const newsFallbackEngines = ['hackernews'].filter(engine => engineAllowed(engine));
 
     return {
         config: runtimeConfig,
         services: {
-            search: createSearchService(searchExecutors, options.searchServiceOptions),
+            search: createSearchService(searchExecutors, {
+                ...options.searchServiceOptions,
+                newsFallbackEngines: options.searchServiceOptions?.newsFallbackEngines ?? newsFallbackEngines
+            }),
             fetchLinuxDoArticle: createArticleFetchService('linuxdo', dependencies.fetchLinuxDoArticle ?? fetchLinuxDoArticle),
             fetchCsdnArticle: createArticleFetchService('csdn', dependencies.fetchCsdnArticle ?? fetchCsdnArticle),
             fetchJuejinArticle: createArticleFetchService('juejin', dependencies.fetchJuejinArticle ?? fetchJuejinArticle),

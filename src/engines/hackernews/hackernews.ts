@@ -1,13 +1,15 @@
 import axios from 'axios';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import * as cheerio from 'cheerio';
-import { SearchResult } from '../../types.js';
+import type { SearchResult, SearchVertical } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
 import { isPrivateOrLocalHostname } from '../../utils/urlSafety.js';
 
 const HACKER_NEWS_SEARCH_URL = 'https://hn.algolia.com/api/v1/search';
+const HACKER_NEWS_SEARCH_BY_DATE_URL = 'https://hn.algolia.com/api/v1/search_by_date';
 const HACKER_NEWS_ITEM_URL = 'https://news.ycombinator.com/item';
 const HACKER_NEWS_MAX_RESULTS = 50;
+const HACKER_NEWS_NEWS_MAX_AGE_HOURS = 72;
 
 type HackerNewsHttpGet = (url: string, options: AxiosRequestConfig) => Promise<AxiosResponse>;
 
@@ -121,13 +123,32 @@ function mapHackerNewsHit(hit: unknown): SearchResult | undefined {
         return undefined;
     }
 
+    const createdAt = readText(candidate.created_at);
+    const createdAtTimestamp = Date.parse(createdAt);
+
     return {
         title,
         url: resultUrl,
         description: buildDescription(candidate),
         source: externalUrl?.hostname || 'news.ycombinator.com',
-        engine: 'hackernews'
+        engine: 'hackernews',
+        ...(Number.isFinite(createdAtTimestamp)
+            ? { publishedAt: new Date(createdAtTimestamp).toISOString() }
+            : {})
     };
+}
+
+export function normalizeHackerNewsNewsQuery(query: string): string {
+    const withoutDate = query
+        .replace(/\b(?:19|20)\d{2}-\d{1,2}-\d{1,2}\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const topicalQuery = withoutDate
+        .replace(/\b(?:breaking|latest|industry|news|updates?)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return topicalQuery || withoutDate || query.trim();
 }
 
 export function parseHackerNewsSearchResponse(data: unknown, limit: number): SearchResult[] {
@@ -163,24 +184,34 @@ export function parseHackerNewsSearchResponse(data: unknown, limit: number): Sea
     return results;
 }
 
-export async function searchHackerNews(query: string, limit: number): Promise<SearchResult[]> {
+export async function searchHackerNews(
+    query: string,
+    limit: number,
+    context?: { vertical?: SearchVertical }
+): Promise<SearchResult[]> {
     const normalizedLimit = Math.floor(limit);
     if (!Number.isFinite(normalizedLimit) || normalizedLimit <= 0) {
         return [];
     }
 
     const hitsPerPage = Math.min(normalizedLimit, HACKER_NEWS_MAX_RESULTS);
-    const response = await hackerNewsHttpGet(HACKER_NEWS_SEARCH_URL, buildAxiosRequestOptions({
+    const isNewsSearch = context?.vertical === 'news';
+    const requestUrl = isNewsSearch ? HACKER_NEWS_SEARCH_BY_DATE_URL : HACKER_NEWS_SEARCH_URL;
+    const normalizedQuery = isNewsSearch ? normalizeHackerNewsNewsQuery(query) : query;
+    const response = await hackerNewsHttpGet(requestUrl, buildAxiosRequestOptions({
         trustedStaticHost: true,
         headers: {
             Accept: 'application/json',
             'User-Agent': 'open-websearch'
         },
         params: {
-            query,
+            query: normalizedQuery,
             tags: 'story',
             hitsPerPage,
-            attributesToRetrieve: 'objectID,title,url,author,points,num_comments,created_at,story_text'
+            attributesToRetrieve: 'objectID,title,url,author,points,num_comments,created_at,story_text',
+            ...(isNewsSearch ? {
+                numericFilters: `created_at_i>${Math.floor((Date.now() - HACKER_NEWS_NEWS_MAX_AGE_HOURS * 60 * 60 * 1000) / 1000)}`
+            } : {})
         },
         timeout: 15000,
         maxContentLength: 2 * 1024 * 1024

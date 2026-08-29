@@ -6,6 +6,7 @@ import {
     SearchRankingMode
 } from './searchEngines.js';
 import { normalizePublicationMetadata } from './publicationMetadata.js';
+import { isQualifiedNewsResult } from './newsQualification.js';
 
 export type SearchExecutionContext = {
     searchMode?: AppConfig['searchMode'];
@@ -28,10 +29,16 @@ export type SearchExecutionResult = {
     totalResults: number;
     results: SearchResult[];
     partialFailures: SearchExecutionFailure[];
+    retrievalMode: 'web' | 'news' | 'news_fallback';
+    newsDiagnostics?: {
+        rejectedResults: number;
+        fallbackEngines: string[];
+    };
 };
 
 export type SearchServiceOptions = {
     now?: () => Date;
+    newsFallbackEngines?: string[];
 };
 
 export type SearchExecutionInput = {
@@ -264,10 +271,8 @@ function aggregateSearchResults(
     return groups.slice(0, limit).map((group) => {
         const { sourceDomain: _ignoredSourceDomain, ...result } = group.bestCandidate.result;
         const sourceDomain = getSourceDomain(result.url);
-        const resultWithMetadata = normalizePublicationMetadata(result, options.retrievedAt);
-
         return {
-            ...resultWithMetadata,
+            ...result,
             ...(sourceDomain ? { sourceDomain } : {}),
             engine: group.bestCandidate.engine,
             engines: group.engines,
@@ -283,6 +288,7 @@ function classifyEngineError(error: unknown): SearchExecutionFailure['code'] {
 
 export function createSearchService(engineMap: SearchEngineExecutorMap, options: SearchServiceOptions = {}) {
     const now = options.now ?? (() => new Date());
+    const newsFallbackEngines = [...new Set(options.newsFallbackEngines ?? [])];
 
     return {
         async execute({
@@ -306,9 +312,8 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, options:
             const partialFailures: SearchExecutionFailure[] = [];
             const effectiveSearchMode = resolveSearchModeOverride(searchMode);
 
-            const tasks = engines.map(async (engine, index) => {
+            const runEngine = async (engine: string, engineLimit: number): Promise<SearchResult[]> => {
                 const executor = engineMap[engine];
-                const engineLimit = limits[index];
 
                 if (!executor) {
                     partialFailures.push({
@@ -336,12 +341,43 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, options:
                     });
                     return [];
                 }
-            });
+            };
 
-            const engineResults = await Promise.all(tasks);
+            const initialEngineResults = await Promise.all(
+                engines.map((engine, index) => runEngine(engine, limits[index]))
+            );
             const retrievedAtDate = now();
+            let rejectedResults = 0;
+            const qualify = (results: SearchResult[]): SearchResult[] => {
+                const normalized = results.map(result => normalizePublicationMetadata(result, retrievedAtDate));
+                if (vertical !== 'news') {
+                    return normalized;
+                }
+                const qualified = normalized.filter(result => isQualifiedNewsResult(result, retrievedAtDate));
+                rejectedResults += normalized.length - qualified.length;
+                return qualified;
+            };
+
+            const effectiveEngines = [...engines];
+            const engineResults = initialEngineResults.map(qualify);
+            const fallbackEngines: string[] = [];
+
+            if (vertical === 'news') {
+                let qualifiedCount = engineResults.reduce((count, results) => count + results.length, 0);
+                for (const fallbackEngine of newsFallbackEngines) {
+                    if (qualifiedCount >= limit || effectiveEngines.includes(fallbackEngine) || !engineMap[fallbackEngine]) {
+                        continue;
+                    }
+                    const fallbackResults = qualify(await runEngine(fallbackEngine, perEngineLimit ?? limit));
+                    effectiveEngines.push(fallbackEngine);
+                    engineResults.push(fallbackResults);
+                    fallbackEngines.push(fallbackEngine);
+                    qualifiedCount += fallbackResults.length;
+                }
+            }
+
             const retrievedAt = retrievedAtDate.toISOString();
-            const results = aggregateSearchResults(engineResults, engines, limit, {
+            const results = aggregateSearchResults(engineResults, effectiveEngines, limit, {
                 aggregationMode,
                 ranking,
                 engineWeights,
@@ -351,11 +387,20 @@ export function createSearchService(engineMap: SearchEngineExecutorMap, options:
 
             return {
                 query: cleanQuery,
-                engines,
+                engines: effectiveEngines,
                 retrievedAt,
                 totalResults: results.length,
                 results,
-                partialFailures
+                partialFailures,
+                retrievalMode: vertical === 'news'
+                    ? fallbackEngines.length > 0 ? 'news_fallback' : 'news'
+                    : 'web',
+                ...(vertical === 'news' ? {
+                    newsDiagnostics: {
+                        rejectedResults,
+                        fallbackEngines
+                    }
+                } : {})
             };
         }
     };

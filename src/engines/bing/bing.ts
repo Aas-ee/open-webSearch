@@ -90,8 +90,26 @@ function buildBingNewsUrl(query: string): string {
     return url.toString();
 }
 
+function buildBingNewsFallbackUrl(query: string, pageNumber: number): string {
+    const url = new URL(BING_BASE_URL);
+    url.searchParams.set('q', query);
+    url.searchParams.set('setlang', 'en-US');
+    url.searchParams.set('ensearch', '1');
+    // Bing China redirects /news/search to its home page on some server
+    // networks. The ordinary endpoint remains available, so constrain it to
+    // recent results and let downstream publication-date policy enforce the
+    // product's stricter freshness window.
+    url.searchParams.set('filters', 'ex1:"ez2"');
+    url.searchParams.set('first', String(1 + pageNumber * 10));
+    return url.toString();
+}
+
 export function __buildBingNewsUrlForTests(query: string): string {
     return buildBingNewsUrl(query);
+}
+
+export function __buildBingNewsFallbackUrlForTests(query: string): string {
+    return buildBingNewsFallbackUrl(query, 0);
 }
 
 function analyzeBlockedPage(html: string): { blocked: boolean; hasResults: boolean; detectedKeywords: string[]; title: string } {
@@ -650,16 +668,40 @@ async function searchBingWithHttp(query: string, limit: number): Promise<SearchR
 }
 
 async function searchBingNewsWithHttp(query: string, limit: number): Promise<SearchResult[]> {
-    const response = await axios.get(
-        buildBingNewsUrl(query),
-        buildBingNewsAxiosRequestOptions()
-    );
-    const html = String(response.data || '');
-    const results = parseBingNewsResults(html, limit);
-    if (results.length === 0) {
-        console.error('⚠️ No Bing News results from HTTP mode.');
+    let primaryFailure = 'the endpoint returned no results';
+    try {
+        const response = await axios.get(
+            buildBingNewsUrl(query),
+            buildBingNewsAxiosRequestOptions()
+        );
+        const html = String(response.data || '');
+        const results = parseBingNewsResults(html, limit);
+        if (results.length > 0) {
+            return results;
+        }
+    } catch (error) {
+        primaryFailure = error instanceof Error ? error.message : String(error);
     }
-    return results;
+
+    console.warn(`Bing News endpoint unavailable (${primaryFailure}); falling back to freshness-filtered web results.`);
+    let allResults: SearchResult[] = [];
+    for (let pageNumber = 0; allResults.length < limit; pageNumber += 1) {
+        const response = await axios.get(
+            buildBingNewsFallbackUrl(query, pageNumber),
+            buildBingNewsAxiosRequestOptions()
+        );
+        const html = String(response.data || '');
+        const pageState = analyzeBlockedPage(html);
+        if (pageState.blocked) {
+            throw new Error(`Bing news fallback returned a verification or anti-bot page (title: ${pageState.title || 'unknown'}, keywords: ${pageState.detectedKeywords.join(', ') || 'none'})`);
+        }
+        const results = parseBingSearchResults(html, limit - allResults.length);
+        allResults = allResults.concat(results);
+        if (results.length === 0) {
+            break;
+        }
+    }
+    return allResults.slice(0, limit);
 }
 
 async function searchBingWithPlaywright(query: string, limit: number): Promise<SearchResult[]> {
