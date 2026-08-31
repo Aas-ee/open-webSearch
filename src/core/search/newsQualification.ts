@@ -15,6 +15,8 @@ const NON_ARTICLE_LAST_SEGMENTS = new Set([
     'tags',
     'topic',
     'topics',
+    'browse',
+    'portal',
     'newsroom',
     'press-releases'
 ]);
@@ -52,6 +54,9 @@ function isLikelyArticleUrl(rawUrl: string): boolean {
         .map(safeDecodePathSegment)
         .filter(Boolean);
     if (segments.length === 0) {
+        return false;
+    }
+    if (segments.slice(0, -1).some(segment => /^(?:category|categories|tags?|topics?|browse|portal)$/i.test(segment))) {
         return false;
     }
 

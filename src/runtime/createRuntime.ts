@@ -10,6 +10,7 @@ import { searchJuejin } from '../engines/juejin/index.js';
 import { searchStartpage } from '../engines/startpage/index.js';
 import { searchSogou } from '../engines/sogou/index.js';
 import { searchHackerNews } from '../engines/hackernews/index.js';
+import { searchChinaNews } from '../engines/chinanews/chinanews.js';
 import { fetchLinuxDoArticle } from '../engines/linuxdo/fetchLinuxDoArticle.js';
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
@@ -53,7 +54,8 @@ function createDefaultSearchExecutors(): SearchEngineExecutorMap {
         juejin: searchJuejin,
         startpage: searchStartpage,
         sogou: searchSogou,
-        hackernews: searchHackerNews
+        hackernews: searchHackerNews,
+        chinanews: searchChinaNews
     };
 }
 
@@ -63,7 +65,7 @@ export function createOpenWebSearchRuntime(options: CreateOpenWebSearchRuntimeOp
     const searchExecutors = dependencies.searchExecutors ?? createDefaultSearchExecutors();
     const engineAllowed = (engine: string) => runtimeConfig.allowedSearchEngines.length === 0 ||
         runtimeConfig.allowedSearchEngines.includes(engine);
-    const newsFallbackEngines = ['hackernews'].filter(engine => engineAllowed(engine));
+    const newsFallbackEngines = ['chinanews', 'hackernews'].filter(engine => engineAllowed(engine));
 
     return {
         config: runtimeConfig,

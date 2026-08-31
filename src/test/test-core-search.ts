@@ -60,7 +60,8 @@ function testNormalizeEngineName(): void {
         'juejin',
         'startpage',
         'sogou',
-        'hackernews'
+        'hackernews',
+        'chinanews'
     ], 'supported engines list');
     console.log('✅ normalizeEngineName and supported engines');
 }

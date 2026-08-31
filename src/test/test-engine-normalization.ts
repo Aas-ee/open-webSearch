@@ -12,7 +12,8 @@ const SUPPORTED_ENGINES = [
     'juejin',
     'startpage',
     'sogou',
-    'hackernews'
+    'hackernews',
+    'chinanews'
 ] as const;
 
 const engineSchema = z.array(
@@ -45,7 +46,9 @@ const successCases: SuccessCase[] = [
     { input: ['搜狗'], expected: ['sogou'] },
     { input: ['Hacker News'], expected: ['hackernews'] },
     { input: ['hacker-news'], expected: ['hackernews'] },
-    { input: ['hn'], expected: ['hackernews'] }
+    { input: ['hn'], expected: ['hackernews'] },
+    { input: ['China News'], expected: ['chinanews'] },
+    { input: ['中新网'], expected: ['chinanews'] }
 ];
 
 const failureCases: FailureCase[] = [

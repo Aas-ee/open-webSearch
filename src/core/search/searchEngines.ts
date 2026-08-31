@@ -9,7 +9,8 @@ export const SUPPORTED_SEARCH_ENGINES = [
     'juejin',
     'startpage',
     'sogou',
-    'hackernews'
+    'hackernews',
+    'chinanews'
 ] as const;
 
 export type SupportedSearchEngine = typeof SUPPORTED_SEARCH_ENGINES[number];
@@ -44,6 +45,9 @@ export function normalizeEngineName(engine: string): string {
         case 'hackernews':
         case 'hn':
             return 'hackernews';
+        case 'chinanews':
+        case '中新网':
+            return 'chinanews';
         default:
             return cleaned;
     }

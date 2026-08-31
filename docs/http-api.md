@@ -185,6 +185,19 @@ Notes:
 - aggregated results preserve the original result fields and may include `engines` plus `score`
 - `retrievalMode` is `web`, `news`, or `news_fallback`; news responses also include `newsDiagnostics.rejectedResults` and the fallback engines used
 
+The `chinanews` engine reads the publisher's [official RSS feeds](https://www.chinanews.com.cn/rss/).
+It maps supported broad English/Chinese topics to fixed feeds, filters titles/summaries locally,
+and returns original publisher links and `pubDate` timestamps from the last 72 hours. It is not
+arbitrary web search: unmapped topics and topics without current articles return no results.
+Query text is never sent to the publisher. Feeds are limited to 2 MiB, have a five-second timeout,
+and are cached for one minute; failures never substitute fabricated news or fetch time as publication time.
+
+For deployments where Bing News is unavailable, explicitly set
+`ALLOWED_SEARCH_ENGINES=bing,chinanews`. News searches try the allowed `chinanews` source before
+`hackernews` when primary results are insufficient. A Bing-only allowlist remains Bing-only;
+the fallback does not override source restrictions. Article URL checks reject `browse`, `portal`,
+category and tag paths even when they contain a date or an article-looking slug.
+
 For Bing's `zh-CN` result page, publication metadata follows these conservative rules:
 
 - dedicated result date nodes and machine-readable zoned `datetime` attributes take precedence

@@ -57,7 +57,7 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
         const searchModeDescription = autoWithPlaywrightAvailable
             ? ' searchMode meanings: request performs plain HTTP scraping, playwright drives a real browser through Playwright, and auto or omitting searchMode lets the server decide (request first, falling back to Playwright when it is blocked). Start with the default auto (or omit searchMode). Only retry the same query with searchMode=playwright when the request-based results fail, come back empty, or are clearly blocked or low-quality, for example anti-bot or verification pages.'
             : '';
-        const verticalDescription = ' Set vertical=news for recent news results (currently optimized for Bing).';
+        const verticalDescription = ' Set vertical=news for recent news results; allowed China News RSS and Hacker News sources can supplement empty or insufficient primary results.';
         const aggregationDescription = ' Aggregation options: aggregationMode fast/balanced/deep, ranking engine-order/rrf, perEngineLimit for each engine candidate pool, engineWeights for RRF weighting, and dedupe for URL normalization merging.';
         if (runtime.config.allowedSearchEngines.length === 0) {
             return `Search the web using multiple engines (e.g., Baidu, Bing, DuckDuckGo, CSDN, Exa, Brave, Juejin(掘金), Startpage, Sogou(搜狗), Hacker News) with no API key required.${searchModeDescription}${verticalDescription}${aggregationDescription}`;
@@ -72,6 +72,8 @@ export const setupTools = (server: McpServer, runtime: OpenWebSearchRuntime): vo
                         return 'Sogou(搜狗)';
                     case 'hackernews':
                         return 'Hacker News';
+                    case 'chinanews':
+                        return 'China News RSS(中新网)';
                     default:
                         return e.charAt(0).toUpperCase() + e.slice(1);
                 }

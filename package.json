@@ -37,6 +37,7 @@
     "test:sogou": "tsc && node build/test/test-sogou.js",
     "test:baidu": "tsc && node build/test/test-baidu.js",
     "test:hackernews": "tsc && node build/test/test-hackernews.js",
+    "test:chinanews": "tsc && node build/test/test-chinanews.js",
     "test:startpage": "tsc && node build/test/test-startpage.js",
     "test:http-request-options": "tsc && node build/test/test-http-request-options.js",
     "test:url-safety": "tsc && node build/test/test-url-safety.js",
