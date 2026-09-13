@@ -370,7 +370,7 @@ npx open-websearch@latest
 - `PLAYWRIGHT_MODULE_PATH` 优先级高于 `PLAYWRIGHT_PACKAGE`
 - `PLAYWRIGHT_WS_ENDPOINT` 优先级高于 `PLAYWRIGHT_CDP_ENDPOINT`
 - 使用远端端点时，会忽略 `PLAYWRIGHT_EXECUTABLE_PATH` 和本地启动代理参数
-- 当 Playwright 可用时，CSDN/知乎文章抓取以及通用网页抓取在遇到拦截页时也会尝试复用浏览器拿到的 cookie 进行重试
+- 当 Playwright 可用时，CSDN/知乎文章抓取以及通用网页抓取在遇到拦截页时会尝试复用浏览器拿到的 cookie 进行重试，而被拦截的 Linux.do 文章抓取则复用与 `fetchWebContent` 相同的浏览器竞速模式（带 Cookie 的 HTTP 请求与页面渲染竞速）
 - 没有 Playwright 时，`fetchWebContent` 会停留在纯请求路径。公开页面通常仍可抓取，但依赖浏览器 cookie 或浏览器渲染 HTML 的页面可能失败。
 
 浏览器状态说明（本地共享 profile）：

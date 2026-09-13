@@ -339,7 +339,7 @@ type BrowserRaceOutcome = { ok: true; result: BrowserFetchResult } | { ok: false
 
 // 浏览器导航一次，页面 domcontentloaded 后立即取 Cookie 发起 HTTP 请求，同时浏览器继续渲染。
 // 两条路径竞速：任一结果到达 settle 循环即评估，内容可用的先达者立即胜出。HTTP 失败或无效时，浏览器渲染结果可以先于 HTTP 返回，不必等 HTTP 请求耗尽。
-async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFetchResult> {
+export async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFetchResult> {
     const playwright = await loadPlaywrightClient({ silent: true });
     if (!playwright) {
         throw new Error('Playwright client is not available for browser fetch');
