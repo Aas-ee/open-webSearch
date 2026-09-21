@@ -1,6 +1,7 @@
 import { AppConfig } from '../config.js';
 import { runCli } from '../cli/runCli.js';
 import { createOpenWebSearchRuntime } from '../runtime/createRuntime.js';
+import { packageVersion } from '../version.js';
 import { startLocalDaemon } from '../adapters/http/localDaemon.js';
 import http from 'node:http';
 import { EventEmitter } from 'node:events';
@@ -461,9 +462,14 @@ async function testCliServeWaitsForSignal(): Promise<void> {
     const baseUrl = match[1];
 
     const statusResponse = await fetch(`${baseUrl}/status`);
-    const statusPayload = await statusResponse.json() as { status: string; data: { daemon: string } };
+    const statusPayload = await statusResponse.json() as {
+        status: string;
+        data: { daemon: string; version: string };
+    };
     assertEqual(statusPayload.status, 'ok', 'CLI serve should keep daemon alive until signal');
     assertEqual(statusPayload.data.daemon, 'running', 'CLI serve daemon state before signal');
+    assertEqual(statusPayload.data.version, packageVersion, 'CLI serve daemon package version');
+    assert(statusPayload.data.version !== 'unknown', 'CLI serve daemon should expose a resolved package version');
 
     signals.emit('SIGINT');
     const exitCode = await runPromise;
