@@ -269,14 +269,14 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MODE` | `both`                  | `both`, `http`, `stdio` | 服务器模式：同时支持HTTP+STDIO、仅HTTP或仅STDIO    |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口                                |
 | `ALLOWED_SEARCH_ENGINES` | 空（全部可用） | 逗号分隔的引擎名称 | 限制可使用的搜索引擎，如默认搜索引擎不在范围，则默认第一个为默认搜索引擎 |
-| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | 搜索策略，当前仅对 Bing 生效：强制 HTTP 请求模式（`request`）、强制 Playwright 模式（`playwright`）、或允许 Agent 选择模式（`auto`，默认）。强制模式不向 Agent 暴露 `searchMode` 参数。`auto` 模式下服务端会检查 Playwright 是否真实可用（客户端模块可真实加载，本地启动时还需浏览器二进制真实存在：显式 `PLAYWRIGHT_EXECUTABLE_PATH`、捆绑浏览器或系统 Chrome/Edge）；可用时搜索工具暴露 `searchMode` 参数，并引导 Agent 保持默认 `auto`、仅在 request 结果失败或异常时再重试 `playwright`，不可用时按强制请求模式处理。强制 `playwright` 但不可用时，搜索返回 `browser_unavailable` 错误 |
+| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | 搜索策略，当前对 Bing 和 Startpage 生效：强制 HTTP 请求模式（`request`）、强制 Playwright 模式（`playwright`）、或允许 Agent 选择模式（`auto`，默认）。强制模式不向 Agent 暴露 `searchMode` 参数。`auto` 模式下服务端会检查 Playwright 是否真实可用（客户端模块可真实加载，本地启动时还需浏览器二进制真实存在：显式 `PLAYWRIGHT_EXECUTABLE_PATH`、捆绑浏览器或系统 Chrome/Edge）；可用时搜索工具暴露 `searchMode` 参数，并引导 Agent 保持默认 `auto`、仅在 request 结果失败、为空或明显被拦截时再重试 `playwright`，不可用时按强制请求模式处理。强制 `playwright` 但不可用时，搜索返回 `browser_unavailable` 错误 |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | 启用浏览器模式时优先解析哪种 Playwright 客户端包 |
 | `PLAYWRIGHT_MODULE_PATH` | 空 | 绝对路径或相对项目根目录路径 | 复用当前项目外部已经存在的 Playwright 客户端包 |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | 空 | 任意有效浏览器二进制路径 | 使用现有 Chromium/Chrome 可执行文件启动浏览器 |
 | `PLAYWRIGHT_WS_ENDPOINT` | 空 | 有效的 Playwright `ws://` / `wss://` 地址 | 连接现有远端 Playwright 浏览器服务 |
 | `PLAYWRIGHT_CDP_ENDPOINT` | 空 | 有效的 Chromium CDP 地址 | 通过 CDP 连接现有 Chromium 实例 |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Playwright Chromium 是否以无头模式运行 |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 正整数 | Playwright 页面导航和 Bing 结果等待超时时间 |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | 正整数 | Playwright 页面导航以及 Bing/Startpage 结果等待超时时间 |
 | `OPEN_WEBSEARCH_PROFILE_DIR` | `<tmpdir>/open-websearch-browser-profiles` | 任意可写目录 | 本地浏览器持久化 profile 的根目录（见下方“浏览器状态说明”） |
 | `MCP_TOOL_SEARCH_NAME` | `search` | 有效的MCP工具名称 | 搜索工具的自定义名称；设为 `<disabled>`（bash/zsh 中需引号 `'<disabled>'`，Windows cmd 中需双引号 `"<disabled>"`）可禁用该工具。无效名称会回退到默认值并给出警告
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | 有效的MCP工具名称 | Linux.do文章获取工具的自定义名称；设为 `<disabled>`（bash/zsh 中需引号 `'<disabled>'`，Windows cmd 中需双引号 `"<disabled>"`）可禁用该工具。无效名称会回退到默认值并给出警告
@@ -310,7 +310,7 @@ DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http:
 ```
 > **注意：** `<disabled>` 包含 shell 特殊字符。bash/zsh 中需用单引号 `'<disabled>'`，Windows cmd 中需用双引号 `"<disabled>"`。
 
-浏览器增强 Bing 兜底现在是显式启用，不随发行包默认安装。你可以按下面几种方式手动启用：
+浏览器增强的 Bing 和 Startpage 搜索现在是显式启用，不随发行包默认安装。你可以按下面几种方式手动启用：
 
 1. 本地完整安装 Playwright：
 ```bash
@@ -362,9 +362,9 @@ npx open-websearch@latest
 ```
 
 模式说明：
-- `request`：只使用请求方式抓 Bing；搜索工具不暴露 `searchMode` 参数、不生成模式提示语
-- `playwright`：强制使用 Playwright；搜索工具不暴露 `searchMode` 参数、不生成模式提示语。启动时检查 Playwright 可用性并在配置无效时告警；搜索时返回清晰的 `browser_unavailable` 错误
-- `auto`：检查 Playwright 是否真实可用（客户端模块可真实加载；本地启动还需浏览器二进制真实存在）。可用时搜索工具暴露 `searchMode` 参数（request / auto / playwright），并引导 Agent 保持默认 `auto`，仅在 request 结果失败、为空或明显被拦截时再用 `playwright` 重试；不可用时按请求模式处理
+- `request`：Bing 和 Startpage 只使用请求方式抓取，其他引擎保持原有行为；搜索工具不暴露 `searchMode` 参数、不生成模式提示语
+- `playwright`：Bing 和 Startpage 强制使用 Playwright，其他引擎保持原有行为；搜索工具不暴露 `searchMode` 参数、不生成模式提示语。启动时检查 Playwright 可用性并在配置无效时告警；受影响的搜索返回清晰的 `browser_unavailable` 错误
+- `auto`：检查 Playwright 是否真实可用（客户端模块可真实加载；本地启动还需浏览器二进制真实存在）。可用时搜索工具暴露 `searchMode` 参数（request / auto / playwright），并引导 Agent 保持默认 `auto`，仅在 Bing 或 Startpage 的 request 结果失败、为空或明显被拦截时再用 `playwright` 重试；不可用时按请求模式处理
 
 补充说明：
 - `PLAYWRIGHT_MODULE_PATH` 优先级高于 `PLAYWRIGHT_PACKAGE`
@@ -576,7 +576,7 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
   "query": string,        // 搜索查询词
   "limit": number,        // 可选：返回结果数量（默认：10）
   "engines": string[],    // 可选：使用的引擎 (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou,hackernews) 默认使用当前运行配置
-  "searchMode": string    // 可选：request、auto 或 playwright（当前仅对 Bing 生效）
+  "searchMode": string    // 可选：request、auto 或 playwright（当前对 Bing 和 Startpage 生效）
 }
 ```
 

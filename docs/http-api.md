@@ -151,7 +151,7 @@ Notes:
 - `limit` is optional, integer `1-50`, default `10`
 - `engines` is optional
 - `searchMode` is optional: `request`, `auto`, or `playwright`
-- `searchMode` currently only affects Bing; other engines ignore it
+- `searchMode` currently affects Bing and Startpage; other engines ignore it
 - if `engines` is omitted, the daemon uses its configured default engine
 - when the effective mode is `playwright` but the Playwright configuration is invalid, the daemon returns `status: "error"` with `error.code: "browser_unavailable"`
 

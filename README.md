@@ -180,14 +180,14 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `MODE` | `both`                  | `both`, `http`, `stdio` | Server mode: both HTTP+STDIO, HTTP only, or STDIO only |
 | `PORT` | `3000`                  | 1-65535 | Server port |
 | `ALLOWED_SEARCH_ENGINES` | empty (all available) | Comma-separated engine names | Limit which search engines can be used; if the default engine is not in this list, the first allowed engine becomes the default |
-| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently only affects Bing: force HTTP request mode (`request`), force Playwright mode (`playwright`), or let the agent choose (`auto`, default). Forced modes never expose a `searchMode` override to the agent. In `auto` mode the server checks whether Playwright is really usable (the client module can actually be loaded, and for local launches a real browser binary exists: explicit `PLAYWRIGHT_EXECUTABLE_PATH`, bundled browser, or system Chrome/Edge); if available, the search tool exposes a `searchMode` parameter and directs the agent to stay on the default `auto` and only retry with `playwright` when request results fail, return empty, or look blocked; otherwise it behaves as forced request mode. If `playwright` is forced but not usable, searches fail with a `browser_unavailable` error |
+| `SEARCH_MODE` | `auto` | `request`, `auto`, `playwright` | Search strategy. Currently affects Bing and Startpage: force HTTP request mode (`request`), force Playwright mode (`playwright`), or let the agent choose (`auto`, default). Forced modes never expose a `searchMode` override to the agent. In `auto` mode the server checks whether Playwright is really usable (the client module can actually be loaded, and for local launches a real browser binary exists: explicit `PLAYWRIGHT_EXECUTABLE_PATH`, bundled browser, or system Chrome/Edge); if available, the search tool exposes a `searchMode` parameter and directs the agent to stay on the default `auto` and only retry with `playwright` when request results fail, return empty, or look blocked; otherwise it behaves as forced request mode. If `playwright` is forced but not usable, searches fail with a `browser_unavailable` error |
 | `PLAYWRIGHT_PACKAGE` | `auto` | `auto`, `playwright`, `playwright-core` | Which Playwright client package to resolve when browser mode is enabled |
 | `PLAYWRIGHT_MODULE_PATH` | empty | Absolute path or project-relative path | Reuse an existing Playwright client package outside this project |
 | `PLAYWRIGHT_EXECUTABLE_PATH` | empty | Any valid browser binary path | Launch an existing Chromium/Chrome executable without installing bundled browsers |
 | `PLAYWRIGHT_WS_ENDPOINT` | empty | Valid Playwright `ws://` / `wss://` endpoint | Connect to an existing remote Playwright browser server |
 | `PLAYWRIGHT_CDP_ENDPOINT` | empty | Valid Chromium CDP endpoint | Connect to an existing Chromium instance over CDP |
 | `PLAYWRIGHT_HEADLESS` | `true` | `true`, `false` | Whether Playwright Chromium runs in headless mode |
-| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing result waits |
+| `PLAYWRIGHT_NAVIGATION_TIMEOUT_MS` | `20000` | Positive integer | Timeout for Playwright navigation and Bing/Startpage result waits |
 | `OPEN_WEBSEARCH_PROFILE_DIR` | `<tmpdir>/open-websearch-browser-profiles` | Any writable directory | Base directory for persistent local browser profiles (see browser state note below) |
 | `MCP_TOOL_SEARCH_NAME` | `search` | Valid MCP tool name | Custom name for the search tool; set to `<disabled>` (quote as `'<disabled>'` in bash/zsh, `"<disabled>"` in Windows cmd) to disable the tool. Invalid names fallback to default with a warning
 | `MCP_TOOL_FETCH_LINUXDO_NAME` | `fetchLinuxDoArticle` | Valid MCP tool name | Custom name for the Linux.do article fetch tool; set to `<disabled>` (quote as `'<disabled>'` in bash/zsh, `"<disabled>"` in Windows cmd) to disable the tool. Invalid names fallback to default with a warning
@@ -207,7 +207,7 @@ FETCH_WEB_INSECURE_TLS=true npx open-websearch@latest
 # Request first, then fallback to Playwright if available
 SEARCH_MODE=auto npx open-websearch@latest
 
-# Force request-only Bing search
+# Force request-only Bing and Startpage search
 SEARCH_MODE=request npx open-websearch@latest
 
 # Rename search tool to webSearch
@@ -221,7 +221,7 @@ DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true USE_PROXY=true PROXY_URL=http:
 ```
 > **Note:** The `<disabled>` sentinel contains shell-special characters. In bash/zsh, quote it as `'<disabled>'`; in Windows cmd, use double quotes `"<disabled>"`.
 
-Browser-enhanced Bing fallback is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
+Browser-enhanced search for Bing and Startpage is opt-in. The published package does not bundle Playwright anymore. Enable it manually with one of these setups:
 
 1. Full local Playwright install:
 ```bash
@@ -274,9 +274,9 @@ npx open-websearch@latest
 ```
 
 Mode behavior:
-- `request`: only uses request-based Bing scraping; the search tool exposes no `searchMode` parameter and no mode guidance
-- `playwright`: forces Playwright; the search tool exposes no `searchMode` parameter and no mode guidance. Playwright availability is checked at startup and an invalid configuration logs a warning; searches then fail with a clear `browser_unavailable` error
-- `auto`: checks whether Playwright is really usable (the client module actually loads; for local launches a real browser binary must exist). If available, the search tool exposes a `searchMode` parameter (request / auto / playwright) and directs the agent to stay on the default `auto`, retrying with `playwright` only when request results fail, return empty, or look blocked; otherwise the server behaves as request mode
+- `request`: uses request-based scraping for Bing and Startpage; other engines keep their normal behavior. The search tool exposes no `searchMode` parameter and no mode guidance
+- `playwright`: forces Playwright for Bing and Startpage; other engines keep their normal behavior. The search tool exposes no `searchMode` parameter and no mode guidance. Playwright availability is checked at startup and an invalid configuration logs a warning; affected searches then fail with a clear `browser_unavailable` error
+- `auto`: checks whether Playwright is really usable (the client module actually loads; for local launches a real browser binary must exist). If available, the search tool exposes a `searchMode` parameter (request / auto / playwright) and directs the agent to stay on the default `auto`, retrying Bing or Startpage with `playwright` only when request results fail, return empty, or look blocked; otherwise the server behaves as request mode
 
 Notes:
 - `PLAYWRIGHT_MODULE_PATH` takes precedence over `PLAYWRIGHT_PACKAGE`
@@ -485,7 +485,7 @@ For the local daemon HTTP API (`serve`, `status`, `GET /health`, `POST /search`,
   "query": string,        // Search query
   "limit": number,        // Optional: Number of results to return (default: 10)
   "engines": string[],    // Optional: Engines to use (bing,baidu,linuxdo,csdn,duckduckgo,exa,brave,juejin,startpage,sogou,hackernews) default runtime-configured engine
-  "searchMode": string    // Optional: request, auto, or playwright (currently only affects Bing)
+  "searchMode": string    // Optional: request, auto, or playwright (currently affects Bing and Startpage)
 }
 ```
 

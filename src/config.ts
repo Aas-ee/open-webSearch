@@ -12,7 +12,7 @@ export interface AppConfig {
     // List of allowed search engines (if empty, all engines are available)
     allowedSearchEngines: string[];
     // Search mode: request only, auto request then fallback, or force Playwright
-    // Currently only affects Bing.
+    // Currently affects Bing and Startpage.
     searchMode: 'request' | 'auto' | 'playwright';
     // Proxy configuration
     proxyUrl?: string;
@@ -162,7 +162,7 @@ if (!quietStartupLogs) {
     }
     const effectiveModeForLog = getEffectiveSearchMode(config);
     const effectiveModeSuffix = effectiveModeForLog !== config.searchMode ? `, effective: ${effectiveModeForLog.toUpperCase()}` : '';
-    console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()}${effectiveModeSuffix} (currently only affects Bing)`);
+    console.error(`🔍 Search mode: ${config.searchMode.toUpperCase()}${effectiveModeSuffix} (currently affects Bing and Startpage)`);
     if (config.searchMode === 'playwright') {
         const availability = checkPlaywrightModeConfiguration(config);
         if (!availability.available) {

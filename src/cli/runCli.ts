@@ -53,7 +53,7 @@ function formatCliHelp(): string {
         '',
         'One-shot action commands:',
         '  open-websearch search <query> [--limit N] [--engine NAME] [--engines a,b] [--search-mode MODE] [--daemon-url URL] [--spawn] [--json]',
-        '    Search the web. `--search-mode` is request|auto|playwright and currently only affects Bing.',
+        '    Search the web. `--search-mode` is request|auto|playwright and currently affects Bing and Startpage.',
         '  open-websearch fetch-web <url> [--max-chars N] [--render-mode MODE] [--readability] [--include-links] [--daemon-url URL] [--spawn] [--json]',
         '    Fetch readable page content. `--render-mode` is request|auto|browser; browser renders directly with Playwright. `--readability` enables Mozilla Readability extraction; `--include-links` preserves article links.',
         '  open-websearch fetch-github-readme <url> [--daemon-url URL] [--spawn] [--json]',
