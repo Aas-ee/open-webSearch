@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { AppConfig } from '../config.js';
 import { isBrowserUnavailableError } from '../utils/playwrightClient.js';
+import { packageVersion } from '../version.js';
 
 export type CliIo = {
     stdout: (text: string) => void;
@@ -1392,7 +1393,8 @@ export async function runCli(
         try {
             const daemon = await startLocalDaemon(runtime, {
                 host: parsed.host,
-                port: parsed.port
+                port: parsed.port,
+                version: packageVersion
             });
 
             io.stdout(`Local open-websearch daemon running at ${daemon.baseUrl}`);
