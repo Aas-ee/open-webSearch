@@ -6,14 +6,31 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag to rebuild (for example, v2.2.0)'
+        required: true
+        type: string
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Validate manual release tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release_tag must be an existing version tag such as v2.2.0" >&2
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       # 设置 Docker Buildx（支持多架构构建）
       - name: Set up Docker Buildx
@@ -58,9 +75,11 @@ jobs:
       # 准备镜像 tag（包括 latest 和版本 tag）
       - name: Prepare tags
         id: tags
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
         run: |
           REPO_LOWERCASE="ghcr.io/${{ steps.lowercase.outputs.repository_owner_lowercase }}/open-web-search"
-          VERSION_TAG="${GITHUB_REF##*/}"
+          VERSION_TAG="$RELEASE_TAG"
           TAGS="${REPO_LOWERCASE}:latest,${REPO_LOWERCASE}:${VERSION_TAG}"
 
           if [ "${{ steps.check-acr.outputs.acr_enabled }}" == "true" ] && [ -n "${{ secrets.ACR_IMAGE_NAME }}" ]; then
@@ -80,6 +99,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64  # 🎯 这里添加了多平台支持
           push: true
+          provenance: false
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
