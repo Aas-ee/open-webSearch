@@ -282,7 +282,7 @@ Notes:
 - `PLAYWRIGHT_MODULE_PATH` takes precedence over `PLAYWRIGHT_PACKAGE`
 - `PLAYWRIGHT_WS_ENDPOINT` takes precedence over `PLAYWRIGHT_CDP_ENDPOINT`
 - Remote endpoints ignore `PLAYWRIGHT_EXECUTABLE_PATH` and local proxy launch flags
-- When Playwright is available, blocked CSDN/Zhihu article fetches and generic web fetches can also retry with browser-acquired cookies
+- When Playwright is available, blocked CSDN/Zhihu article fetches and generic web fetches can retry with browser-acquired cookies, while blocked Linux.do article fetches reuse the same browser race mode as `fetchWebContent` (cookie-assisted HTTP request racing against page rendering)
 - Without Playwright, `fetchWebContent` stays on the request-only path. Public pages can still work, but pages that require browser cookies or browser-rendered HTML may fail.
 
 Browser state note (local shared profiles):
