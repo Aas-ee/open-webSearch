@@ -6,6 +6,7 @@ import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/ur
 import {
     detectFloatingOverlayPageScript,
     fetchPageHtmlWithBrowser,
+    followVideoHelpHumanCheck,
     installNavigationGuard,
     looksLikeBotChallengePage,
     readCookiesFromPage,
@@ -446,6 +447,7 @@ async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFe
                     throw new Error('browser race arm cancelled');
                 }
                 await resolveCloudflareCheckbox(page, () => raceCancelled);
+                await followVideoHelpHumanCheck(page);
                 const html = typeof page.content === 'function' ? await page.content() : '';
                 const finalUrl = typeof page.url === 'function' ? page.url() : url;
                 const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';

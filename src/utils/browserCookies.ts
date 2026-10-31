@@ -58,6 +58,43 @@ export function looksLikeBotChallengePage(html: string): boolean {
     return BOT_KEYWORDS.some((keyword) => normalized.includes(keyword));
 }
 
+// VideoHelp 的人机校验没有交互式验证码，页面脚本延迟后才会出现官方继续链接。只在该站点与该校验文案同时匹配时点击，并沿用导航守卫与最终地址校验，避免把普通页面链接当作继续按钮。
+export async function followVideoHelpHumanCheck(page: any): Promise<void> {
+    let currentUrl = typeof page.url === 'function' ? String(page.url()) : '';
+    try {
+        if (!['forum.videohelp.com', 'www.videohelp.com'].includes(new URL(currentUrl).hostname.toLowerCase())) {
+            return;
+        }
+    } catch {
+        return;
+    }
+
+    const html = typeof page.content === 'function' ? String(await page.content().catch(() => '')) : '';
+    if (!/human check!?\s*are you a human/i.test(html)) {
+        return;
+    }
+
+    const continueLink = page.locator('a[href]').filter({ hasText: /click here to continue browse our site/i }).first();
+    await continueLink.waitFor({ state: 'visible', timeout: Math.max(config.playwrightNavigationTimeoutMs, 5000) });
+    const href = String(await continueLink.getAttribute('href') || '');
+    const target = new URL(href, currentUrl);
+    if (target.hostname.toLowerCase() !== 'www.videohelp.com' || target.pathname !== '/unb') {
+        throw new Error('VideoHelp 人机校验继续链接不符合预期，已停止自动导航');
+    }
+    await assertPublicHttpUrlResolved(target, 'VideoHelp 人机校验继续链接');
+
+    await continueLink.click({ timeout: Math.max(config.playwrightNavigationTimeoutMs, 5000) });
+    await page.waitForLoadState('domcontentloaded', {
+        timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
+    }).catch(() => undefined);
+    currentUrl = typeof page.url === 'function' ? String(page.url()) : target.toString();
+    if (/\/unb(?:[/?#]|$)/i.test(currentUrl)) {
+        await page.waitForURL((url: URL) => !/\/unb(?:[/?#]|$)/i.test(url.toString()), {
+            timeout: Math.max(config.playwrightNavigationTimeoutMs, 15000)
+        }).catch(() => undefined);
+    }
+}
+
 // 页面侧脚本：检测视口中心的顶层悬浮浮层文本，用于捕获非语义化 <dialog> 的模态框，例如放在 Shadow DOM 内的 Salesforce SLDS 模态。
 // 注意：本函数作为 page.evaluate 的参数传入，被序列化后在页面上下文执行，因此函数体必须自包含，不得引用外部模块变量。
 export function detectFloatingOverlayPageScript(): string[] | undefined {
@@ -376,6 +413,8 @@ export async function fetchPageHtmlWithBrowser(urlInput: string): Promise<{ html
                     timeout: Math.min(Math.max(config.playwrightNavigationTimeoutMs, 5000), 15000)
                 }).catch(() => undefined);
             }
+
+            await followVideoHelpHumanCheck(page);
 
             if (typeof page.waitForTimeout === 'function') {
                 await page.waitForTimeout(COOKIE_WARMUP_DELAY_MS).catch(() => undefined);
