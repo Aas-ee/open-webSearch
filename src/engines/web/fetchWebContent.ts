@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { JSDOM } from 'jsdom';
-import { config } from '../../config.js';
+import { config, getAcceptLanguage } from '../../config.js';
 import { buildAxiosRequestOptions, requestWithSafeRedirects } from '../../utils/httpRequest.js';
 import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/urlSafety.js';
 import {
@@ -228,7 +228,7 @@ function buildRequestOptions(cookieHeader?: string): any {
     const headers: Record<string, string> = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
         'Accept': 'text/markdown,text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        'Accept-Language': getAcceptLanguage()
     };
     const requestOptions = buildAxiosRequestOptions({
         allowInsecureTls: config.fetchWebAllowInsecureTls,

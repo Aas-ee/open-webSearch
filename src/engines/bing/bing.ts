@@ -1,14 +1,14 @@
 import axios from 'axios';
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import * as cheerio from 'cheerio';
-import { AppConfig, config, getEffectiveSearchMode, checkPlaywrightModeConfiguration } from '../../config.js';
+import { AppConfig, config, getAcceptLanguage, getEffectiveSearchMode, checkPlaywrightModeConfiguration } from '../../config.js';
 import { SearchResult } from '../../types.js';
 import { parseBingSearchResults } from './parser.js';
 import { acquirePooledPlaywrightPage, getPlaywrightModuleSource, loadPlaywrightClient, openPlaywrightBrowser, retryOnBrowserCrash } from '../../utils/playwrightClient.js';
 import { buildAxiosRequestOptions as buildSharedAxiosRequestOptions } from '../../utils/httpRequest.js';
 
 const BING_BASE_URL = 'https://cn.bing.com/search';
-const BING_HOME_URL = 'https://www.bing.com/?mkt=zh-CN';
+const BING_HOME_URL = `https://www.bing.com/?mkt=${config.locale}`;
 const BING_REGIONAL_HOSTS = new Set(['cn.bing.com', 'www.bing.com']);
 const BING_MAX_REGIONAL_REDIRECTS = 1;
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -35,7 +35,7 @@ const SEARCH_SUBMIT_SELECTORS = [
 const FALLBACK_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Accept-Language': getAcceptLanguage(),
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
     'Upgrade-Insecure-Requests': '1'
@@ -54,7 +54,7 @@ const BOT_DETECTION_KEYWORDS = [
 ];
 const BROWSER_CONTEXT_OPTIONS = {
     userAgent: BROWSER_USER_AGENT,
-    locale: 'zh-CN',
+    locale: config.locale,
     viewport: { width: 1920, height: 1080 },
     deviceScaleFactor: 1,
     colorScheme: 'light'
@@ -84,7 +84,7 @@ export function shouldSuggestRemovingSiteOperator(query: string, error: unknown)
 function buildBingSearchUrl(query: string, pageNumber: number): string {
     const url = new URL(BING_BASE_URL);
     url.searchParams.set('q', query);
-    url.searchParams.set('setlang', 'zh-CN');
+    url.searchParams.set('setlang', config.locale);
     url.searchParams.set('ensearch', '0');
     url.searchParams.set('first', String(1 + pageNumber * 10));
     return url.toString();
@@ -179,7 +179,8 @@ let playwrightAvailabilityPromise: Promise<boolean> | null = null;
 let hasVerifiedPlaywrightAvailability = false;
 
 async function setupAntiDetection(page: any): Promise<void> {
-    await page.addInitScript(() => {
+    const languages = [...new Set([config.locale, config.locale.split('-')[0], 'en-US', 'en'])];
+    await page.addInitScript((languages: string[]) => {
         Object.defineProperty(navigator, 'webdriver', {
             get: () => false
         });
@@ -192,7 +193,7 @@ async function setupAntiDetection(page: any): Promise<void> {
             get: () => 'MacIntel'
         });
         Object.defineProperty(navigator, 'languages', {
-            get: () => ['zh-CN', 'zh', 'en-US', 'en']
+            get: () => languages
         });
         Object.defineProperty(navigator, 'hardwareConcurrency', {
             get: () => 8
@@ -336,7 +337,7 @@ async function setupAntiDetection(page: any): Promise<void> {
         Function.prototype.toString = function () {
             return originalToString.call(this).includes('[native code]') ? originalToString.call(this) : 'function () { [native code] }';
         };
-    });
+    }, languages);
 }
 
 async function preparePlaywrightPage(page: any): Promise<void> {
@@ -345,7 +346,7 @@ async function preparePlaywrightPage(page: any): Promise<void> {
         await page.setViewportSize(BROWSER_CONTEXT_OPTIONS.viewport).catch(() => undefined);
     }
     await page.setExtraHTTPHeaders({
-        'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+        'Accept-Language': getAcceptLanguage()
     });
 }
 

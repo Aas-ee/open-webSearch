@@ -19,6 +19,8 @@ export interface AppConfig {
     useProxy: boolean;
     fakeIpCidrs: string[];
     fetchWebAllowInsecureTls: boolean;
+    // Locale for Accept-Language and Bing market (Chinese-site engines always use zh-CN)
+    locale: string;
     // Playwright configuration
     playwrightPackage: 'auto' | 'playwright' | 'playwright-core';
     playwrightModulePath?: string;
@@ -58,6 +60,7 @@ export const config: AppConfig = {
         process.env.FAKE_IP_CIDRS.split(',').map(cidr => cidr.trim()).filter(Boolean) :
         [],
     fetchWebAllowInsecureTls: process.env.FETCH_WEB_INSECURE_TLS === 'true',
+    locale: readOptionalEnv('OPEN_WEBSEARCH_LOCALE') || 'en-US',
     playwrightPackage: (process.env.PLAYWRIGHT_PACKAGE as AppConfig['playwrightPackage']) || 'auto',
     playwrightModulePath: readOptionalEnv('PLAYWRIGHT_MODULE_PATH'),
     playwrightExecutablePath: readOptionalEnv('PLAYWRIGHT_EXECUTABLE_PATH'),
@@ -72,6 +75,15 @@ export const config: AppConfig = {
     // Modes: 'both' (default), 'http', 'stdio'
     enableHttpServer: process.env.MODE ? ['both', 'http'].includes(process.env.MODE) : true
 };
+
+/** Accept-Language for the configured locale, e.g. en-US -> "en-US,en;q=0.9". */
+export function getAcceptLanguage(locale: string = config.locale): string {
+    const language = locale.split('-')[0];
+    const parts = [locale];
+    if (language !== locale) parts.push(`${language};q=0.9`);
+    if (language !== 'en') parts.push('en;q=0.8');
+    return parts.join(',');
+}
 
 // Valid search engines list
 const validSearchEngines = ['bing', 'duckduckgo', 'exa', 'brave', 'baidu', 'csdn', 'linuxdo', 'juejin', 'startpage', 'sogou', 'hackernews'];
@@ -88,6 +100,11 @@ if (!validSearchEngines.includes(config.defaultSearchEngine)) {
 if (!validSearchModes.includes(config.searchMode)) {
     console.warn(`Invalid SEARCH_MODE: "${config.searchMode}", falling back to "auto"`);
     config.searchMode = 'auto';
+}
+
+if (!/^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$/.test(config.locale)) {
+    console.warn(`Invalid OPEN_WEBSEARCH_LOCALE: "${config.locale}", falling back to "en-US"`);
+    config.locale = 'en-US';
 }
 
 if (!validPlaywrightPackages.includes(config.playwrightPackage)) {

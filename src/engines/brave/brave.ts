@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SearchResult } from '../../types.js';
 import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
+import {getAcceptLanguage} from "../../config.js";
 
 export async function searchBrave(query: string, limit: number): Promise<SearchResult[]> {
     let allResults: SearchResult[] = [];
@@ -22,7 +23,7 @@ export async function searchBrave(query: string, limit: number): Promise<SearchR
             "sec-fetch-user": "?1",
             "sec-fetch-dest": "document",
             "referer": "https://duckduckgo.com/",
-            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
+            "accept-language": getAcceptLanguage()
         }
     });
 

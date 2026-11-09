@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import {SearchResult} from "../../types.js";
 import {buildAxiosRequestOptions} from "../../utils/httpRequest.js";
+import {getAcceptLanguage} from "../../config.js";
 
 export function isTrustedDuckDuckGoPreloadUrl(value: string): boolean {
   try {
@@ -63,7 +64,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
           "sec-fetch-user": "?1",
           "sec-fetch-dest": "document",
           "referer": "https://duckduckgo.com/",
-          "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
+          "accept-language": getAcceptLanguage()
         }
       });
 
@@ -134,7 +135,7 @@ export async function searchDuckDuckGo(query: string, limit: number): Promise<Se
             "sec-fetch-mode": "no-cors",
             "sec-fetch-dest": "script",
             "referer": "https://duckduckgo.com/",
-            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
+            "accept-language": getAcceptLanguage()
           }
         });
 

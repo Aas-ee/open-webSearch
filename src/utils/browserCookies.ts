@@ -8,7 +8,7 @@ const COOKIE_WARMUP_DELAY_MS = 1200;
 export const MAX_BROWSER_HTML_BYTES = 2 * 1024 * 1024;
 const COOKIE_CONTEXT_OPTIONS = {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-    locale: 'zh-CN',
+    locale: config.locale,
     viewport: { width: 1440, height: 960 }
 };
 const BOT_KEYWORDS = [

@@ -173,6 +173,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | Default search engine |
+| `OPEN_WEBSEARCH_LOCALE` | `en-US` | Any BCP 47 tag, e.g. `zh-CN` | Locale for the `Accept-Language` header, browser locale and Bing market used by general engines and `fetchWebContent`. Chinese-site engines (Baidu, Sogou, Zhihu, Juejin, Linux.do) always use `zh-CN` |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |
@@ -443,6 +444,7 @@ Environment variable configuration:
 | `ENABLE_CORS` | `false`                 | `true`, `false` | Enable CORS |
 | `CORS_ORIGIN` | `*`                     | Any valid origin | CORS origin configuration |
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | Default search engine |
+| `OPEN_WEBSEARCH_LOCALE` | `en-US` | Any BCP 47 tag, e.g. `zh-CN` | Locale for the `Accept-Language` header, browser locale and Bing market used by general engines and `fetchWebContent`. Chinese-site engines (Baidu, Sogou, Zhihu, Juejin, Linux.do) always use `zh-CN` |
 | `USE_PROXY` | `false`                 | `true`, `false` | Enable HTTP proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Any valid URL | Proxy server URL |
 | `FAKE_IP_CIDRS` | empty | Comma-separated CIDR list | Treat DNS answers in these CIDRs as synthetic fake-IP results and do not block them as private-network DNS answers. Literal private/local targets and other private-network DNS answers remain blocked |

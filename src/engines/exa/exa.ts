@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from "../../utils/httpRequest.js";
+import { getAcceptLanguage } from "../../config.js";
 
 interface ExaResult {
     id: string;
@@ -26,7 +27,7 @@ export async function searchExa(query: string, limit: number): Promise<SearchRes
             "sec-fetch-site": "same-origin",
             "sec-fetch-mode": "cors",
             "sec-fetch-dest": "empty",
-            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"
+            "accept-language": getAcceptLanguage()
         }
     });
 

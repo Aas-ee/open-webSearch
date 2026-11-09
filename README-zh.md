@@ -263,6 +263,7 @@ npx cross-env DEFAULT_SEARCH_ENGINE=duckduckgo ENABLE_CORS=true open-websearch
 | `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS                               |
 | `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置                             |
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | 默认搜索引擎                               |
+| `OPEN_WEBSEARCH_LOCALE` | `en-US` | 任意 BCP 47 标签，如 `zh-CN` | 通用搜索引擎和 `fetchWebContent` 使用的 `Accept-Language` 请求头、浏览器语言和 Bing 市场。中文站点引擎（百度、搜狗、知乎、掘金、Linux.do）始终使用 `zh-CN` |
 | `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理                             |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL                             |
 | `FETCH_WEB_INSECURE_TLS` | `false` | `true`, `false` | 仅对 `fetchWebContent` 的请求路径关闭 TLS 校验，不影响 Playwright 浏览器导航。只建议在证书链异常时临时使用 |
@@ -535,6 +536,7 @@ docker run -d --name web-search -p 3000:3000 -e ENABLE_CORS=true -e CORS_ORIGIN=
 | `ENABLE_CORS` | `false`                 | `true`, `false` | 启用CORS |
 | `CORS_ORIGIN` | `*`                     | 任何有效来源 | CORS来源配置 |
 | `DEFAULT_SEARCH_ENGINE` | `bing`                  | `bing`, `duckduckgo`, `exa`, `brave`, `baidu`, `csdn`, `linuxdo`, `juejin`, `startpage`, `sogou`, `hackernews` | 默认搜索引擎 |
+| `OPEN_WEBSEARCH_LOCALE` | `en-US` | 任意 BCP 47 标签，如 `zh-CN` | 通用搜索引擎和 `fetchWebContent` 使用的 `Accept-Language` 请求头、浏览器语言和 Bing 市场。中文站点引擎（百度、搜狗、知乎、掘金、Linux.do）始终使用 `zh-CN` |
 | `USE_PROXY` | `false`                 | `true`, `false` | 启用HTTP代理 |
 | `PROXY_URL` | `http://127.0.0.1:7890` | 任何有效URL | 代理服务器URL |
 | `PORT` | `3000`                  | 1-65535 | 服务器端口 |
