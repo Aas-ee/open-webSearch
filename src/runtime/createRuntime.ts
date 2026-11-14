@@ -10,6 +10,7 @@ import { searchJuejin } from '../engines/juejin/index.js';
 import { searchStartpage } from '../engines/startpage/index.js';
 import { searchSogou } from '../engines/sogou/index.js';
 import { searchHackerNews } from '../engines/hackernews/index.js';
+import { searchKeenable } from '../engines/keenable/index.js';
 import { fetchLinuxDoArticle } from '../engines/linuxdo/fetchLinuxDoArticle.js';
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
@@ -52,7 +53,8 @@ function createDefaultSearchExecutors(): SearchEngineExecutorMap {
         juejin: searchJuejin,
         startpage: searchStartpage,
         sogou: searchSogou,
-        hackernews: searchHackerNews
+        hackernews: searchHackerNews,
+        keenable: searchKeenable
     };
 }
 

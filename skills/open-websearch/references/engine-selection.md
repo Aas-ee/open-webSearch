@@ -16,6 +16,7 @@ Engine choice is heuristic, not mandatory. If a preferred engine is unavailable,
 ## Community discussions
 
 - Use `hackernews` for Hacker News stories and technology-community discussions. Results link to the submitted page when available and otherwise to the Hacker News discussion.
+- Use `keenable` for general web search through Keenable's keyless public API. It calls an API instead of scraping a results page, so it is not affected by anti-bot pages; the public tier is rate limited per IP.
 
 ## Source-specific retrieval
 
