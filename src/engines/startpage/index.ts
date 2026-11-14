@@ -1,1 +1,10 @@
-export { searchStartpage } from './startpage.js';
+export {
+    StartpageEngine,
+    searchStartpage,
+    solveAnubisChallenge,
+    extractAnubisChallenge,
+    isHardCaptchaPage,
+    parseStartpageSearchResults,
+    __setStartpageEngineForTests,
+    type SearchResult
+} from './startpage.js';
