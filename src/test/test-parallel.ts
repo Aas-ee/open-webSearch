@@ -42,6 +42,7 @@ async function runTests(): Promise<void> {
     }> = [];
     let sessionCount = 0;
     let redirected = false;
+    let longRetryFixture = false;
     const resumed = new Map<string, number>();
     const results = [
         { url: 'file:///etc/hosts' },
@@ -75,9 +76,13 @@ async function runTests(): Promise<void> {
         const json = (result: object, id = body.id) => response.writeHead(200, { 'Content-Type': 'application/json' })
             .end(JSON.stringify({ jsonrpc: '2.0', id, result }));
         const success = { content: [], structuredContent: { results } };
+        const longRetry = (id: string) => response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+            .end(`retry: 30000\nid: ${id}\ndata:\n\n`);
         if (request.method === 'GET') {
             const id = typeof resume === 'string' ? resumed.get(resume) : undefined;
-            if (id !== undefined) {
+            if (longRetryFixture && !resume) {
+                longRetry('idle-stream');
+            } else if (id !== undefined) {
                 // The resumed SSE result has multiline data, just like a split JSON event.
                 response.writeHead(200, { 'Content-Type': 'text/event-stream' })
                     .end(`event: message\ndata: {"jsonrpc":"2.0","id":${id},\ndata: "result":${JSON.stringify(success)}}\n\n`);
@@ -111,6 +116,10 @@ async function runTests(): Promise<void> {
                         .end(`retry: 1\nid: ${eventId}\ndata:\n\n`);
                     break;
                 }
+                case 'long SSE retry':
+                    // Give the optional idle GET time to schedule its own reconnect, if opened.
+                    setTimeout(() => longRetry('request-stream'), 250);
+                    break;
                 case 'rate limited':
                     response.writeHead(429).end('fixture error body');
                     break;
@@ -120,6 +129,9 @@ async function runTests(): Promise<void> {
                 case 'rpc error':
                     response.writeHead(200, { 'Content-Type': 'application/json' })
                         .end(JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { code: -32000, message: 'fixture error body' } }));
+                    break;
+                case 'malformed JSON':
+                    response.writeHead(200, { 'Content-Type': 'application/json' }).end('fixture error body');
                     break;
                 case 'tool error':
                     json({ ...success, isError: true });
@@ -153,9 +165,9 @@ async function runTests(): Promise<void> {
         OPEN_WEBSEARCH_DAEMON_PORT: '1',
         OPEN_WEBSEARCH_QUIET_STARTUP: 'true'
     };
-    const cli = async (engineArgs: string[] = [], overrides: Record<string, string> = {}) => {
+    const cli = async (engineArgs: string[] = [], overrides: Record<string, string> = {}, query = 'sqlite') => {
         const { stdout } = await promisify(execFile)(process.execPath, [
-            ...args, 'search', 'sqlite', '--json', '--limit', '1', ...engineArgs
+            ...args, 'search', query, '--json', '--limit', '1', ...engineArgs
         ], { env: { ...env, ...overrides }, timeout: 20_000 });
         return JSON.parse(stdout).data as SearchExecutionResult;
     };
@@ -187,21 +199,28 @@ async function runTests(): Promise<void> {
         assert.equal((await search('empty')).partialFailures.length, 0);
         for (const [query, error] of [
             ['rate limited', 'HTTP 429'], ['redirect', 'request failed'], ['rpc error', 'request failed'],
-            ['tool error', 'tool error'], ['invalid', 'missing a results array'], ['oversized', 'request failed']
+            ['malformed JSON', 'request failed'], ['tool error', 'tool error'], ['invalid', 'missing a results array'], ['oversized', 'request failed']
         ]) {
             const result = await search(query);
             assert.equal(result.totalResults, 0);
             assert.equal(result.partialFailures[0]?.engine, 'parallel');
             assert.equal(result.partialFailures[0]?.code, 'engine_error');
-            assert(result.partialFailures[0]?.message.includes(error));
+            assert(result.partialFailures[0]?.message.includes(error), result.partialFailures[0]?.message);
             assert(!result.partialFailures[0]?.message.includes('fixture error body'));
         }
         assert(!redirected);
+        longRetryFixture = true;
+        const timeout = await cli(['--engine', 'parallel'], {}, 'long SSE retry');
+        assert.deepEqual(timeout.partialFailures, [{
+            engine: 'parallel', code: 'engine_error', message: 'Parallel search timed out'
+        }]);
+
         const calls = captured.filter(request => request.tool === 'web_search');
-        assert.equal(calls.length, 10);
+        assert.equal(calls.length, 12);
         assert.equal(new Set(calls.map(request => request.session)).size, calls.length);
         assert(captured.some(request => request.method === 'GET' && request.resume));
-        assert.equal(captured.filter(request => request.method === 'DELETE').length, calls.length);
+        assert(captured.every(request => request.method !== 'GET' || request.resume));
+        assert.equal(captured.filter(request => request.method === 'DELETE').length, calls.length - 1);
         for (const request of captured) {
             assert.equal(request.agent, userAgent);
             assert.equal(request.authenticated, false);
