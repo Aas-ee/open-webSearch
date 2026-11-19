@@ -6,6 +6,7 @@ import { assertPublicHttpUrl, assertPublicHttpUrlResolved } from '../../utils/ur
 import {
     detectFloatingOverlayPageScript,
     fetchPageHtmlWithBrowser,
+    followVideoHelpHumanCheck,
     installNavigationGuard,
     looksLikeBotChallengePage,
     readCookiesFromPage,
@@ -334,6 +335,52 @@ function isUsableHttpRaceResult(raw: string): boolean {
     return raw.length > MIN_RACE_HTTP_HTML_CHARS && !looksLikeBotChallengePage(raw);
 }
 
+function isCloudflareChallengePage(title: string, html: string): boolean {
+    return /just a moment|请稍候|verify you are human|请验证您是真人|正在进行安全验证/i.test(title) ||
+        /challenges\.cloudflare\.com|cf-chl-widget|cf-turnstile-response/i.test(html);
+}
+
+class CloudflareVerificationRequiredError extends Error {
+    constructor(url: string, detail: string) {
+        super(`Cloudflare 人机验证未能自动完成：${detail}。请建议用户在已打开的浏览器中手动完成验证，然后重试抓取。目标页面：${url}`);
+        this.name = 'CloudflareVerificationRequiredError';
+    }
+}
+
+async function resolveCloudflareCheckbox(page: any, isCancelled: () => boolean): Promise<void> {
+    const deadline = Date.now() + Math.max(config.playwrightNavigationTimeoutMs, 30000);
+    let foundChallenge = false;
+
+    while (!isCancelled() && Date.now() < deadline) {
+        const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';
+        const html = typeof page.content === 'function' ? await page.content().catch(() => '') : '';
+        if (!isCloudflareChallengePage(title, html)) {
+            return;
+        }
+        foundChallenge = true;
+
+        for (const frame of page.frames()) {
+            try {
+                const checkbox = frame.locator('input[type="checkbox"], [role="checkbox"]').first();
+                if (await checkbox.count() > 0 && await checkbox.isVisible({ timeout: 500 })) {
+                    await checkbox.click({ timeout: 3000 });
+                    break;
+                }
+            } catch {
+                // 挑战刷新期间 frame 可能短暂失效，下一轮重新读取。
+            }
+        }
+        await page.waitForTimeout(500);
+    }
+
+    if (isCancelled()) {
+        throw new Error('browser race arm cancelled');
+    }
+    if (foundChallenge) {
+        throw new CloudflareVerificationRequiredError(page.url(), '等待复选框出现及验证通过时已超时');
+    }
+}
+
 type HttpRaceOutcome = { ok: true; contentType: string; raw: string; finalUrl: string } | { ok: false };
 type BrowserRaceOutcome = { ok: true; result: BrowserFetchResult } | { ok: false; error: unknown };
 
@@ -399,12 +446,14 @@ async function fetchWithCookiesRaceViaPlaywright(url: string): Promise<BrowserFe
                 if (raceCancelled) {
                     throw new Error('browser race arm cancelled');
                 }
+                await resolveCloudflareCheckbox(page, () => raceCancelled);
+                await followVideoHelpHumanCheck(page);
                 const html = typeof page.content === 'function' ? await page.content() : '';
-                if (raceCancelled) {
-                    throw new Error('browser race arm cancelled');
-                }
                 const finalUrl = typeof page.url === 'function' ? page.url() : url;
                 const title = typeof page.title === 'function' ? await page.title().catch(() => '') : '';
+                if (isCloudflareChallengePage(title, html)) {
+                    throw new CloudflareVerificationRequiredError(finalUrl, '浏览器仍停留在验证页面');
+                }
                 if (raceCancelled) {
                     throw new Error('browser race arm cancelled');
                 }
@@ -588,7 +637,8 @@ export async function fetchWebContent(
             response = await requestWithSafeRedirects('GET', parsedUrl.toString(), requestOptions, 'Request URL');
         } catch (error: any) {
             const status = error?.response?.status;
-            const blockedByStatus = [401, 403, 429].includes(status);
+            // 反爬状态码：401/403/429 是显式拦截，406 通常表示 UA/Accept 指纹被服务端拒绝（如 eLife）。
+            const blockedByStatus = [401, 403, 406, 429].includes(status);
             // 黑名单语义：request 模式不使用任何浏览器辅助；带明确 HTTP 响应且不属于反爬状态码的（404/500 等真实拒绝），以及安全/资源/DNS 致命错误，必须原样上抛；其余错误全部委托浏览器竞速层。
             if (renderMode === 'request' || (!blockedByStatus && (error?.response || isFatalRequestError(error)))) {
                 throw error;
@@ -662,8 +712,11 @@ export async function fetchWebContent(
                     extractedContent = newTexts.join('\n\n') + '\n\n' + extractedContent;
                 }
             }
-        } catch {
-            // 浏览器回退失败（Playwright 不可用、测试桩故意抛错等）时，保留 HTTP 请求的提取结果。支持"桩抛错后保留 request 模式"的测试用例。
+        } catch (error) {
+            if (error instanceof CloudflareVerificationRequiredError) {
+                throw error;
+            }
+            // 其他浏览器回退失败保留 HTTP 请求的提取结果。
         }
     }
 
