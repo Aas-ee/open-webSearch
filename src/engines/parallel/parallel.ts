@@ -2,7 +2,7 @@ import axios from 'axios';
 import { Readable } from 'node:stream';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { SearchResult } from '../../types.js';
 import { buildAxiosRequestOptions } from '../../utils/httpRequest.js';
@@ -68,12 +68,17 @@ function createParallelFetch(deadline: AbortSignal) {
     };
 }
 
+function normalizeResultText(text: string): string {
+    return text.replace(/\s+/g, ' ').replace(/\p{Cc}/gu, '').trim().slice(0, 500);
+}
+
 function mapResult(hit: unknown): SearchResult | undefined {
     if (!hit || typeof hit !== 'object') {
         return undefined;
     }
     const { url, title, excerpts } = hit as Record<string, unknown>;
-    if (typeof url !== 'string') {
+    // Preserve absolute source links verbatim after rejecting syntax that URL would rewrite.
+    if (typeof url !== 'string' || !/^https?:\/\/[^/]/i.test(url) || /[\p{Cc}\s\\]/u.test(url)) {
         return undefined;
     }
     let parsed: URL;
@@ -87,10 +92,10 @@ function mapResult(hit: unknown): SearchResult | undefined {
         return undefined;
     }
     const description = Array.isArray(excerpts)
-        ? excerpts.filter((text): text is string => typeof text === 'string').join(' ').replace(/\s+/g, ' ').trim().slice(0, 500)
+        ? normalizeResultText(excerpts.filter((text): text is string => typeof text === 'string').join(' '))
         : '';
     return {
-        title: (typeof title === 'string' ? title.trim().slice(0, 500) : '') || parsed.hostname,
+        title: (typeof title === 'string' ? normalizeResultText(title) : '') || parsed.hostname,
         url,
         description,
         source: parsed.hostname,
@@ -153,7 +158,10 @@ export async function searchParallel(query: string, limit: number): Promise<Sear
         await client.connect(transport, { signal });
         let cursor: string | undefined;
         do {
-            const page = await client.listTools(cursor ? { cursor } : undefined, { signal });
+            // Discovery only needs tool names. The SDK's listTools also compiles advertised output schemas.
+            const page = await client.request({
+                method: 'tools/list', params: cursor ? { cursor } : undefined
+            }, ListToolsResultSchema, { signal });
             if (page.tools.some(tool => tool.name === 'web_search')) {
                 const result = await client.callTool({
                     name: 'web_search',

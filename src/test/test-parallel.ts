@@ -48,7 +48,9 @@ async function runTests(): Promise<void> {
         { url: 'file:///etc/hosts' },
         { url: 'http://127.0.0.1/a' },
         { url: 'https://someone@example.org/a' },
-        { url: originalUrl, title: 'SQLite WAL', excerpts: ['A public excerpt.', 'Second excerpt.'] },
+        { url: 'https:example.org/relative' },
+        { url: 'https://example.org/line\nbreak' },
+        { url: originalUrl, title: 'SQLite\u0007 WAL', excerpts: ['A public\u0007 excerpt.', 'Second excerpt.'] },
         { url: 'https://example.org/another' }
     ];
 
@@ -103,7 +105,17 @@ async function runTests(): Promise<void> {
         } else if (body.method === 'tools/list') {
             json(body.params?.cursor === 'second-page'
                 ? { tools: [{ name: 'web_search', inputSchema: { type: 'object' } }] }
-                : { tools: [], nextCursor: 'second-page' });
+                : {
+                    tools: [{
+                        name: 'extract',
+                        inputSchema: { type: 'object' },
+                        outputSchema: {
+                            type: 'object',
+                            properties: { page: { $ref: 'https://example.org/schemas/page.json' } }
+                        }
+                    }],
+                    nextCursor: 'second-page'
+                });
         } else if (body.method === 'tools/call') {
             const query = body.params.arguments.objective;
             assert.deepEqual(body.params.arguments, { objective: query, search_queries: [query] });
