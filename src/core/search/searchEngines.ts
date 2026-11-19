@@ -10,7 +10,8 @@ export const SUPPORTED_SEARCH_ENGINES = [
     'startpage',
     'sogou',
     'hackernews',
-    'keenable'
+    'keenable',
+    'parallel'
 ] as const;
 
 export type SupportedSearchEngine = typeof SUPPORTED_SEARCH_ENGINES[number];
@@ -47,6 +48,8 @@ export function normalizeEngineName(engine: string): string {
             return 'hackernews';
         case 'keenable':
             return 'keenable';
+        case 'parallel':
+            return 'parallel';
         default:
             return cleaned;
     }
