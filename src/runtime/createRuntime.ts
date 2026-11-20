@@ -11,6 +11,7 @@ import { searchStartpage } from '../engines/startpage/index.js';
 import { searchSogou } from '../engines/sogou/index.js';
 import { searchHackerNews } from '../engines/hackernews/index.js';
 import { searchKeenable } from '../engines/keenable/index.js';
+import { searchParallel } from '../engines/parallel/parallel.js';
 import { fetchLinuxDoArticle } from '../engines/linuxdo/fetchLinuxDoArticle.js';
 import { fetchCsdnArticle } from '../engines/csdn/fetchCsdnArticle.js';
 import { fetchJuejinArticle } from '../engines/juejin/fetchJuejinArticle.js';
@@ -54,7 +55,8 @@ function createDefaultSearchExecutors(): SearchEngineExecutorMap {
         startpage: searchStartpage,
         sogou: searchSogou,
         hackernews: searchHackerNews,
-        keenable: searchKeenable
+        keenable: searchKeenable,
+        parallel: searchParallel
     };
 }
 

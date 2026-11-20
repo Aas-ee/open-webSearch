@@ -13,7 +13,8 @@ const SUPPORTED_ENGINES = [
     'startpage',
     'sogou',
     'hackernews',
-    'keenable'
+    'keenable',
+    'parallel'
 ] as const;
 
 const engineSchema = z.array(
@@ -47,7 +48,8 @@ const successCases: SuccessCase[] = [
     { input: ['Hacker News'], expected: ['hackernews'] },
     { input: ['hacker-news'], expected: ['hackernews'] },
     { input: ['hn'], expected: ['hackernews'] },
-    { input: ['Keenable'], expected: ['keenable'] }
+    { input: ['Keenable'], expected: ['keenable'] },
+    { input: ['Parallel'], expected: ['parallel'] }
 ];
 
 const failureCases: FailureCase[] = [

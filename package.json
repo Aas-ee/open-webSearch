@@ -49,7 +49,7 @@
     "test:dialog-capture": "tsc && node build/test/test-dialog-capture.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.11.2",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@mozilla/readability": "^0.6.0",
     "@types/cheerio": "^0.22.35",
     "axios": "^1.16.0",
